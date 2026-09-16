@@ -89,6 +89,12 @@ function buildLines(config: WorkerConfig): ConfigLine[] {
     { kind: "entry", label: "browser", value: config.browser ? "on" : "off" },
     {
       kind: "entry",
+      label: "shutdown grace",
+      value:
+        config.shutdownGraceMs === 0 ? "none" : formatInterval(config.shutdownGraceMs),
+    },
+    {
+      kind: "entry",
       label: "mcp servers",
       value: serverList(Object.keys(config.mcpServers)),
     },

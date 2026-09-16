@@ -94,6 +94,16 @@ describe("applySettings", () => {
     expect(executor.mcpServers).toEqual(["linter"]);
   });
 
+  it("applies the shutdown grace so the next signal uses it, and resets it to 0", () => {
+    const config = buildConfig();
+
+    applySettings(config, parseSettings({ shutdownGraceMs: 120_000 }));
+    expect(config.shutdownGraceMs).toBe(120_000);
+
+    applySettings(config, parseSettings({}));
+    expect(config.shutdownGraceMs).toBe(0);
+  });
+
   it("preserves prompt paths and resets the mcp wiring to its defaults", () => {
     const config = buildConfig({ browser: true });
     config.executor = { ...config.executor, mcpServers: ["linter"] };

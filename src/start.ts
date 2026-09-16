@@ -101,15 +101,6 @@ export async function startWorker(options: StartWorkerOptions = {}): Promise<voi
       ? null
       : createHeadlessReporters(headlessEmit, { verbose: options.verbose });
 
-  let shutdownSignal: string | undefined;
-  const drainFinished = new AbortController();
-  const signal = AbortSignal.any([
-    abortOnSignals((signalName) => {
-      shutdownSignal = signalName;
-      status.shutdownRequested(signalName);
-    }),
-    drainFinished.signal,
-  ]);
   const waker = new Waker();
   const gates: LoopGates = {
     limit: new UsageLimitGate(),
@@ -142,6 +133,7 @@ export async function startWorker(options: StartWorkerOptions = {}): Promise<voi
     });
     drain.noteSettled();
   }, initialControlState);
+  const drainFinished = new AbortController();
   const drain = new DrainController(
     { monitor: monitorControl, executor: executorControl },
     () => {
@@ -162,6 +154,26 @@ export async function startWorker(options: StartWorkerOptions = {}): Promise<voi
   );
   status.setControl("monitor", initialControlState);
   status.setControl("executor", initialControlState);
+
+  let shutdownSignal: NodeJS.Signals | undefined;
+  const signal = AbortSignal.any([
+    abortOnSignals({
+      graceMsFor: (signalName) =>
+        signalName === "SIGTERM" && drain.snapshot === undefined
+          ? config.shutdownGraceMs
+          : 0,
+      onDrain: (signalName, graceMs) => {
+        shutdownSignal = signalName;
+        drain.request(signalName, graceMs);
+      },
+      onAbort: (signalName) => {
+        if (drainFinished.signal.aborted) return;
+        shutdownSignal = signalName;
+        status.shutdownRequested(signalName);
+      },
+    }),
+    drainFinished.signal,
+  ]);
 
   const settings = createSettingsController({
     config,

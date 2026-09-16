@@ -10,6 +10,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Added
 
 - `brownie drain [--timeout <ms>] [--json]`, `/drain` in the dashboard and the `drain` control command stop a worker without throwing work away: both agents finish what they are doing — an executor session together with its memory summary — start nothing new, and the process exits `0` once both are idle. The command answers at once with `{"state":"draining","since":…,"until":…}`; `--timeout` (`timeoutMs` on the socket, up to 24 hours) sets a deadline after which whatever still runs is killed. A repeated request answers with the first acknowledgement and never moves the deadline, `resume` is refused while draining, and `brownie status` shows the drain (`drain` in the JSON document). The headless log gains `worker.draining`, and `worker.stopped` carries `drained`, plus `forced` when the deadline or a signal cut the drain short ([docs/control.md](docs/control.md)).
+- `shutdownGraceMs` in `.brownie/settings.json` turns `SIGTERM` into a drain with that deadline, so `docker stop` or `systemctl stop` lets a running session finish instead of killing it: the worker exits `0` once both agents are idle (`worker.stopped signal=SIGTERM drained=true`), or kills what still runs when the grace is up. The default `0` keeps today's immediate stop, `SIGINT` always stops at once, and a second signal of either kind during a drain stops at once too. A patched value applies to the next signal ([docs/configuration.md](docs/configuration.md#shutdown-grace)).
+
+### Changed
+
+- Stopping a container or service with a shutdown grace needs a stop timeout longer than the grace, or the supervisor sends `SIGKILL` in the middle of it: `docs/deployment.md` now says to set `stop_grace_period` (Compose) or `TimeoutStopSec` (systemd) at least 10 s above `shutdownGraceMs`, and that `docker stop -t 10` kills the worker after 10 s whatever the grace ([docs/deployment.md](docs/deployment.md#stopping-the-worker)).
+- Once a signal has stopped the worker and it is killing sessions and closing its logs, any further signal ends the process on the spot; before, only a repeat of the same signal did, and the other one was ignored.
 
 ## [0.6.0] - 2026-09-14
 

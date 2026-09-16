@@ -39,7 +39,7 @@ Every JSON line carries the envelope `ts` (ISO 8601), `level` (`info`/`warn`/`er
 | Event                                                         | Fields                                                                                                                                  |
 | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `worker.started`                                              | `version`, `claudeVersion` (when readable), `nodeVersion`, `authKind`, `pid`, `projectDir`, `paused` (when booted paused)               |
-| `worker.draining`                                             | `reason` (`drain`), `timeoutMs` (when the drain has a deadline)                                                                         |
+| `worker.draining`                                             | `reason` (`drain`, or `SIGTERM` under a shutdown grace), `timeoutMs` (when the drain has a deadline)                                    |
 | `worker.stopped`                                              | `signal` (when stopped by SIGINT/SIGTERM), `drained` (exited through a drain), `forced` (a deadline or a signal cut the drain short)    |
 | `control.changed`                                             | `state` — an agent moved between `running`/`pausing`/`paused`                                                                           |
 | `update.available` / `update.installed`                       | `from`, `to`; available adds `installError` when a background install failed                                                            |
@@ -85,6 +85,32 @@ brownie sessions list    # what ran, when, at what cost
 ```
 
 `brownie status --json` doubles as a health check — it exits non-zero when no worker is running. Its document opens with the worker's identity (brownie, Claude Code and Node versions, `authKind`, pid, start time), which `brownie version` prints on its own. The socket also guards against double starts: a second `brownie` in the same project refuses to boot with `brownie is already running in this project (pid …)`. The same socket edits tasks, settings, prompts and memory, reaches out of a container, and has a documented wire protocol — see [docs/control.md](control.md).
+
+## Stopping the worker
+
+`SIGINT` (ctrl+c) and `SIGTERM` (`systemctl stop`, `docker stop`) stop the worker at once by default: a session still running is killed (`session.killed reason=abort`), its task goes back to the queue on the next start, and the worker closes its logs and socket and exits with `worker.stopped signal=…`.
+
+To let running sessions finish instead, give `SIGTERM` a grace in `.brownie/settings.json`:
+
+```json
+{ "shutdownGraceMs": 120000 }
+```
+
+`SIGTERM` then drains the worker exactly like `brownie drain --timeout 120000`: both agents finish what they are doing — the executor its session and the memory summary after it — nothing new starts, and the worker exits `0` as soon as both are idle (`worker.stopped signal=SIGTERM drained=true`), or kills what still runs when the grace is up (`forced=true`). `SIGINT` always stops at once. A second signal of either kind during a drain is the emergency exit: it stops the worker at once, the way a signal does without a grace; a further signal after that ends the process without cleanup.
+
+The supervisor has to wait longer than the grace, or it kills the worker in the middle of it with `SIGKILL`, which brownie cannot catch — no `worker.stopped`, and the session dies with the process. Give it at least 10 s on top of the grace, enough to kill what still runs and close the logs:
+
+- **Docker Compose** — `stop_grace_period`, which `docker compose stop` and `docker stop` without `-t` use:
+
+  ```yaml
+  services:
+    brownie:
+      stop_grace_period: 130s
+  ```
+
+  An explicit `docker stop -t 10` (and a plain `docker stop` on a container started without a stop timeout) sends `SIGKILL` after 10 s, whatever the grace.
+
+- **systemd** — `TimeoutStopSec=130` in the `[Service]` section (the default is 90 s).
 
 ## Staying up to date
 
@@ -182,7 +208,7 @@ journalctl -u brownie -f                      # the pretty/json event stream
 sudo -u brownie brownie status                # from the project directory
 ```
 
-`systemctl stop` sends SIGTERM — brownie finishes writing logs, closes the socket, and exits cleanly (`worker.stopped signal=SIGTERM`).
+`systemctl stop` sends SIGTERM — brownie finishes writing logs, closes the socket, and exits cleanly (`worker.stopped signal=SIGTERM`). To let running sessions finish first, set `shutdownGraceMs` and a matching `TimeoutStopSec` ([Stopping the worker](#stopping-the-worker)).
 
 ## Docker
 

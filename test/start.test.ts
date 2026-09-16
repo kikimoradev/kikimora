@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { SignalPolicy } from "../src/shutdown.js";
 import type { StartWorkerOptions } from "../src/start.js";
 import { packageVersion } from "../src/paths.js";
 import type { ExecutorReporter, MonitorReporter } from "../src/status.js";
@@ -120,6 +121,37 @@ function monitorLoopArgs(args: unknown[]): [Controller, AbortSignal] {
 
 function executorLoopArgs(args: unknown[]): [Controller, AbortSignal] {
   return [args[5] as Controller, args[7] as AbortSignal];
+}
+
+interface SignalsHarness {
+  policy(): SignalPolicy;
+  deliver(signalName: NodeJS.Signals): void;
+}
+
+function captureSignals(): SignalsHarness {
+  const shutdown = new AbortController();
+  const captured: { policy?: SignalPolicy; draining: boolean } = { draining: false };
+  mocks.abortOnSignals.mockImplementation((policy: SignalPolicy) => {
+    captured.policy = policy;
+    return shutdown.signal;
+  });
+  const policy = (): SignalPolicy => {
+    if (captured.policy === undefined) throw new Error("abortOnSignals was not called");
+    return captured.policy;
+  };
+  return {
+    policy,
+    deliver: (signalName) => {
+      const graceMs = captured.draining ? 0 : policy().graceMsFor(signalName);
+      if (graceMs > 0) {
+        captured.draining = true;
+        policy().onDrain(signalName, graceMs);
+        return;
+      }
+      policy().onAbort(signalName);
+      shutdown.abort();
+    },
+  };
 }
 
 describe("startWorker", () => {
@@ -339,32 +371,173 @@ describe("startWorker", () => {
     expect(executorController.state).toBe("pausing");
   });
 
-  it("stops the loops when a shutdown signal arrives and names the signal", async () => {
-    stubHappyPath(buildConfig({ cwd: dir }));
-    const shutdown = new AbortController();
-    let onSignal: (name: string) => void = () => undefined;
-    mocks.abortOnSignals.mockImplementation((listener: (name: string) => void) => {
-      onSignal = listener;
-      return shutdown.signal;
+  describe("signals", () => {
+    function blockUntilAborted(): void {
+      mocks.runMonitorLoop.mockImplementation((...args: unknown[]) =>
+        untilAborted(monitorLoopArgs(args)[1]),
+      );
+      mocks.runExecutorLoop.mockImplementation((...args: unknown[]) =>
+        untilAborted(executorLoopArgs(args)[1]),
+      );
+    }
+
+    it("SIGTERM without a shutdown grace stops the loops at once and names the signal", async () => {
+      stubHappyPath(buildConfig({ cwd: dir }));
+      const signals = captureSignals();
+      blockUntilAborted();
+      const sink = jsonSink();
+
+      const worker = runStart({ logFormat: "json", stdout: sink });
+      await vi.waitFor(() => expect(mocks.runExecutorLoop).toHaveBeenCalled());
+      expect(signals.policy().graceMsFor("SIGTERM")).toBe(0);
+      signals.deliver("SIGTERM");
+      await worker;
+
+      expect(sink.events().map((event) => event.event)).not.toContain("worker.draining");
+      const stopped = sink.events().at(-1);
+      expect(stopped).toMatchObject({ event: "worker.stopped", signal: "SIGTERM" });
+      expect(stopped).not.toHaveProperty("drained");
+      expect(stopped).not.toHaveProperty("forced");
     });
-    mocks.runMonitorLoop.mockImplementation((...args: unknown[]) =>
-      untilAborted(monitorLoopArgs(args)[1]),
-    );
-    mocks.runExecutorLoop.mockImplementation((...args: unknown[]) =>
-      untilAborted(executorLoopArgs(args)[1]),
-    );
-    const sink = jsonSink();
 
-    const worker = runStart({ logFormat: "json", stdout: sink });
-    await vi.waitFor(() => expect(mocks.runExecutorLoop).toHaveBeenCalled());
-    onSignal("SIGTERM");
-    shutdown.abort();
-    await worker;
+    it("grants the shutdown grace to SIGTERM only, read live from the configuration", async () => {
+      const config = buildConfig({ cwd: dir, shutdownGraceMs: 120_000 });
+      stubHappyPath(config);
+      const signals = captureSignals();
 
-    const stopped = sink.events().at(-1);
-    expect(stopped).toMatchObject({ event: "worker.stopped", signal: "SIGTERM" });
-    expect(stopped).not.toHaveProperty("drained");
-    expect(stopped).not.toHaveProperty("forced");
+      await runStart({ logFormat: "json", stdout: jsonSink() });
+
+      expect(signals.policy().graceMsFor("SIGTERM")).toBe(120_000);
+      expect(signals.policy().graceMsFor("SIGINT")).toBe(0);
+      config.shutdownGraceMs = 5_000;
+      expect(signals.policy().graceMsFor("SIGTERM")).toBe(5_000);
+    });
+
+    it("SIGTERM under a grace drains with that deadline, and the worker exits drained once the agents rest", async () => {
+      stubHappyPath(buildConfig({ cwd: dir, shutdownGraceMs: 120_000 }));
+      const signals = captureSignals();
+      let finishSession: () => void = () => undefined;
+      const session = new Promise<void>((resolvePromise) => {
+        finishSession = resolvePromise;
+      });
+      mocks.runMonitorLoop.mockImplementation((...args: unknown[]) =>
+        idleLoop(...monitorLoopArgs(args)),
+      );
+      mocks.runExecutorLoop.mockImplementation(async (...args: unknown[]) => {
+        const [controller, signal] = executorLoopArgs(args);
+        await session;
+        await idleLoop(controller, signal);
+      });
+      const sink = jsonSink();
+
+      const worker = runStart({ logFormat: "json", stdout: sink });
+      await vi.waitFor(() => expect(mocks.runExecutorLoop).toHaveBeenCalled());
+      signals.deliver("SIGTERM");
+
+      expect(sink.events()).toContainEqual(
+        expect.objectContaining({
+          event: "worker.draining",
+          reason: "SIGTERM",
+          timeoutMs: 120_000,
+        }),
+      );
+      const deps = mocks.startControlServer.mock.calls[0]?.[0] as {
+        buildStatus: () => { drain?: { reason: string; since: string; until: string } };
+      };
+      const drain = deps.buildStatus().drain;
+      expect(drain?.reason).toBe("SIGTERM");
+      expect(Date.parse(drain?.until ?? "") - Date.parse(drain?.since ?? "")).toBe(
+        120_000,
+      );
+      expect(signals.policy().graceMsFor("SIGTERM")).toBe(0);
+
+      finishSession();
+      await worker;
+
+      const stopped = sink.events().at(-1);
+      expect(stopped).toMatchObject({
+        event: "worker.stopped",
+        signal: "SIGTERM",
+        drained: true,
+      });
+      expect(stopped).not.toHaveProperty("forced");
+    });
+
+    it("a second signal during the grace stops at once and says forced", async () => {
+      stubHappyPath(buildConfig({ cwd: dir, shutdownGraceMs: 120_000 }));
+      const signals = captureSignals();
+      blockUntilAborted();
+      const sink = jsonSink();
+
+      const worker = runStart({ logFormat: "json", stdout: sink });
+      await vi.waitFor(() => expect(mocks.runExecutorLoop).toHaveBeenCalled());
+      signals.deliver("SIGTERM");
+      signals.deliver("SIGINT");
+      await worker;
+
+      const stopped = sink.events().at(-1);
+      expect(stopped).toMatchObject({
+        event: "worker.stopped",
+        signal: "SIGINT",
+        drained: true,
+        forced: true,
+      });
+    });
+
+    it("a signal during brownie drain stops at once, whatever the grace", async () => {
+      stubHappyPath(buildConfig({ cwd: dir, shutdownGraceMs: 120_000 }));
+      const signals = captureSignals();
+      blockUntilAborted();
+      const sink = jsonSink();
+
+      const worker = runStart({ logFormat: "json", stdout: sink });
+      await vi.waitFor(() => expect(mocks.runExecutorLoop).toHaveBeenCalled());
+      const deps = mocks.startControlServer.mock.calls[0]?.[0] as {
+        drain: InstanceType<typeof DrainController>;
+      };
+      deps.drain.request("drain", undefined);
+      signals.deliver("SIGTERM");
+      await worker;
+
+      expect(
+        sink.events().filter((event) => event.event === "worker.draining"),
+      ).toHaveLength(1);
+      expect(sink.events().at(-1)).toMatchObject({
+        event: "worker.stopped",
+        signal: "SIGTERM",
+        drained: true,
+        forced: true,
+      });
+    });
+
+    it("a signal after the drain finished does not change how the worker says it stopped", async () => {
+      stubHappyPath(buildConfig({ cwd: dir }));
+      const signals = captureSignals();
+      mocks.runMonitorLoop.mockImplementation((...args: unknown[]) =>
+        idleLoop(...monitorLoopArgs(args)),
+      );
+      mocks.runExecutorLoop.mockImplementation((...args: unknown[]) =>
+        idleLoop(...executorLoopArgs(args)),
+      );
+      mocks.controlServerClose.mockImplementation(() => {
+        signals.deliver("SIGTERM");
+        return Promise.resolve();
+      });
+      const sink = jsonSink();
+
+      const worker = runStart({ logFormat: "json", stdout: sink });
+      await vi.waitFor(() => expect(mocks.runExecutorLoop).toHaveBeenCalled());
+      const deps = mocks.startControlServer.mock.calls[0]?.[0] as {
+        drain: InstanceType<typeof DrainController>;
+      };
+      deps.drain.request("drain", undefined);
+      await worker;
+
+      const stopped = sink.events().at(-1);
+      expect(stopped).toMatchObject({ event: "worker.stopped", drained: true });
+      expect(stopped).not.toHaveProperty("signal");
+      expect(stopped).not.toHaveProperty("forced");
+    });
   });
 
   describe("drain", () => {

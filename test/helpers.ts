@@ -421,6 +421,7 @@ export function buildConfig(overrides: Partial<WorkerConfig> = {}): WorkerConfig
     summarizer: buildSummarizerConfig(),
     streamPartial: false,
     browser: false,
+    shutdownGraceMs: 0,
     mcpServers: {},
     cwd: process.cwd(),
     settingsFilePath: join(process.cwd(), ".brownie", "settings.json"),

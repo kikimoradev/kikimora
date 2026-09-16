@@ -761,6 +761,134 @@ describe("CLI start (smoke E2E)", () => {
     }
   }, 40_000);
 
+  it("SIGTERM under shutdownGraceMs lets the executor finish its session and summary, then the worker exits 0", async () => {
+    await seedProject(dir, {
+      settings: {
+        monitor: { model: "haiku", intervalMinutes: 1 },
+        executor: { model: "opus" },
+        summarizer: { model: "sonnet" },
+        shutdownGraceMs: 60_000,
+      },
+    });
+    const env = drainProjectEnv("graced-1", {
+      FAKE_CLAUDE_DELAY_MS_OPUS: "3000",
+      FAKE_CLAUDE_MODE_SONNET: "slow",
+      FAKE_CLAUDE_DELAY_MS_SONNET: "800",
+    });
+    const worker = spawnJsonWorker(dir, env);
+
+    try {
+      await worker.waitFor(executorSessionStarted);
+      worker.child.kill("SIGTERM");
+
+      expect(await worker.exited).toBe(0);
+      const events = await worker.events();
+      expect(events).not.toContainEqual(
+        expect.objectContaining({ event: "session.killed" }),
+      );
+      const draining = indexOfEvent(events, (event) => event.event === "worker.draining");
+      const finished = indexOfEvent(
+        events,
+        (event) =>
+          event.event === "task.finished" &&
+          event.taskId === "graced-1" &&
+          event.ok === true,
+      );
+      const summarized = indexOfEvent(
+        events,
+        (event) => event.event === "summary.finished" && event.ok === true,
+      );
+      expect(events[draining]).toMatchObject({ reason: "SIGTERM", timeoutMs: 60_000 });
+      expect(draining).toBeLessThan(finished);
+      expect(finished).toBeLessThan(summarized);
+      expect(events.at(-1)).toEqual({
+        ts: expect.any(String) as unknown,
+        level: "info",
+        event: "worker.stopped",
+        signal: "SIGTERM",
+        drained: true,
+      });
+    } finally {
+      await stopWorker(worker);
+    }
+  }, 40_000);
+
+  it("SIGTERM without shutdownGraceMs kills the session in flight, as before", async () => {
+    await seedProject(dir, {
+      settings: {
+        monitor: { model: "haiku", intervalMinutes: 1 },
+        executor: { model: "opus" },
+      },
+    });
+    const env = drainProjectEnv("ungraced-1", { FAKE_CLAUDE_DELAY_MS_OPUS: "20000" });
+    const worker = spawnJsonWorker(dir, env);
+
+    try {
+      await worker.waitFor(executorSessionStarted);
+      worker.child.kill("SIGTERM");
+
+      expect(await worker.exited).toBe(0);
+      const events = await worker.events();
+      expect(events).not.toContainEqual(
+        expect.objectContaining({ event: "worker.draining" }),
+      );
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          agent: "executor",
+          event: "session.killed",
+          reason: "abort",
+        }),
+      );
+      expect(events.at(-1)).toEqual({
+        ts: expect.any(String) as unknown,
+        level: "info",
+        event: "worker.stopped",
+        signal: "SIGTERM",
+      });
+    } finally {
+      await stopWorker(worker);
+    }
+  }, 40_000);
+
+  it("a second SIGTERM during the grace kills the session at once and the worker exits 0, forced", async () => {
+    await seedProject(dir, {
+      settings: {
+        monitor: { model: "haiku", intervalMinutes: 1 },
+        executor: { model: "opus" },
+        shutdownGraceMs: 60_000,
+      },
+    });
+    const env = drainProjectEnv("graced-2", { FAKE_CLAUDE_DELAY_MS_OPUS: "20000" });
+    const worker = spawnJsonWorker(dir, env);
+
+    try {
+      await worker.waitFor(executorSessionStarted);
+      worker.child.kill("SIGTERM");
+      await worker.waitFor((event) => event.event === "worker.draining");
+      worker.child.kill("SIGTERM");
+
+      expect(await worker.exited).toBe(0);
+      const events = await worker.events();
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          agent: "executor",
+          event: "session.killed",
+          reason: "abort",
+        }),
+      );
+      expect(events.at(-1)).toEqual({
+        ts: expect.any(String) as unknown,
+        level: "info",
+        event: "worker.stopped",
+        signal: "SIGTERM",
+        drained: true,
+        forced: true,
+      });
+    } finally {
+      await stopWorker(worker);
+    }
+  }, 40_000);
+
   it("brownie status fails cleanly when no worker is running", async () => {
     const result = await runCommand(dir, fakeClaudeCliEnv("ok"), ["status"]);
 

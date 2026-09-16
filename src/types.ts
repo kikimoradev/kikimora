@@ -55,6 +55,7 @@ export interface WorkerConfig {
   summarizer: SummarizerConfig;
   streamPartial: boolean;
   browser: boolean;
+  shutdownGraceMs: number;
   mcpServers: Record<string, McpServer>;
   cwd: string;
   settingsFilePath: string;
