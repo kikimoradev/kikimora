@@ -29,7 +29,7 @@ Changes apply live — a patched setting on the next session, a replaced prompt 
 
 `--json` prints the raw payload for scripts; `-` reads the body from stdin. `brownie version` describes the _running_ worker and fails without one — `brownie --version` prints the installed CLI's version and needs no worker.
 
-`brownie drain` stops a worker without throwing work away. Both agents finish what they are doing — for the executor that is its session and the memory summary after it — start nothing new, and the process exits `0` once both are idle, logging `worker.stopped` with `drained: true`. The command returns as soon as the worker accepts the request. `--timeout <ms>` (up to 24 hours) adds a deadline: whatever still runs then is killed, and `worker.stopped` adds `forced: true`. Asking again answers with the first acknowledgement and never moves the deadline, `resume` is refused until the worker is gone, and any signal during a drain stops the worker at once. `SIGTERM` drains the same way when `shutdownGraceMs` is set ([deployment](deployment.md#stopping-the-worker)).
+`brownie drain` lets the running sessions finish and then exits the worker; what it waits for, its deadline and the `SIGTERM` equivalent are in [deployment](deployment.md#stopping-the-worker).
 
 ## In containers
 

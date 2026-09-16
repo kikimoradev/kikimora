@@ -90,13 +90,15 @@ brownie sessions list    # what ran, when, at what cost
 
 `SIGINT` (ctrl+c) and `SIGTERM` (`systemctl stop`, `docker stop`) stop the worker at once by default: a session still running is killed (`session.killed reason=abort`), its task goes back to the queue on the next start, and the worker closes its logs and socket and exits with `worker.stopped signal=…`.
 
-To let running sessions finish instead, give `SIGTERM` a grace in `.brownie/settings.json`:
+Draining stops it without throwing work away. `brownie drain` (also `/drain` and the `drain` control command) pauses both agents and exits the worker `0` the moment both are idle, with `worker.stopped drained=true`. A session in flight finishes — for the executor, together with the memory summary after it — and nothing new starts: a monitor cycle about to begin is skipped, and a task the executor has claimed but not started goes back to the queue with its attempt given back. `--timeout <ms>` (up to 24 hours) adds a deadline after which whatever still runs is killed (`forced=true`). The command returns at once; asking again answers with the first acknowledgement and never moves the deadline, `resume` is refused until the worker is gone, and `brownie status` shows the drain.
+
+To drain on `SIGTERM` instead of stopping at once, give it a grace in `.brownie/settings.json`:
 
 ```json
 { "shutdownGraceMs": 120000 }
 ```
 
-`SIGTERM` then drains the worker exactly like `brownie drain --timeout 120000`: both agents finish what they are doing — the executor its session and the memory summary after it — nothing new starts, and the worker exits `0` as soon as both are idle (`worker.stopped signal=SIGTERM drained=true`), or kills what still runs when the grace is up (`forced=true`). `SIGINT` always stops at once. A second signal of either kind during a drain is the emergency exit: it stops the worker at once, the way a signal does without a grace; a further signal after that ends the process without cleanup.
+`SIGTERM` then drains exactly like `brownie drain --timeout 120000` (`worker.stopped signal=SIGTERM drained=true`). The default `0` keeps the immediate stop, a patched value applies to the next signal, and `SIGINT` always stops at once. Any signal during a drain is the emergency exit: it stops the worker at once, as without a grace, and a further signal after that ends the process without cleanup.
 
 The supervisor has to wait longer than the grace, or it kills the worker in the middle of it with `SIGKILL`, which brownie cannot catch — no `worker.stopped`, and the session dies with the process. Give it at least 10 s on top of the grace, enough to kill what still runs and close the logs:
 
@@ -110,7 +112,7 @@ The supervisor has to wait longer than the grace, or it kills the worker in the 
 
   An explicit `docker stop -t 10` (and a plain `docker stop` on a container started without a stop timeout) sends `SIGKILL` after 10 s, whatever the grace.
 
-- **systemd** — `TimeoutStopSec=130` in the `[Service]` section (the default is 90 s).
+- **systemd** — `KillMode=mixed` and `TimeoutStopSec=130` in the `[Service]` section (the default timeout is 90 s). With the default `KillMode=control-group`, `systemctl stop` sends `SIGTERM` to every process of the service at once: the `claude` sessions die as the grace begins and the executor's task is marked failed. `mixed` signals brownie alone and keeps `SIGKILL` for whatever is left when the timeout runs out.
 
 ## Staying up to date
 
@@ -190,6 +192,7 @@ Type=simple
 User=brownie
 WorkingDirectory=/home/brownie/your-project
 ExecStart=/usr/bin/brownie --log-format json
+KillMode=mixed
 Restart=on-failure
 RestartSec=10
 Environment=TZ=Europe/Warsaw
@@ -208,7 +211,7 @@ journalctl -u brownie -f                      # the pretty/json event stream
 sudo -u brownie brownie status                # from the project directory
 ```
 
-`systemctl stop` sends SIGTERM — brownie finishes writing logs, closes the socket, and exits cleanly (`worker.stopped signal=SIGTERM`). To let running sessions finish first, set `shutdownGraceMs` and a matching `TimeoutStopSec` ([Stopping the worker](#stopping-the-worker)).
+`systemctl stop` sends SIGTERM — with `KillMode=mixed` to brownie alone, which stops its own sessions, finishes writing logs, closes the socket, and exits cleanly (`worker.stopped signal=SIGTERM`). To let running sessions finish first, set `shutdownGraceMs` and a `TimeoutStopSec` above it ([Stopping the worker](#stopping-the-worker)).
 
 ## Docker
 
