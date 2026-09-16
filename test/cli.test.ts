@@ -712,6 +712,60 @@ describe("CLI start (smoke E2E)", () => {
     }
   }, 40_000);
 
+  it("brownie drain waits for a monitor cycle in flight while the executor idles, then the worker exits 0", async () => {
+    await seedProject(dir, {
+      settings: {
+        monitor: { model: "haiku", intervalMinutes: 1 },
+        executor: { model: "opus" },
+      },
+    });
+    const env = fakeClaudeCliEnv("ok", {
+      CI: "true",
+      FAKE_CLAUDE_MODE_HAIKU: "slow",
+      FAKE_CLAUDE_DELAY_MS_HAIKU: "5000",
+      FAKE_CLAUDE_RESULT_TEXT_HAIKU: JSON.stringify({ tasks: [] }),
+    });
+    const worker = spawnJsonWorker(dir, env);
+
+    try {
+      await worker.waitFor(
+        (event) => event.event === "session.init" && event.agent === "monitor",
+      );
+
+      const drained = await runCommand(dir, env, ["drain", "--json"]);
+      expect(drained.code).toBe(0);
+
+      expect(await worker.exited).toBe(0);
+      const events = await worker.events();
+      const isPaused = (agent: string) => (event: LogEvent) =>
+        event.event === "control.changed" &&
+        event.agent === agent &&
+        event.state === "paused";
+      const draining = indexOfEvent(events, (event) => event.event === "worker.draining");
+      const executorPaused = indexOfEvent(events, isPaused("executor"));
+      const cycleFinished = indexOfEvent(
+        events,
+        (event) => event.event === "cycle.finished" && event.ok === true,
+      );
+      const monitorPaused = indexOfEvent(events, isPaused("monitor"));
+      expect(draining).toBeLessThan(executorPaused);
+      expect(executorPaused).toBeLessThan(cycleFinished);
+      expect(cycleFinished).toBeLessThan(monitorPaused);
+      expect(monitorPaused).toBe(events.length - 2);
+      expect(events).not.toContainEqual(
+        expect.objectContaining({ event: "session.killed" }),
+      );
+      expect(events.at(-1)).toEqual({
+        ts: expect.any(String) as unknown,
+        level: "info",
+        event: "worker.stopped",
+        drained: true,
+      });
+    } finally {
+      await stopWorker(worker);
+    }
+  }, 40_000);
+
   it("a drain deadline shorter than the session kills it and the worker exits 0, forced", async () => {
     await seedProject(dir, {
       settings: {

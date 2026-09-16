@@ -631,6 +631,43 @@ describe("startWorker", () => {
       expect(process.exitCode).toBe(savedExitCode);
     });
 
+    it("exits once the monitor finishes its cycle when the executor was idle", async () => {
+      stubHappyPath(buildConfig({ cwd: dir }));
+      const sink = jsonSink();
+      let finishCycle: () => void = () => undefined;
+      const cycle = new Promise<void>((resolvePromise) => {
+        finishCycle = resolvePromise;
+      });
+      mocks.runMonitorLoop.mockImplementation(async (...args: unknown[]) => {
+        const [controller, signal] = monitorLoopArgs(args);
+        await cycle;
+        await idleLoop(controller, signal);
+      });
+      mocks.runExecutorLoop.mockImplementation((...args: unknown[]) =>
+        idleLoop(...executorLoopArgs(args)),
+      );
+
+      const worker = runStart({ logFormat: "json", stdout: sink });
+      await vi.waitFor(() => expect(mocks.runExecutorLoop).toHaveBeenCalled());
+      serverDrain().request("drain", undefined);
+      await vi.waitFor(() => expect(eventNames(sink)).toContain("executor paused"));
+      expect(eventNames(sink)).not.toContain("worker.stopped");
+
+      finishCycle();
+      await vi.waitFor(() => expect(eventNames(sink)).toContain("worker.stopped"), {
+        timeout: 2_000,
+      });
+      await worker;
+
+      expect(eventNames(sink).slice(-3)).toEqual([
+        "executor paused",
+        "monitor paused",
+        "worker.stopped",
+      ]);
+      expect(sink.events().at(-1)).toMatchObject({ drained: true });
+      expect(sink.events().at(-1)).not.toHaveProperty("forced");
+    });
+
     it("a drain deadline cuts the session short and says forced", async () => {
       stubHappyPath(buildConfig({ cwd: dir }));
       const sink = jsonSink();
