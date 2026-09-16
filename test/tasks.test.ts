@@ -178,6 +178,23 @@ describe("TaskStore", () => {
     expect(again?.attempts).toBe(1);
   });
 
+  it("release without a reason gives the attempt back and keeps the last error", async () => {
+    const store = await TaskStore.open(path);
+    await store.addTasks([newTask("a")]);
+    await store.takeNext();
+    await store.requeue("a", "API Error: overloaded");
+    await store.takeNext();
+
+    await store.release("a");
+
+    expect(store.list()[0]).toMatchObject({
+      id: "a",
+      status: "pending",
+      attempts: 1,
+      error: "API Error: overloaded",
+    });
+  });
+
   it("release of an unknown id is ignored", async () => {
     const store = await TaskStore.open(path);
     await store.addTasks([newTask("a")]);

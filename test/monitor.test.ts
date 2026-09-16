@@ -678,4 +678,111 @@ describe("runMonitorLoop", () => {
     await promise;
     expect(mocks.runSession).toHaveBeenCalledTimes(1);
   });
+
+  it("a pause requested while the session is being prepared starts no session and announces no cycle", async () => {
+    let finishWrite: (path: string) => void = () => undefined;
+    mocks.writeMcpConfig.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolvePromise) => {
+          finishWrite = resolvePromise;
+        }),
+    );
+    mocks.runSession.mockResolvedValue(ok(report()));
+    const { store } = fakeStore();
+    const abort = new AbortController();
+    const control = noopController();
+
+    const promise = runMonitorLoop(
+      buildConfig(),
+      store,
+      new Waker(),
+      spy.reporter,
+      control,
+      buildGates(),
+      abort.signal,
+    );
+    await vi.advanceTimersByTimeAsync(1);
+    expect(mocks.writeMcpConfig).toHaveBeenCalledTimes(1);
+
+    control.pause();
+    finishWrite(join("data", "mcp", "monitor.json"));
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(mocks.runSession).not.toHaveBeenCalled();
+    expect(spy.cycleStarted).not.toHaveBeenCalled();
+    expect(spy.cycleFinished).not.toHaveBeenCalled();
+    expect(control.state).toBe("paused");
+
+    control.resume();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(mocks.runSession).toHaveBeenCalledTimes(1);
+    expect(spy.cycleStarted).toHaveBeenCalledWith(1);
+
+    abort.abort();
+    await vi.advanceTimersByTimeAsync(INTERVAL);
+    await promise;
+  });
+
+  it("an abort while the session is being prepared ends the loop without a session", async () => {
+    let finishWrite: (path: string) => void = () => undefined;
+    mocks.writeMcpConfig.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolvePromise) => {
+          finishWrite = resolvePromise;
+        }),
+    );
+    const { store } = fakeStore();
+    const abort = new AbortController();
+
+    const promise = runMonitorLoop(
+      buildConfig(),
+      store,
+      new Waker(),
+      spy.reporter,
+      noopController(),
+      buildGates(),
+      abort.signal,
+    );
+    await vi.advanceTimersByTimeAsync(1);
+    abort.abort();
+    finishWrite(join("data", "mcp", "monitor.json"));
+    await promise;
+
+    expect(mocks.runSession).not.toHaveBeenCalled();
+    expect(spy.cycleStarted).not.toHaveBeenCalled();
+  });
+
+  it("a prompt that cannot be read still ends a started cycle with the error", async () => {
+    mocks.readFile.mockImplementationOnce(() =>
+      Promise.reject(new Error("ENOENT: monitor.prompt.md")),
+    );
+    const { store } = fakeStore();
+    const abort = new AbortController();
+
+    const promise = runMonitorLoop(
+      buildConfig(),
+      store,
+      new Waker(),
+      spy.reporter,
+      noopController(),
+      buildGates(),
+      abort.signal,
+    );
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(spy.cycleStarted).toHaveBeenCalledWith(1);
+    expect(spy.cycleFinished).toHaveBeenCalledWith(
+      expect.objectContaining({
+        cycle: 1,
+        ok: false,
+        error: "ENOENT: monitor.prompt.md",
+      }),
+    );
+    expect(mocks.runSession).not.toHaveBeenCalled();
+    expect(spy.sleepUntil).toHaveBeenCalledTimes(1);
+
+    abort.abort();
+    await vi.advanceTimersByTimeAsync(INTERVAL);
+    await promise;
+  });
 });

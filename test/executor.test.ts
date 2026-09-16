@@ -967,6 +967,146 @@ describe("runExecutorLoop under a drain", () => {
   });
 });
 
+describe("runExecutorLoop while a session is being prepared", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.readFile.mockResolvedValue("identity\n");
+  });
+
+  function pendingMcpWrite(): { finish: () => void } {
+    const handle = { finish: (): void => undefined };
+    mocks.writeMcpConfig.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolvePromise) => {
+          handle.finish = () => {
+            resolvePromise(join("data", "mcp", "executor.json"));
+          };
+        }),
+    );
+    return handle;
+  }
+
+  function claimingStore() {
+    const takeNext = vi
+      .fn()
+      .mockResolvedValueOnce({ ...task("claimed"), attempts: 1 })
+      .mockResolvedValue(undefined);
+    const release = vi.fn().mockResolvedValue(undefined);
+    const fail = vi.fn().mockResolvedValue(undefined);
+    const store = { takeNext, release, fail } as unknown as TaskStore;
+    return { store, takeNext, release, fail };
+  }
+
+  it("a drain returns the claimed task to the queue and starts no session", async () => {
+    const write = pendingMcpWrite();
+    const { store, takeNext, release, fail } = claimingStore();
+    const reporter = createExecutorReporterSpy();
+    const shutdown = new AbortController();
+    const executorControl = new AgentController(() => {
+      drain.noteSettled();
+    });
+    const monitorControl = new AgentController(() => undefined, "paused");
+    const drainFinished = vi.fn(() => {
+      shutdown.abort();
+    });
+    const drain = new DrainController(
+      { monitor: monitorControl, executor: executorControl },
+      drainFinished,
+    );
+
+    const loop = runExecutorLoop(
+      buildConfig(),
+      store,
+      new Waker(),
+      reporter.reporter,
+      createTaskSummarizerSpy().summarizer,
+      executorControl,
+      buildGates(),
+      shutdown.signal,
+    );
+    await vi.waitFor(() => expect(mocks.writeMcpConfig).toHaveBeenCalledTimes(1));
+
+    drain.request("drain", undefined);
+    write.finish();
+    await loop;
+
+    expect(release).toHaveBeenCalledWith("claimed");
+    expect(fail).not.toHaveBeenCalled();
+    expect(mocks.runSession).not.toHaveBeenCalled();
+    expect(reporter.taskStarted).not.toHaveBeenCalled();
+    expect(reporter.taskFinished).not.toHaveBeenCalled();
+    expect(takeNext).toHaveBeenCalledTimes(1);
+    expect(drainFinished).toHaveBeenCalledTimes(1);
+    expect(drain.settled).toBe(true);
+  });
+
+  it("an abort leaves the claimed task alone and starts no session", async () => {
+    const write = pendingMcpWrite();
+    const { store, release, fail } = claimingStore();
+    const reporter = createExecutorReporterSpy();
+    const shutdown = new AbortController();
+
+    const loop = runExecutorLoop(
+      buildConfig(),
+      store,
+      new Waker(),
+      reporter.reporter,
+      createTaskSummarizerSpy().summarizer,
+      noopController(),
+      buildGates(),
+      shutdown.signal,
+    );
+    await vi.waitFor(() => expect(mocks.writeMcpConfig).toHaveBeenCalledTimes(1));
+
+    shutdown.abort();
+    write.finish();
+    await loop;
+
+    expect(release).not.toHaveBeenCalled();
+    expect(fail).not.toHaveBeenCalled();
+    expect(mocks.runSession).not.toHaveBeenCalled();
+    expect(reporter.taskStarted).not.toHaveBeenCalled();
+  });
+
+  it("a prompt that cannot be read still fails the started task", async () => {
+    mocks.writeMcpConfig.mockResolvedValue(join("data", "mcp", "executor.json"));
+    mocks.readFile.mockRejectedValueOnce(new Error("ENOENT: executor.prompt.md"));
+    const { store, fail, release } = claimingStore();
+    const reporter = createExecutorReporterSpy();
+    const shutdown = new AbortController();
+
+    const loop = runExecutorLoop(
+      buildConfig(),
+      store,
+      new Waker(),
+      reporter.reporter,
+      createTaskSummarizerSpy().summarizer,
+      noopController(),
+      buildGates(),
+      shutdown.signal,
+    );
+    await vi.waitFor(() =>
+      expect(fail).toHaveBeenCalledWith("claimed", "ENOENT: executor.prompt.md"),
+    );
+
+    expect(reporter.taskStarted).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "claimed" }),
+    );
+    expect(reporter.taskFinished).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: "claimed",
+        ok: false,
+        error: "ENOENT: executor.prompt.md",
+      }),
+    );
+    expect(release).not.toHaveBeenCalled();
+    expect(mocks.runSession).not.toHaveBeenCalled();
+
+    shutdown.abort();
+    await loop;
+  });
+});
+
 describe("isTransientFailure", () => {
   it("a session timeout is transient", () => {
     expect(

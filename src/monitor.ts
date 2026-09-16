@@ -51,24 +51,29 @@ export async function runMonitorLoop(
       continue;
     }
 
-    cycle += 1;
     const start = Date.now();
+    const sessionInputs = Promise.all([
+      readFile(monitor.promptPath, "utf8"),
+      readFile(monitor.systemPromptPath, "utf8"),
+      contextFile.read(),
+      writeMcpConfig(config.dataDir, {
+        role: "monitor",
+        servers: config.mcpServers,
+        selected: monitor.mcpServers,
+        browser: config.browser,
+        memoryDbPath: null,
+        playwrightOutputDir: config.playwrightOutputDir,
+      }),
+    ]);
+    await sessionInputs.catch(() => undefined);
+    if (aborted()) break;
+    if (controller.state !== "running") continue;
+
+    cycle += 1;
     reporter.cycleStarted(cycle);
 
     try {
-      const [prompt, systemPrompt, context, mcpConfigPath] = await Promise.all([
-        readFile(monitor.promptPath, "utf8"),
-        readFile(monitor.systemPromptPath, "utf8"),
-        contextFile.read(),
-        writeMcpConfig(config.dataDir, {
-          role: "monitor",
-          servers: config.mcpServers,
-          selected: monitor.mcpServers,
-          browser: config.browser,
-          memoryDbPath: null,
-          playwrightOutputDir: config.playwrightOutputDir,
-        }),
-      ]);
+      const [prompt, systemPrompt, context, mcpConfigPath] = await sessionInputs;
 
       const result = await runSession(
         {

@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Changed
 
 - Stopping a container or service with a shutdown grace needs a stop timeout longer than the grace, or the supervisor sends `SIGKILL` in the middle of it: `docs/deployment.md` now says to set `stop_grace_period` (Compose) or `TimeoutStopSec` (systemd) at least 10 s above `shutdownGraceMs`, and that `docker stop -t 10` kills the worker after 10 s whatever the grace ([docs/deployment.md](docs/deployment.md#stopping-the-worker)).
+- A pause or a drain that arrives while an agent is preparing its next session — reading the prompts, writing the MCP configuration — now takes effect before that session starts: the monitor skips the cycle, and the executor returns the task it has just claimed to the queue with its attempt given back. Before, that one session still ran.
 - Once a signal has stopped the worker and it is killing sessions and closing its logs, any further signal ends the process on the spot; before, only a repeat of the same signal did, and the other one was ignored.
 
 ## [0.6.0] - 2026-09-14
