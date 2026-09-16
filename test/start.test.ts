@@ -49,6 +49,7 @@ vi.mock("../src/logger.js", async () =>
 
 const { startWorker } = await import("../src/start.js");
 const { AgentController } = await import("../src/control.js");
+const { DrainController } = await import("../src/drain.js");
 const { Waker } = await import("../src/waker.js");
 const { WorkerStatusStore } = await import("../src/status.js");
 const { UsageLimitGate } = await import("../src/usage-limit.js");
@@ -95,6 +96,30 @@ function jsonSink(): JsonSink {
     events: () =>
       lines.map((line) => JSON.parse(line.trimEnd()) as Record<string, unknown>),
   };
+}
+
+type Controller = InstanceType<typeof AgentController>;
+
+function untilAborted(signal: AbortSignal): Promise<void> {
+  return new Promise((resolvePromise) => {
+    if (signal.aborted) resolvePromise();
+    else signal.addEventListener("abort", () => resolvePromise(), { once: true });
+  });
+}
+
+async function idleLoop(controller: Controller, signal: AbortSignal): Promise<void> {
+  while (!signal.aborted) {
+    await controller.pauseRequested(signal);
+    await controller.gate(signal);
+  }
+}
+
+function monitorLoopArgs(args: unknown[]): [Controller, AbortSignal] {
+  return [args[4] as Controller, args[6] as AbortSignal];
+}
+
+function executorLoopArgs(args: unknown[]): [Controller, AbortSignal] {
+  return [args[5] as Controller, args[7] as AbortSignal];
 }
 
 describe("startWorker", () => {
@@ -154,7 +179,7 @@ describe("startWorker", () => {
       cwd: dir,
       tasksFilePath: join(dir, ".brownie", "data", "tasks.json"),
     });
-    const { signal, store } = stubHappyPath(config);
+    const { store } = stubHappyPath(config);
 
     await runStart({ stdout: jsonSink() });
 
@@ -171,7 +196,7 @@ describe("startWorker", () => {
         limit: expect.any(UsageLimitGate) as unknown,
         auth: expect.any(AuthGate) as unknown,
       }),
-      signal,
+      expect.any(AbortSignal),
       expect.objectContaining({ started: expect.any(Function) as unknown }),
     );
     expect(mocks.memoryStoreOpen).toHaveBeenCalledWith(config.memoryDbPath);
@@ -186,7 +211,7 @@ describe("startWorker", () => {
         limit: expect.any(UsageLimitGate) as unknown,
         auth: expect.any(AuthGate) as unknown,
       }),
-      signal,
+      expect.any(AbortSignal),
       expect.objectContaining({ started: expect.any(Function) as unknown }),
     );
     const monitorController = mocks.runMonitorLoop.mock.calls[0]?.[4] as InstanceType<
@@ -204,6 +229,9 @@ describe("startWorker", () => {
     const monitorGate = mocks.runMonitorLoop.mock.calls[0]?.[5] as unknown;
     const executorGate = mocks.runExecutorLoop.mock.calls[0]?.[6] as unknown;
     expect(monitorGate).toBe(executorGate);
+    const monitorSignal = mocks.runMonitorLoop.mock.calls[0]?.[6] as unknown;
+    const executorSignal = mocks.runExecutorLoop.mock.calls[0]?.[7] as unknown;
+    expect(monitorSignal).toBe(executorSignal);
     expect(store.onChange).toHaveBeenCalledWith(expect.any(Function));
     expect(mocks.memoryStoreClose).toHaveBeenCalledTimes(1);
     expect(process.exitCode).toBe(savedExitCode);
@@ -232,7 +260,8 @@ describe("startWorker", () => {
         sessions: expect.objectContaining({
           list: expect.any(Function) as unknown,
         }) as unknown,
-        signal,
+        drain: expect.any(DrainController) as unknown,
+        signal: monitorSignal,
       }),
     );
     expect(mocks.controlServerClose).toHaveBeenCalledTimes(1);
@@ -308,6 +337,156 @@ describe("startWorker", () => {
     expect(gates.auth.blocked).toBeNull();
     expect(monitorController.state).toBe("running");
     expect(executorController.state).toBe("pausing");
+  });
+
+  it("stops the loops when a shutdown signal arrives and names the signal", async () => {
+    stubHappyPath(buildConfig({ cwd: dir }));
+    const shutdown = new AbortController();
+    let onSignal: (name: string) => void = () => undefined;
+    mocks.abortOnSignals.mockImplementation((listener: (name: string) => void) => {
+      onSignal = listener;
+      return shutdown.signal;
+    });
+    mocks.runMonitorLoop.mockImplementation((...args: unknown[]) =>
+      untilAborted(monitorLoopArgs(args)[1]),
+    );
+    mocks.runExecutorLoop.mockImplementation((...args: unknown[]) =>
+      untilAborted(executorLoopArgs(args)[1]),
+    );
+    const sink = jsonSink();
+
+    const worker = runStart({ logFormat: "json", stdout: sink });
+    await vi.waitFor(() => expect(mocks.runExecutorLoop).toHaveBeenCalled());
+    onSignal("SIGTERM");
+    shutdown.abort();
+    await worker;
+
+    const stopped = sink.events().at(-1);
+    expect(stopped).toMatchObject({ event: "worker.stopped", signal: "SIGTERM" });
+    expect(stopped).not.toHaveProperty("drained");
+    expect(stopped).not.toHaveProperty("forced");
+  });
+
+  describe("drain", () => {
+    function serverDrain(): InstanceType<typeof DrainController> {
+      const deps = mocks.startControlServer.mock.calls[0]?.[0] as {
+        drain: InstanceType<typeof DrainController>;
+      };
+      return deps.drain;
+    }
+
+    function serverStatus(): Record<string, unknown> {
+      const deps = mocks.startControlServer.mock.calls[0]?.[0] as {
+        buildStatus: () => Record<string, unknown>;
+      };
+      return deps.buildStatus();
+    }
+
+    function eventNames(sink: JsonSink): string[] {
+      return sink
+        .events()
+        .map((event) =>
+          event.event === "control.changed"
+            ? `${String(event.agent)} ${String(event.state)}`
+            : String(event.event),
+        );
+    }
+
+    it("lets the session in flight finish, exits once both agents rest, and says drained after the logs close", async () => {
+      stubHappyPath(buildConfig({ cwd: dir }));
+      const sink = jsonSink();
+      let finishSession: () => void = () => undefined;
+      const session = new Promise<void>((resolvePromise) => {
+        finishSession = resolvePromise;
+      });
+      mocks.runMonitorLoop.mockImplementation((...args: unknown[]) =>
+        idleLoop(...monitorLoopArgs(args)),
+      );
+      mocks.runExecutorLoop.mockImplementation(async (...args: unknown[]) => {
+        const [controller, signal] = executorLoopArgs(args);
+        await session;
+        await idleLoop(controller, signal);
+      });
+      let stoppedBeforeServerClosed = false;
+      mocks.controlServerClose.mockImplementation(() => {
+        stoppedBeforeServerClosed = eventNames(sink).includes("worker.stopped");
+        return Promise.resolve();
+      });
+
+      const worker = runStart({ logFormat: "json", stdout: sink });
+      await vi.waitFor(() => expect(mocks.runExecutorLoop).toHaveBeenCalled());
+      const drain = serverDrain();
+      const ack = drain.request("drain", undefined);
+      await vi.waitFor(() => expect(eventNames(sink)).toContain("monitor paused"));
+
+      expect(sink.events()).toContainEqual(
+        expect.objectContaining({
+          level: "info",
+          event: "worker.draining",
+          reason: "drain",
+        }),
+      );
+      expect(
+        sink.events().find((event) => event.event === "worker.draining"),
+      ).not.toHaveProperty("timeoutMs");
+      expect(serverStatus()).toMatchObject({
+        drain: { since: new Date(ack.since).toISOString(), reason: "drain" },
+      });
+      expect(eventNames(sink)).not.toContain("worker.stopped");
+
+      finishSession();
+      await worker;
+
+      expect(eventNames(sink).slice(1)).toEqual([
+        "worker.draining",
+        "monitor pausing",
+        "executor pausing",
+        "monitor paused",
+        "executor paused",
+        "worker.stopped",
+      ]);
+      const stopped = sink.events().at(-1);
+      expect(stopped).toMatchObject({
+        level: "info",
+        event: "worker.stopped",
+        drained: true,
+      });
+      expect(stopped).not.toHaveProperty("forced");
+      expect(stopped).not.toHaveProperty("signal");
+      expect(drain.settled).toBe(true);
+      expect(stoppedBeforeServerClosed).toBe(false);
+      expect(process.exitCode).toBe(savedExitCode);
+    });
+
+    it("a drain deadline cuts the session short and says forced", async () => {
+      stubHappyPath(buildConfig({ cwd: dir }));
+      const sink = jsonSink();
+      mocks.runMonitorLoop.mockImplementation((...args: unknown[]) =>
+        idleLoop(...monitorLoopArgs(args)),
+      );
+      mocks.runExecutorLoop.mockImplementation((...args: unknown[]) =>
+        untilAborted(executorLoopArgs(args)[1]),
+      );
+
+      const worker = runStart({ logFormat: "json", stdout: sink });
+      await vi.waitFor(() => expect(mocks.runExecutorLoop).toHaveBeenCalled());
+      serverDrain().request("drain", 50);
+      await worker;
+
+      expect(sink.events()).toContainEqual(
+        expect.objectContaining({
+          event: "worker.draining",
+          reason: "drain",
+          timeoutMs: 50,
+        }),
+      );
+      expect(sink.events().at(-1)).toMatchObject({
+        level: "info",
+        event: "worker.stopped",
+        drained: true,
+        forced: true,
+      });
+    });
   });
 
   it("exits with code 1 when another worker already owns the control socket", async () => {
@@ -474,6 +653,7 @@ describe("startWorker", () => {
           write: expect.any(Function) as unknown,
         }) as unknown,
         waker: expect.any(Waker) as unknown,
+        drain: expect.any(DrainController) as unknown,
         requestExit: expect.any(Function) as unknown,
       }),
     );
@@ -485,6 +665,7 @@ describe("startWorker", () => {
       prompts: unknown;
       context: unknown;
       waker: unknown;
+      drain: unknown;
     };
     expect(mountProps.controls.monitor).toBe(monitorController);
     expect(mountProps.controls.executor).toBe(executorController);
@@ -493,7 +674,9 @@ describe("startWorker", () => {
       prompts: unknown;
       context: unknown;
       waker: unknown;
+      drain: unknown;
     };
+    expect(serverDeps.drain).toBe(mountProps.drain);
     expect(serverDeps.settings).toBe(mountProps.settings);
     expect(serverDeps.prompts).toBe(mountProps.prompts);
     expect(serverDeps.context).toBe(mountProps.context);

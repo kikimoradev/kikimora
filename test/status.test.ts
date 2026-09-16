@@ -512,6 +512,21 @@ describe("WorkerStatusStore", () => {
     store.dispose();
   });
 
+  it("drainRequested exposes the drain in the snapshot", () => {
+    const store = createStore();
+    expect(store.getSnapshot().drain).toBeUndefined();
+
+    store.drainRequested({ since: 1_000, until: 61_000, reason: "SIGTERM" });
+    store.flush();
+
+    expect(store.getSnapshot().drain).toEqual({
+      since: 1_000,
+      until: 61_000,
+      reason: "SIGTERM",
+    });
+    store.dispose();
+  });
+
   it("exposes the control state per agent and defaults to running", () => {
     const store = createStore();
     expect(store.getSnapshot().monitor.control).toBe("running");

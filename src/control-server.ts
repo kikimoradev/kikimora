@@ -4,6 +4,7 @@ import { dirname } from "node:path";
 import type { ContextFileAccess } from "./context-file.js";
 import type { AgentController } from "./control.js";
 import {
+  buildDrainAck,
   parseControlRequest,
   type ControlRequest,
   type ControlResponse,
@@ -11,6 +12,7 @@ import {
   type ControlTarget,
   type WorkerIdentity,
 } from "./control-protocol.js";
+import type { DrainController } from "./drain.js";
 import { CONTROL_SOCKET_ENV } from "./paths.js";
 import type { PromptAgent, PromptFileAccess } from "./prompt-files.js";
 import type { SettingsController } from "./settings-controller.js";
@@ -22,6 +24,8 @@ import type { MemoryReader, SessionReader, TaskControls } from "./worker-control
 const CONNECTION_TIMEOUT_MS = 5_000;
 const MAX_REQUEST_BYTES = 1_048_576;
 const REQUEST_TOO_LARGE = "Control request too large.";
+export const RESUME_WHILE_DRAINING =
+  "The worker is draining — it exits after the current session and cannot resume.";
 
 export class AlreadyRunningError extends Error {
   constructor(pid: number | undefined) {
@@ -42,6 +46,7 @@ export interface ControlServerDeps {
     monitor: Pick<AgentController, "pause" | "resume">;
     executor: Pick<AgentController, "pause" | "resume">;
   };
+  drain: Pick<DrainController, "request" | "snapshot">;
   tasks: TaskControls;
   memory: MemoryReader;
   sessions: SessionReader;
@@ -154,9 +159,19 @@ async function handleRequest(
     case "version":
       return { ok: true, data: deps.identity };
     case "pause":
-    case "resume":
       applyControl(deps, request.cmd, request.agent);
       return { ok: true, data: undefined };
+    case "resume":
+      if (deps.drain.snapshot !== undefined) {
+        return { ok: false, error: RESUME_WHILE_DRAINING };
+      }
+      applyControl(deps, request.cmd, request.agent);
+      return { ok: true, data: undefined };
+    case "drain":
+      return {
+        ok: true,
+        data: buildDrainAck(deps.drain.request("drain", request.timeoutMs)),
+      };
     case "settings.get":
       return { ok: true, data: await deps.settings.current() };
     case "settings.patch":

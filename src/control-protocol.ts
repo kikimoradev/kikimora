@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { Settings } from "./config.js";
 import type { AgentControlState } from "./control.js";
+import { DRAIN_TIMEOUT_MAX_MS, type DrainReason, type DrainSnapshot } from "./drain.js";
 import type { TaskSummaryRecord } from "./memory/store.js";
 import { PROMPT_AGENTS, type PromptAgent } from "./prompt-files.js";
 import {
@@ -63,6 +64,12 @@ export const controlRequestSchema = z.discriminatedUnion("cmd", [
   z.object({ cmd: z.literal("version") }).strict(),
   z.object({ cmd: z.literal("pause"), agent: targetSchema }).strict(),
   z.object({ cmd: z.literal("resume"), agent: targetSchema }).strict(),
+  z
+    .object({
+      cmd: z.literal("drain"),
+      timeoutMs: z.number().int().positive().max(DRAIN_TIMEOUT_MAX_MS).optional(),
+    })
+    .strict(),
   z.object({ cmd: z.literal("settings.get") }).strict(),
   z.object({ cmd: z.literal("settings.patch"), patch: settingsPatchSchema }).strict(),
   z
@@ -118,11 +125,18 @@ export interface ContextContent {
   content: string;
 }
 
+export interface DrainAck {
+  state: "draining";
+  since: string;
+  until: string | undefined;
+}
+
 export interface ControlResponseData {
   status: ControlStatus;
   version: WorkerIdentity;
   pause: undefined;
   resume: undefined;
+  drain: DrainAck;
   "settings.get": Settings;
   "settings.patch": Settings;
   "tasks.list": Task[];
@@ -212,6 +226,12 @@ export interface WorkerIdentity {
   authKind: AuthKind;
 }
 
+export interface ControlDrainStatus {
+  since: string;
+  until?: string | undefined;
+  reason: DrainReason;
+}
+
 export interface ControlStatus extends WorkerIdentity {
   headless: boolean;
   agents: {
@@ -220,10 +240,31 @@ export interface ControlStatus extends WorkerIdentity {
   };
   stats: WorkerStats;
   taskCounts: Record<TaskStatus, number>;
+  drain?: ControlDrainStatus | undefined;
 }
 
 function iso(epochMs: number): string {
   return new Date(epochMs).toISOString();
+}
+
+function isoOrUndefined(epochMs: number | undefined): string | undefined {
+  return epochMs === undefined ? undefined : iso(epochMs);
+}
+
+export function buildDrainAck(snapshot: DrainSnapshot): DrainAck {
+  return {
+    state: "draining",
+    since: iso(snapshot.since),
+    until: isoOrUndefined(snapshot.until),
+  };
+}
+
+function serializeDrain(snapshot: DrainSnapshot): ControlDrainStatus {
+  return {
+    since: iso(snapshot.since),
+    until: isoOrUndefined(snapshot.until),
+    reason: snapshot.reason,
+  };
 }
 
 function serializeMonitorPhase(phase: MonitorPhase): ControlPhase {
@@ -309,5 +350,6 @@ export function buildControlStatus(context: ControlStatusContext): ControlStatus
     },
     stats: snapshot.stats,
     taskCounts,
+    drain: snapshot.drain === undefined ? undefined : serializeDrain(snapshot.drain),
   };
 }

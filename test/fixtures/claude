@@ -80,7 +80,7 @@ function emitAuthFailure(text, withRetries) {
   });
 }
 
-function emitOk(isError) {
+function emitInit() {
   emit({
     type: "system",
     subtype: "init",
@@ -88,6 +88,9 @@ function emitOk(isError) {
     session_id: sessionId,
     tools: ["Read", "Bash"],
   });
+}
+
+function emitOutcome(isError) {
   emit({
     type: "assistant",
     message: { content: [{ type: "text", text: "Worker output" }] },
@@ -100,6 +103,11 @@ function emitOk(isError) {
     session_id: sessionId,
     ...(resultText !== undefined ? { result: resultText } : {}),
   });
+}
+
+function emitOk(isError) {
+  emitInit();
+  emitOutcome(isError);
 }
 
 let stdin = "";
@@ -141,14 +149,15 @@ function run() {
       process.on("SIGTERM", () => process.exit(143));
       setInterval(() => {}, 1000);
       break;
+    case "slow":
+      emitInit();
+      setTimeout(() => {
+        emitOutcome(false);
+        process.exit(0);
+      }, Number(pick("FAKE_CLAUDE_DELAY_MS") ?? "1000"));
+      break;
     case "hang_after_init":
-      emit({
-        type: "system",
-        subtype: "init",
-        model: model ?? "haiku",
-        session_id: sessionId,
-        tools: ["Read", "Bash"],
-      });
+      emitInit();
       process.on("SIGTERM", () => process.exit(143));
       setInterval(() => {}, 1000);
       break;

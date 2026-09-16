@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { AgentController } from "../../src/control.js";
+import { DrainController } from "../../src/drain.js";
 import type { TaskSummaryRecord } from "../../src/memory/store.js";
 import {
   buildManualTask,
@@ -52,6 +53,8 @@ interface FakeContext {
   notices: { text: string; tone: string }[];
   monitorControl: AgentController;
   executorControl: AgentController;
+  drain: DrainController;
+  drainFinished: ReturnType<typeof vi.fn>;
   retry: ReturnType<typeof vi.fn>;
   cancel: ReturnType<typeof vi.fn>;
   addTasks: ReturnType<typeof vi.fn>;
@@ -69,6 +72,11 @@ function fakeContext(): FakeContext {
   const notices: { text: string; tone: string }[] = [];
   const monitorControl = new AgentController(() => undefined);
   const executorControl = new AgentController(() => undefined);
+  const drainFinished = vi.fn();
+  const drain = new DrainController(
+    { monitor: monitorControl, executor: executorControl },
+    drainFinished,
+  );
   const retry = vi.fn().mockResolvedValue(true);
   const cancel = vi.fn().mockResolvedValue(true);
   const addTasks = vi
@@ -86,6 +94,8 @@ function fakeContext(): FakeContext {
     notices,
     monitorControl,
     executorControl,
+    drain,
+    drainFinished,
     retry,
     cancel,
     addTasks,
@@ -100,6 +110,7 @@ function fakeContext(): FakeContext {
       setView: (view) => views.push(view),
       monitorControl,
       executorControl,
+      drain,
       tasks: { list: vi.fn().mockReturnValue([]), retry, cancel, addTasks },
       memory: { recent, search },
       settings,
@@ -242,6 +253,42 @@ describe("dispatchCommand", () => {
     expect(monitorControl.state).toBe("running");
     expect(executorControl.state).toBe("running");
     expect(notices[0]?.text).toBe("started monitor and executor");
+  });
+
+  it("/drain pauses both agents until they finish, and says so once", async () => {
+    const { ctx, notices, monitorControl, executorControl, drain, drainFinished } =
+      fakeContext();
+
+    await dispatchCommand("/drain", ctx);
+    await dispatchCommand("/drain", ctx);
+
+    expect(drain.snapshot).toMatchObject({ reason: "drain", until: undefined });
+    expect(monitorControl.state).toBe("pausing");
+    expect(executorControl.state).toBe("pausing");
+    expect(drainFinished).not.toHaveBeenCalled();
+    expect(notices).toEqual([
+      { text: "draining — brownie exits after the current session", tone: "info" },
+      {
+        text: "already draining — brownie exits after the current session",
+        tone: "info",
+      },
+    ]);
+    drain.dispose();
+  });
+
+  it("/start refuses to wake agents while draining", async () => {
+    const { ctx, notices, monitorControl, executorControl, drain } = fakeContext();
+    await dispatchCommand("/drain", ctx);
+
+    await dispatchCommand("/start", ctx);
+
+    expect(monitorControl.state).toBe("pausing");
+    expect(executorControl.state).toBe("pausing");
+    expect(notices[1]).toEqual({
+      text: "draining — brownie exits after the current session",
+      tone: "error",
+    });
+    drain.dispose();
   });
 
   it("/retry requeues a failed task and wakes the executor", async () => {

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   buildControlStatus,
+  buildDrainAck,
   CONTROL_COMMANDS,
   MEMORY_LIMIT_DEFAULT,
   parseControlRequest,
@@ -67,6 +68,11 @@ describe("parseControlRequest", () => {
     expect(accepted('{"cmd":"resume","agent":"all"}')).toEqual({
       cmd: "resume",
       agent: "all",
+    });
+    expect(accepted('{"cmd":"drain"}')).toEqual({ cmd: "drain" });
+    expect(accepted('{"cmd":"drain","timeoutMs":86400000}')).toEqual({
+      cmd: "drain",
+      timeoutMs: 86_400_000,
     });
   });
 
@@ -183,6 +189,18 @@ describe("parseControlRequest", () => {
     expect(rejected('{"cmd":"version","json":true}')).toMatch(
       /^Invalid version request: \(root\): Unrecognized key/,
     );
+    expect(rejected('{"cmd":"drain","timeoutMs":0}')).toMatch(
+      /^Invalid drain request: timeoutMs: /,
+    );
+    expect(rejected('{"cmd":"drain","timeoutMs":86400001}')).toMatch(
+      /^Invalid drain request: timeoutMs: /,
+    );
+    expect(rejected('{"cmd":"drain","timeoutMs":"60000"}')).toMatch(
+      /^Invalid drain request: timeoutMs: /,
+    );
+    expect(rejected('{"cmd":"drain","agent":"all"}')).toMatch(
+      /^Invalid drain request: \(root\): Unrecognized key/,
+    );
   });
 
   it("lists every command", () => {
@@ -192,6 +210,7 @@ describe("parseControlRequest", () => {
         "version",
         "pause",
         "resume",
+        "drain",
         "settings.get",
         "settings.patch",
         "tasks.list",
@@ -379,6 +398,41 @@ describe("buildControlStatus", () => {
     expect(backoff.agents.executor.control).toBe("paused");
   });
 
+  it("leaves drain out until one is requested, then serializes it with ISO timestamps", () => {
+    const idle = buildControlStatus({ ...context, snapshot: buildSnapshot() });
+    const draining = buildControlStatus({
+      ...context,
+      snapshot: buildSnapshot({
+        drain: {
+          since: Date.parse("2026-07-08T09:00:00.000Z"),
+          until: Date.parse("2026-07-08T09:15:00.000Z"),
+          reason: "SIGTERM",
+        },
+      }),
+    });
+    const open = buildControlStatus({
+      ...context,
+      snapshot: buildSnapshot({
+        drain: {
+          since: Date.parse("2026-07-08T09:00:00.000Z"),
+          until: undefined,
+          reason: "drain",
+        },
+      }),
+    });
+
+    expect(JSON.parse(JSON.stringify(idle))).not.toHaveProperty("drain");
+    expect(draining.drain).toEqual({
+      since: "2026-07-08T09:00:00.000Z",
+      until: "2026-07-08T09:15:00.000Z",
+      reason: "SIGTERM",
+    });
+    expect(JSON.parse(JSON.stringify(open))).toMatchObject({
+      drain: { since: "2026-07-08T09:00:00.000Z", reason: "drain" },
+    });
+    expect(JSON.parse(JSON.stringify(open.drain))).not.toHaveProperty("until");
+  });
+
   it("caps recent outcomes at five entries", () => {
     const outcome = {
       cycle: 1,
@@ -405,5 +459,33 @@ describe("buildControlStatus", () => {
 
     expect(status.agents.monitor.recentOutcomes).toHaveLength(5);
     expect(status.agents.monitor.recentOutcomes[0]?.cycle).toBe(1);
+  });
+});
+
+describe("buildDrainAck", () => {
+  it("answers with the drain start and deadline as ISO timestamps", () => {
+    expect(
+      buildDrainAck({
+        since: Date.parse("2026-07-08T09:00:00.000Z"),
+        until: Date.parse("2026-07-08T09:15:00.000Z"),
+        reason: "drain",
+      }),
+    ).toEqual({
+      state: "draining",
+      since: "2026-07-08T09:00:00.000Z",
+      until: "2026-07-08T09:15:00.000Z",
+    });
+  });
+
+  it("leaves until off the wire without a deadline", () => {
+    const ack = buildDrainAck({
+      since: Date.parse("2026-07-08T09:00:00.000Z"),
+      until: undefined,
+      reason: "SIGTERM",
+    });
+
+    expect(JSON.stringify(ack)).toBe(
+      '{"state":"draining","since":"2026-07-08T09:00:00.000Z"}',
+    );
   });
 });

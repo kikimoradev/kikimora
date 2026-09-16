@@ -5,6 +5,7 @@ import {
   CONTROL_TARGETS,
   UNRECOGNIZED_REQUEST,
   type ControlAgentStatus,
+  type ControlDrainStatus,
   type ControlPhase,
   type ControlRequestInput,
   type ControlStatus,
@@ -12,6 +13,7 @@ import {
   type ControlTarget,
   type WorkerIdentity,
 } from "./control-protocol.js";
+import { DRAIN_TIMEOUT_MAX_MS } from "./drain.js";
 import { logger } from "./logger.js";
 import { CONTROL_SOCKET_ENV, controlSocketPath } from "./paths.js";
 
@@ -102,13 +104,15 @@ function formatUptime(startedAt: string): string {
   return `${String(Math.floor(elapsedMs / 1000))}s`;
 }
 
+function clockTime(iso: string): string {
+  return new Date(iso).toLocaleTimeString();
+}
+
 function describePhase(phase: ControlPhase): string {
   const parts = [phase.kind];
   if (phase.cycle !== undefined) parts.push(`cycle ${String(phase.cycle)}`);
   if (phase.taskId !== undefined) parts.push(phase.taskId);
-  if (phase.until !== undefined) {
-    parts.push(`until ${new Date(phase.until).toLocaleTimeString()}`);
-  }
+  if (phase.until !== undefined) parts.push(`until ${clockTime(phase.until)}`);
   if (phase.reason !== undefined) parts.push(phase.reason);
   return parts.join(" · ");
 }
@@ -137,10 +141,17 @@ function renderIdentity(identity: WorkerIdentity): string[] {
   ];
 }
 
+function drainLine(drain: ControlDrainStatus): string {
+  const parts = [`since ${clockTime(drain.since)}`];
+  if (drain.until !== undefined) parts.push(`until ${clockTime(drain.until)}`);
+  parts.push(drain.reason);
+  return `draining  ${parts.join(" · ")}`;
+}
+
 function renderStatus(status: ControlStatus): string[] {
   const { stats, taskCounts } = status;
   const mode = status.headless ? "headless" : "interactive";
-  return [
+  const lines = [
     `${identityLine(status)} · up ${formatUptime(status.startedAt)} · ${mode}`,
     `project   ${status.projectDir}`,
     agentLine("monitor", status.agents.monitor),
@@ -148,6 +159,8 @@ function renderStatus(status: ControlStatus): string[] {
     `tasks     pending ${String(taskCounts.pending)} · in_progress ${String(taskCounts.in_progress)} · done ${String(taskCounts.done)} · failed ${String(taskCounts.failed)} · cancelled ${String(taskCounts.cancelled)}`,
     `stats     cycles ${String(stats.cycles)} · tasks ok ${String(stats.tasksSucceeded)} · tasks failed ${String(stats.tasksFailed)} · cost $${stats.totalCostUsd.toFixed(4)}`,
   ];
+  if (status.drain !== undefined) lines.push(drainLine(status.drain));
+  return lines;
 }
 
 export async function runStatus(
@@ -201,6 +214,40 @@ export async function runControlAction(
   logger.success(action === "pause" ? `Pausing ${label}.` : `Resumed ${label}.`);
 }
 
+function parseDrainTimeout(raw: string | undefined): number | undefined | null {
+  if (raw === undefined) return undefined;
+  const value = Number(raw);
+  if (!Number.isInteger(value) || value < 1 || value > DRAIN_TIMEOUT_MAX_MS) return null;
+  return value;
+}
+
+export async function runDrain(
+  options: {
+    timeout?: string | undefined;
+    json?: boolean | undefined;
+  } & ControlCommandIo = {},
+): Promise<void> {
+  const timeoutMs = parseDrainTimeout(options.timeout);
+  if (timeoutMs === null) {
+    fail(
+      `Invalid timeout "${options.timeout ?? ""}" — use a whole number of milliseconds from 1 to ${String(DRAIN_TIMEOUT_MAX_MS)}.`,
+    );
+    return;
+  }
+  const response = await requestControl({ cmd: "drain", timeoutMs }, options);
+  if (response === null) return;
+  const ack = response.data;
+  if (options.json === true) {
+    writerFor(options)(JSON.stringify(ack, null, 2));
+    return;
+  }
+  const deadline =
+    ack.until === undefined ? "" : `, by ${clockTime(ack.until)} at the latest`;
+  logger.success(
+    `Draining since ${clockTime(ack.since)} — the worker exits once its current sessions finish${deadline}.`,
+  );
+}
+
 export const statusCommand = defineCommand({
   meta: {
     name: "status",
@@ -251,4 +298,20 @@ export const resumeCommand = defineCommand({
     },
   },
   run: ({ args }) => runControlAction("resume", args.agent),
+});
+
+export const drainCommand = defineCommand({
+  meta: {
+    name: "drain",
+    description:
+      "Let the running worker finish its current sessions, then exit (it takes no new work meanwhile).",
+  },
+  args: {
+    timeout: {
+      type: "string",
+      description: `Stop at the latest this many milliseconds from now, killing what still runs (1-${String(DRAIN_TIMEOUT_MAX_MS)})`,
+    },
+    json: { type: "boolean", description: "Print the acknowledgement as JSON" },
+  },
+  run: ({ args }) => runDrain({ timeout: args.timeout, json: args.json }),
 });

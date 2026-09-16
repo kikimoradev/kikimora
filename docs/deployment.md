@@ -39,7 +39,8 @@ Every JSON line carries the envelope `ts` (ISO 8601), `level` (`info`/`warn`/`er
 | Event                                                         | Fields                                                                                                                                  |
 | ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
 | `worker.started`                                              | `version`, `claudeVersion` (when readable), `nodeVersion`, `authKind`, `pid`, `projectDir`, `paused` (when booted paused)               |
-| `worker.stopped`                                              | `signal` (when stopped by SIGINT/SIGTERM)                                                                                               |
+| `worker.draining`                                             | `reason` (`drain`), `timeoutMs` (when the drain has a deadline)                                                                         |
+| `worker.stopped`                                              | `signal` (when stopped by SIGINT/SIGTERM), `drained` (exited through a drain), `forced` (a deadline or a signal cut the drain short)    |
 | `control.changed`                                             | `state` — an agent moved between `running`/`pausing`/`paused`                                                                           |
 | `update.available` / `update.installed`                       | `from`, `to`; available adds `installError` when a background install failed                                                            |
 | `cycle.started` / `cycle.finished`                            | `cycle`; finished adds `ok`, `durationMs`, `costUsd`, `addedTasks`, `skippedDuplicates`, `error`, `sessionId`                           |
@@ -79,6 +80,7 @@ brownie version          # brownie, Claude Code and Node versions, auth kind, pi
 brownie pause            # both agents finish their session, then park
 brownie pause monitor    # just one agent
 brownie resume           # back to work
+brownie drain            # finish the current sessions, then exit
 brownie sessions list    # what ran, when, at what cost
 ```
 

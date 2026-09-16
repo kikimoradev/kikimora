@@ -1,5 +1,6 @@
 import type { ContextFileAccess } from "../context-file.js";
 import type { AgentController } from "../control.js";
+import type { DrainController } from "../drain.js";
 import type { TaskSummaryRecord } from "../memory/store.js";
 import {
   PROMPT_AGENTS,
@@ -39,10 +40,13 @@ export type NoticeTone = "info" | "error";
 
 export type AgentControls = Pick<AgentController, "pause" | "resume" | "state">;
 
+export type DrainControls = Pick<DrainController, "request" | "snapshot">;
+
 export interface CommandContext {
   setView(view: View): void;
   monitorControl: AgentControls;
   executorControl: AgentControls;
+  drain: DrainControls;
   tasks: TaskControls;
   memory: MemoryReader;
   settings: SettingsController;
@@ -161,6 +165,10 @@ export const COMMANDS: readonly CommandSpec[] = [
       const agents = resolveAgents(args);
       if (agents === null) {
         ctx.notice(`unknown agent "${args.trim()}" — use monitor or executor`, "error");
+        return;
+      }
+      if (ctx.drain.snapshot !== undefined) {
+        ctx.notice("draining — brownie exits after the current session", "error");
         return;
       }
       const started = agents.filter((agent) => agentControl(ctx, agent).resume());
@@ -362,6 +370,19 @@ export const COMMANDS: readonly CommandSpec[] = [
     summary: "list all commands",
     run: (_args, ctx) => {
       ctx.setView({ kind: "help" });
+    },
+  },
+  {
+    name: "drain",
+    summary: "let the current sessions finish, then shut down brownie",
+    run: (_args, ctx) => {
+      const alreadyDraining = ctx.drain.snapshot !== undefined;
+      ctx.drain.request("drain", undefined);
+      ctx.notice(
+        alreadyDraining
+          ? "already draining — brownie exits after the current session"
+          : "draining — brownie exits after the current session",
+      );
     },
   },
   {

@@ -18,9 +18,11 @@ vi.mock("../src/logger.js", async () =>
 );
 
 const {
+  drainCommand,
   readStdinText,
   requestControl,
   runControlAction,
+  runDrain,
   runStatus,
   runVersion,
   statusCommand,
@@ -127,6 +129,36 @@ describe("runStatus", () => {
     const output = lines.join("\n");
     expect(output).toContain("monitor   paused   authBlocked · Not logged in");
     expect(output).toContain("executor  paused   authBlocked · HTTP 401");
+  });
+
+  it("adds a drain line while the worker drains", async () => {
+    const since = "2026-07-08T09:00:00.000Z";
+    const until = "2026-07-08T09:15:00.000Z";
+    mocks.sendControlRequest.mockResolvedValue({
+      ok: true,
+      data: buildStatus({ drain: { since, until, reason: "SIGTERM" } }),
+    });
+
+    await runStatus({ write });
+
+    expect(lines).toHaveLength(7);
+    expect(lines[6]).toBe(
+      `draining  since ${new Date(since).toLocaleTimeString()} · until ${new Date(until).toLocaleTimeString()} · SIGTERM`,
+    );
+  });
+
+  it("shows a drain without a deadline", async () => {
+    const since = "2026-07-08T09:00:00.000Z";
+    mocks.sendControlRequest.mockResolvedValue({
+      ok: true,
+      data: buildStatus({ drain: { since, reason: "drain" } }),
+    });
+
+    await runStatus({ write });
+
+    expect(lines[6]).toBe(
+      `draining  since ${new Date(since).toLocaleTimeString()} · drain`,
+    );
   });
 
   it("shows claude unknown when the worker could not read the CLI version", async () => {
@@ -460,5 +492,131 @@ describe("runControlAction", () => {
       "No brownie worker is running in this project.",
     );
     expect(process.exitCode).toBe(1);
+  });
+});
+
+describe("runDrain", () => {
+  let lines: string[];
+  let savedExitCode: typeof process.exitCode;
+  const write = (line: string) => lines.push(line);
+  const since = "2026-07-08T09:00:00.000Z";
+  const until = "2026-07-08T09:15:00.000Z";
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    lines = [];
+    savedExitCode = process.exitCode;
+  });
+
+  afterEach(() => {
+    process.exitCode = savedExitCode;
+  });
+
+  it("asks for a drain without a deadline and says when it started", async () => {
+    mocks.sendControlRequest.mockResolvedValue({
+      ok: true,
+      data: { state: "draining", since },
+    });
+
+    await runDrain({ write });
+
+    expect(mocks.sendControlRequest).toHaveBeenCalledWith(expect.any(String), {
+      cmd: "drain",
+    });
+    expect(logger.success).toHaveBeenCalledWith(
+      `Draining since ${new Date(since).toLocaleTimeString()} — the worker exits once its current sessions finish.`,
+    );
+    expect(lines).toEqual([]);
+    expect(process.exitCode).toBe(savedExitCode);
+  });
+
+  it("passes the timeout and names the deadline", async () => {
+    mocks.sendControlRequest.mockResolvedValue({
+      ok: true,
+      data: { state: "draining", since, until },
+    });
+
+    await runDrain({ timeout: "900000", write });
+
+    expect(mocks.sendControlRequest).toHaveBeenCalledWith(expect.any(String), {
+      cmd: "drain",
+      timeoutMs: 900_000,
+    });
+    expect(logger.success).toHaveBeenCalledWith(
+      `Draining since ${new Date(since).toLocaleTimeString()} — the worker exits once its current sessions finish, by ${new Date(until).toLocaleTimeString()} at the latest.`,
+    );
+  });
+
+  it("prints the acknowledgement as JSON", async () => {
+    const ack = { state: "draining", since, until };
+    mocks.sendControlRequest.mockResolvedValue({ ok: true, data: ack });
+
+    await runDrain({ json: true, write });
+
+    expect(JSON.parse(lines.join("\n"))).toEqual(ack);
+    expect(logger.success).not.toHaveBeenCalled();
+  });
+
+  it("rejects a timeout that is not a whole number of milliseconds in range", async () => {
+    for (const timeout of ["0", "-5", "1.5", "soon", "", "86400001"]) {
+      process.exitCode = savedExitCode;
+
+      await runDrain({ timeout, write });
+
+      expect(logger.error).toHaveBeenLastCalledWith(
+        `Invalid timeout "${timeout}" — use a whole number of milliseconds from 1 to 86400000.`,
+      );
+      expect(process.exitCode).toBe(1);
+    }
+    expect(mocks.sendControlRequest).not.toHaveBeenCalled();
+  });
+
+  it("explains a worker that predates drain", async () => {
+    mocks.sendControlRequest.mockResolvedValue({
+      ok: false,
+      error: "Unrecognized control request.",
+    });
+
+    await runDrain({ write });
+
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('does not support "drain"'),
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("fails with exit code 1 when no worker is running", async () => {
+    mocks.sendControlRequest.mockRejectedValue(new WorkerNotRunningError());
+
+    await runDrain({ json: true, write });
+
+    expect(logger.error).toHaveBeenCalledWith(
+      "No brownie worker is running in this project.",
+    );
+    expect(process.exitCode).toBe(1);
+    expect(lines).toEqual([]);
+  });
+
+  it("drainCommand.run forwards the timeout and json flags", async () => {
+    const ack = { state: "draining", since, until };
+    mocks.sendControlRequest.mockResolvedValue({ ok: true, data: ack });
+    const stdoutWrite = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
+
+    try {
+      await (drainCommand.run as (ctx: unknown) => Promise<void>)({
+        args: { timeout: "60000", json: true, _: [] },
+      });
+      const written = stdoutWrite.mock.calls
+        .map(([chunk]) => (typeof chunk === "string" ? chunk : ""))
+        .join("");
+      expect(JSON.parse(written)).toEqual(ack);
+    } finally {
+      stdoutWrite.mockRestore();
+    }
+
+    expect(mocks.sendControlRequest).toHaveBeenCalledWith(expect.any(String), {
+      cmd: "drain",
+      timeoutMs: 60_000,
+    });
   });
 });

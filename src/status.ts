@@ -1,5 +1,6 @@
 import type { AuthFailure } from "./auth-gate.js";
 import type { AgentControlState } from "./control.js";
+import type { DrainSnapshot } from "./drain.js";
 import {
   describeToolUse,
   formatToolCount,
@@ -107,6 +108,7 @@ export interface UpdateStatus {
 export interface WorkerStatus {
   startedAt: number;
   shutdownSignal?: string | undefined;
+  drain?: DrainSnapshot | undefined;
   monitor: AgentPanelStatus<MonitorPhase, MonitorCycleOutcome>;
   executor: AgentPanelStatus<ExecutorPhase, ExecutorTaskOutcome>;
   tasks: readonly Task[];
@@ -188,6 +190,7 @@ export class WorkerStatusStore {
   private readonly listeners = new Set<() => void>();
   private notifyTimer: NodeJS.Timeout | null = null;
   private shutdownSignal: string | undefined;
+  private drain: DrainSnapshot | undefined;
   private updateStatus: UpdateStatus | undefined;
   private tasks: readonly Task[] = [];
   private snapshot: WorkerStatus;
@@ -336,6 +339,11 @@ export class WorkerStatusStore {
 
   shutdownRequested(signalName: string): void {
     this.shutdownSignal = signalName;
+    this.markDirty();
+  }
+
+  drainRequested(snapshot: DrainSnapshot): void {
+    this.drain = snapshot;
     this.markDirty();
   }
 
@@ -530,6 +538,7 @@ export class WorkerStatusStore {
     return {
       startedAt: this.startedAt,
       shutdownSignal: this.shutdownSignal,
+      drain: this.drain,
       monitor: this.buildPanel(this.monitorState),
       executor: this.buildPanel(this.executorState),
       tasks: this.tasks,

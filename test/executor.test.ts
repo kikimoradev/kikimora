@@ -1,5 +1,7 @@
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AgentController } from "../src/control.js";
+import { DrainController } from "../src/drain.js";
 import type { TaskStore } from "../src/tasks.js";
 import type { SessionResult, Task } from "../src/types.js";
 import { Waker } from "../src/waker.js";
@@ -885,6 +887,83 @@ describe("runExecutorLoop", () => {
 
     abort.abort();
     await promise;
+  });
+});
+
+describe("runExecutorLoop under a drain", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.readFile.mockResolvedValue("identity\n");
+    mocks.writeMcpConfig.mockResolvedValue(join("data", "mcp", "executor.json"));
+  });
+
+  it("waits for the memory summary before the executor comes to rest and the worker exits", async () => {
+    let finishSession: (result: SessionResult) => void = () => undefined;
+    let finishSummary: () => void = () => undefined;
+    mocks.runSession.mockImplementation(
+      () =>
+        new Promise<SessionResult>((resolvePromise) => {
+          finishSession = resolvePromise;
+        }),
+    );
+    const summarize = vi.fn(
+      () =>
+        new Promise<void>((resolvePromise) => {
+          finishSummary = resolvePromise;
+        }),
+    );
+    const takeNext = vi
+      .fn()
+      .mockResolvedValueOnce(task("current"))
+      .mockResolvedValue(task("next"));
+    const complete = vi.fn().mockResolvedValue(undefined);
+    const store = {
+      takeNext,
+      complete,
+      fail: vi.fn(),
+      requeue: vi.fn(),
+    } as unknown as TaskStore;
+    const shutdown = new AbortController();
+    const executorControl = new AgentController(() => {
+      drain.noteSettled();
+    });
+    const monitorControl = new AgentController(() => undefined, "paused");
+    const drainFinished = vi.fn(() => {
+      shutdown.abort();
+    });
+    const drain = new DrainController(
+      { monitor: monitorControl, executor: executorControl },
+      drainFinished,
+    );
+
+    const loop = runExecutorLoop(
+      buildConfig(),
+      store,
+      new Waker(),
+      createExecutorReporterSpy().reporter,
+      { summarize },
+      executorControl,
+      buildGates(),
+      shutdown.signal,
+    );
+    await vi.waitFor(() => expect(mocks.runSession).toHaveBeenCalledTimes(1));
+
+    drain.request("drain", undefined);
+    finishSession(ok());
+    await vi.waitFor(() => expect(summarize).toHaveBeenCalledTimes(1));
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+
+    expect(complete).toHaveBeenCalledWith("current");
+    expect(executorControl.state).toBe("pausing");
+    expect(drainFinished).not.toHaveBeenCalled();
+
+    finishSummary();
+    await loop;
+
+    expect(executorControl.state).toBe("paused");
+    expect(drainFinished).toHaveBeenCalledTimes(1);
+    expect(drain.settled).toBe(true);
+    expect(takeNext).toHaveBeenCalledTimes(1);
   });
 });
 

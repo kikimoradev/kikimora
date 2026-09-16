@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `brownie drain [--timeout <ms>] [--json]`, `/drain` in the dashboard and the `drain` control command stop a worker without throwing work away: both agents finish what they are doing — an executor session together with its memory summary — start nothing new, and the process exits `0` once both are idle. The command answers at once with `{"state":"draining","since":…,"until":…}`; `--timeout` (`timeoutMs` on the socket, up to 24 hours) sets a deadline after which whatever still runs is killed. A repeated request answers with the first acknowledgement and never moves the deadline, `resume` is refused while draining, and `brownie status` shows the drain (`drain` in the JSON document). The headless log gains `worker.draining`, and `worker.stopped` carries `drained`, plus `forced` when the deadline or a signal cut the drain short ([docs/control.md](docs/control.md)).
+
 ## [0.6.0] - 2026-09-14
 
 ### Added

@@ -102,6 +102,7 @@ A shell in the style of Claude Code: a header with the live status of both agent
 | `/memory [query]`             | browse long-term memory, optionally filtered by FTS search |
 | `/start [monitor\|executor]`  | start paused agents — agents boot paused                   |
 | `/pause [monitor\|executor]`  | graceful pause — the current session finishes first        |
+| `/drain`                      | let the current sessions finish, then shut down            |
 | `/task <description>`         | add a task by hand (the executor picks it up immediately)  |
 | `/retry <task-id>`            | requeue a failed task                                      |
 | `/cancel <task-id>`           | cancel a pending task                                      |
@@ -131,6 +132,7 @@ Without a TTY (systemd, Docker, CI, piping) brownie skips the dashboard, starts 
 | `brownie version [--json]`                                | brownie, Claude Code and Node versions, auth kind, pid of the worker                                                |
 | `brownie pause [monitor\|executor]`                       | graceful pause, same as `/pause` in the TUI                                                                         |
 | `brownie resume [monitor\|executor]`                      | resume paused agents                                                                                                |
+| `brownie drain [--timeout <ms>]`                          | let the current sessions finish, then exit (with a deadline, kill what still runs)                                  |
 | `brownie tasks\|settings\|prompt\|memory …`               | edit the queue, settings, prompts and memory of the running worker                                                  |
 | `brownie update [--check]`                                | update to the newest published version (auto-updates in the background too)                                         |
 
