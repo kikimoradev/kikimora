@@ -23,19 +23,6 @@ Changes apply live — a patched setting on the next session, a replaced prompt 
 | `brownie context set [file\|-]`                                                   | replace it from a file or stdin; empty input clears it                                                 |
 | `brownie memory search <query> [--limit <n>]`                                     | full-text search over task summaries (1–100 entries, default 10)                                       |
 | `brownie memory recent [--limit <n>]`                                             | the newest task summaries                                                                              |
-| `brownie status [--json]`                                                         | who's running, phases, task counts, cost — non-zero without a worker, so it doubles as a health check  |
-| `brownie version [--json]`                                                        | the worker's identity: brownie, Claude Code and Node versions, auth kind, pid, start time, project     |
-| `brownie pause [monitor\|executor]`                                               | graceful pause — the current session finishes first                                                    |
-| `brownie resume [monitor\|executor]`                                              | resume paused agents (also after an `authBlocked` stop)                                                |
-| `brownie tasks list [--status <s>] [--json]`                                      | the task queue, optionally one status                                                                  |
-| `brownie tasks add <description> [--id <id>] [--title <t>]`                       | queue a task by hand                                                                                   |
-| `brownie tasks retry <id>` / `brownie tasks cancel <id>`                          | requeue a failed task / drop a pending one                                                             |
-| `brownie settings get [--json]`                                                   | effective settings, defaults filled in                                                                 |
-| `brownie settings patch <json\|-> [--json]`                                       | merge a sparse patch into `settings.json` — `null` deletes a key, the file is validated before writing |
-| `brownie prompt get <agent> [--json]`                                             | print a project prompt                                                                                 |
-| `brownie prompt set <agent> [file\|-]`                                            | replace it from a file or stdin                                                                        |
-| `brownie memory search <query> [--limit <n>]`                                     | full-text search over task summaries (1–100 entries, default 10)                                       |
-| `brownie memory recent [--limit <n>]`                                             | the newest task summaries                                                                              |
 | `brownie sessions list [--agent <a>] [--task <id>] [--before <ts>] [--limit <n>]` | the indexed sessions, newest first (1–100 entries, default 20)                                         |
 | `brownie sessions show <id> [--log]`                                              | one session's metadata and the paths of its two transcript files; `--log` prints the readable one      |
 
@@ -76,20 +63,6 @@ One connection carries one request — a JSON object terminated by `\n` — and 
 | `{"cmd":"prompt.set","agent":…,"content":"…"}`                                  | —                                                |
 | `{"cmd":"context.get"}`                                                         | `{"content":"…"}`; `""` when there is no file    |
 | `{"cmd":"context.set","content":"…"}`                                           | —; an empty `content` clears the file            |
-| `{"cmd":"status"}`                                                              | the document `brownie status --json` prints      |
-| `{"cmd":"version"}`                                                             | the identity block alone (see below)             |
-| `{"cmd":"pause","agent":"monitor"\|"executor"\|"all"}`                          | —                                                |
-| `{"cmd":"resume","agent":…}`                                                    | —                                                |
-| `{"cmd":"settings.get"}`                                                        | effective settings                               |
-| `{"cmd":"settings.patch","patch":{…}}`                                          | the resulting settings; `null` deletes a key     |
-| `{"cmd":"tasks.list","status"?:…}`                                              | `Task[]`                                         |
-| `{"cmd":"tasks.add","description":"…","id"?:"…","title"?:"…"}`                  | the created `Task`; a duplicate id is an error   |
-| `{"cmd":"tasks.retry","id":"…"}`                                                | `true` when a failed task was requeued           |
-| `{"cmd":"tasks.cancel","id":"…"}`                                               | `true` when a pending task was cancelled         |
-| `{"cmd":"memory.search","query":"…","limit"?:1-100}`                            | task summaries, best match first                 |
-| `{"cmd":"memory.recent","limit"?:1-100}`                                        | the newest task summaries                        |
-| `{"cmd":"prompt.get","agent":"monitor"\|"executor"}`                            | `{"agent":…,"content":"…"}`                      |
-| `{"cmd":"prompt.set","agent":…,"content":"…"}`                                  | —                                                |
 | `{"cmd":"sessions.list","agent"?:…,"taskId"?:"…","before"?:"…","limit"?:1-100}` | `SessionRecord[]`, newest first                  |
 | `{"cmd":"sessions.get","sessionId":"…"}`                                        | one `SessionRecord`; an unindexed id is an error |
 
