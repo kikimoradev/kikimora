@@ -1,6 +1,6 @@
 {
   "name": "@brownie-labs/brownie",
-  "version": "0.6.0",
+  "version": "0.7.0",
   "description": "Autonomous two-agent Claude Code worker: a monitor that finds tasks, an executor that completes them, and long-term memory in between",
   "type": "module",
   "license": "MIT",
