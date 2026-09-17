@@ -33,9 +33,25 @@ describe("settingsSchema", () => {
     expect(settings.summarizer.sessionTimeoutMs).toBe(300_000);
     expect(settings.streamPartial).toBe(true);
     expect(settings.browser).toBe(false);
+    expect(settings.shutdownGraceMs).toBe(0);
     expect(settings.mcpServers).toEqual({});
     expect(settings.monitor.mcpServers).toEqual([]);
     expect(settings.executor.mcpServers).toEqual([]);
+  });
+
+  it("accepts a shutdown grace of whole milliseconds up to a day", () => {
+    expect(settingsSchema.parse({ shutdownGraceMs: 120_000 }).shutdownGraceMs).toBe(
+      120_000,
+    );
+    expect(settingsSchema.parse({ shutdownGraceMs: 86_400_000 }).shutdownGraceMs).toBe(
+      86_400_000,
+    );
+  });
+
+  it("rejects a negative, fractional or over-a-day shutdown grace", () => {
+    for (const shutdownGraceMs of [-1, 1.5, 86_400_001, "120000"]) {
+      expect(settingsSchema.safeParse({ shutdownGraceMs }).success).toBe(false);
+    }
   });
 
   it("rejects a non-positive monitor interval", () => {
@@ -329,7 +345,16 @@ describe("loadWorkerConfig", () => {
     expect(config.playwrightOutputDir).toBe(join(dir, ".brownie", "data", "playwright"));
     expect(config.logsDir).toBe(join(dir, ".brownie", "logs"));
     expect(config.streamPartial).toBe(true);
+    expect(config.shutdownGraceMs).toBe(0);
     expect(config.monitor.schedule).toBeNull();
+  });
+
+  it("maps the shutdown grace", async () => {
+    await seedProject(dir, { settings: { shutdownGraceMs: 120_000 } });
+
+    const config = await loadWorkerConfig(dirs());
+
+    expect(config.shutdownGraceMs).toBe(120_000);
   });
 
   it("rounds a fractional interval to whole milliseconds", async () => {

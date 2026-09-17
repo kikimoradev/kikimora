@@ -50,6 +50,7 @@ export function applySettings(config: WorkerConfig, settings: Settings): void {
   config.summarizer.sessionTimeoutMs = settings.summarizer.sessionTimeoutMs;
   config.streamPartial = settings.streamPartial;
   config.browser = settings.browser;
+  config.shutdownGraceMs = settings.shutdownGraceMs;
   config.mcpServers = settings.mcpServers;
 }
 

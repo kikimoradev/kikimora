@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { render } from "ink-testing-library";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { AgentController } from "../../src/control.js";
+import { DrainController } from "../../src/drain.js";
 import type { TaskSummaryRecord } from "../../src/memory/store.js";
 import { createSettingsController } from "../../src/settings-controller.js";
 import { WorkerStatusStore } from "../../src/status.js";
@@ -97,6 +98,7 @@ interface Harness {
   props: AppProps;
   monitorControl: AgentController;
   executorControl: AgentController;
+  drain: DrainController;
   retry: ReturnType<typeof vi.fn>;
   cancel: ReturnType<typeof vi.fn>;
   addTasks: ReturnType<typeof vi.fn>;
@@ -120,6 +122,13 @@ function buildHarness(initialControlState: "running" | "paused" = "running"): Ha
   store.setControl("monitor", initialControlState);
   store.setControl("executor", initialControlState);
   store.flush();
+  const drain = new DrainController(
+    { monitor: monitorControl, executor: executorControl },
+    () => undefined,
+    (snapshot) => {
+      store.drainRequested(snapshot);
+    },
+  );
   const retry = vi.fn().mockResolvedValue(true);
   const cancel = vi.fn().mockResolvedValue(true);
   const addTasks = vi
@@ -137,6 +146,7 @@ function buildHarness(initialControlState: "running" | "paused" = "running"): Ha
     store,
     monitorControl,
     executorControl,
+    drain,
     retry,
     cancel,
     addTasks,
@@ -152,6 +162,7 @@ function buildHarness(initialControlState: "running" | "paused" = "running"): Ha
       config: buildConfig({ cwd: "/tmp/ws" }),
       version: "1.2.3",
       controls: { monitor: monitorControl, executor: executorControl },
+      drain,
       tasks: { list, retry, cancel, addTasks },
       memory: { recent, search },
       settings,
@@ -375,6 +386,44 @@ describe("App", () => {
     await eventually(() => {
       expect(lastFrame()).toContain("Received SIGINT — shutting down…");
     });
+
+    unmount();
+    store.dispose();
+  });
+
+  it("/drain pauses both agents and notes the drain in the header", async () => {
+    const { store, props, monitorControl, executorControl, drain } = buildHarness();
+    const { lastFrame, stdin, unmount } = await renderApp(props);
+
+    await submit(stdin, "/drain");
+
+    await eventually(() => {
+      expect(lastFrame()).toContain("⏏ draining — exits after the current session");
+    });
+    expect(lastFrame()).not.toContain("at the latest");
+    expect(monitorControl.state).toBe("pausing");
+    expect(executorControl.state).toBe("pausing");
+
+    unmount();
+    drain.dispose();
+    store.dispose();
+  });
+
+  it("counts down to the drain deadline in the header", async () => {
+    vi.useFakeTimers();
+    const { store, props } = buildHarness();
+    const { lastFrame, unmount } = render(<App {...props} />);
+
+    store.drainRequested({
+      since: Date.now(),
+      until: Date.now() + 90_000,
+      reason: "SIGTERM",
+    });
+    store.flush();
+    await vi.advanceTimersByTimeAsync(100);
+    expect(lastFrame()).toContain(
+      "⏏ draining — exits after the current session · stops in 01:30 at the latest",
+    );
 
     unmount();
     store.dispose();

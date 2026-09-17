@@ -206,6 +206,23 @@ describe("patchSettings", () => {
     ).rejects.toThrow(/executor\.mcpServers\.0: unknown MCP server "missing"/);
   });
 
+  it("accepts a shutdown grace and rejects a negative one before writing anything", async () => {
+    await writeFile(file, "{}\n", "utf8");
+    const settings = await patchSettings(file, (raw) => {
+      mergeSettingsPatch(raw, { shutdownGraceMs: 120_000 });
+    });
+    expect(settings.shutdownGraceMs).toBe(120_000);
+    const written = await readFile(file, "utf8");
+    expect(JSON.parse(written)).toEqual({ shutdownGraceMs: 120_000 });
+
+    await expect(
+      patchSettings(file, (raw) => {
+        mergeSettingsPatch(raw, { shutdownGraceMs: -1 });
+      }),
+    ).rejects.toThrow(/shutdownGraceMs/);
+    expect(await readFile(file, "utf8")).toBe(written);
+  });
+
   it("leaves no temporary file behind", async () => {
     await writeFile(file, "{}\n", "utf8");
     await patchSettings(file, (raw) => {

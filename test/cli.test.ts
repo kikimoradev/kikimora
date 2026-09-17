@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -107,6 +107,86 @@ function runCommand(
     child.on("close", (code) => {
       resolvePromise({ code, stdout, stderr });
     });
+  });
+}
+
+type LogEvent = Record<string, unknown>;
+
+interface JsonWorker {
+  child: ChildProcess;
+  exited: Promise<number | null>;
+  events(): Promise<LogEvent[]>;
+  waitFor(predicate: (event: LogEvent) => boolean): Promise<LogEvent>;
+}
+
+function spawnJsonWorker(cwd: string, env: NodeJS.ProcessEnv): JsonWorker {
+  const outPath = join(cwd, "worker-out.log");
+  const outFd = openSync(outPath, "w");
+  const errFd = openSync(join(cwd, "worker-err.log"), "w");
+  const child = spawn(tsxBin, [entry, "--log-format", "json"], {
+    cwd,
+    env: { ...env, TSX_TSCONFIG_PATH: join(projectRoot, "tsconfig.json") },
+    stdio: ["ignore", outFd, errFd],
+  });
+  const exited = new Promise<number | null>((resolvePromise) => {
+    child.on("close", (code) => {
+      closeSync(outFd);
+      closeSync(errFd);
+      resolvePromise(code);
+    });
+  });
+  const events = async (): Promise<LogEvent[]> => {
+    const lines = (await readFile(outPath, "utf8")).split("\n").slice(0, -1);
+    return lines
+      .filter((line) => line.startsWith("{"))
+      .map((line) => JSON.parse(line) as LogEvent);
+  };
+  const waitFor = async (predicate: (event: LogEvent) => boolean): Promise<LogEvent> => {
+    const deadline = Date.now() + INTERRUPT_DEADLINE_MS;
+    while (Date.now() < deadline) {
+      const match = (await events()).find(predicate);
+      if (match !== undefined) return match;
+      await new Promise((resolve) => setTimeout(resolve, POLL_INTERVAL_MS));
+    }
+    throw new Error("Timed out waiting for a worker event.");
+  };
+  return { child, exited, events, waitFor };
+}
+
+async function stopWorker(worker: JsonWorker): Promise<void> {
+  if (worker.child.exitCode === null && worker.child.signalCode === null) {
+    worker.child.kill("SIGINT");
+  }
+  await worker.exited;
+}
+
+function indexOfEvent(
+  events: LogEvent[],
+  predicate: (event: LogEvent) => boolean,
+): number {
+  const index = events.findIndex(predicate);
+  if (index === -1) throw new Error("Expected event is missing from the worker log.");
+  return index;
+}
+
+const executorSessionStarted = (event: LogEvent): boolean =>
+  event.event === "session.init" && event.agent === "executor";
+
+function drainProjectEnv(
+  taskId: string,
+  extra: NodeJS.ProcessEnv = {},
+): NodeJS.ProcessEnv {
+  return fakeClaudeCliEnv("ok", {
+    CI: "true",
+    FAKE_CLAUDE_RESULT_TEXT_HAIKU: JSON.stringify({
+      tasks: [{ id: taskId, title: "Drained task", description: "drain description" }],
+    }),
+    FAKE_CLAUDE_MODE_OPUS: "slow",
+    FAKE_CLAUDE_RESULT_TEXT_SONNET: JSON.stringify({
+      headline: "drained summary",
+      summary: "The executor finished while the worker drained.",
+    }),
+    ...extra,
   });
 }
 
@@ -558,6 +638,310 @@ describe("CLI start (smoke E2E)", () => {
       await workerClosed;
     }
   }, 30_000);
+
+  it("brownie drain --json lets the executor finish its session and summary, then the worker exits 0", async () => {
+    await seedProject(dir, {
+      settings: {
+        monitor: { model: "haiku", intervalMinutes: 1 },
+        executor: { model: "opus" },
+        summarizer: { model: "sonnet" },
+      },
+    });
+    const env = drainProjectEnv("drain-1", {
+      FAKE_CLAUDE_DELAY_MS_OPUS: "4000",
+      FAKE_CLAUDE_MODE_SONNET: "slow",
+      FAKE_CLAUDE_DELAY_MS_SONNET: "800",
+    });
+    const worker = spawnJsonWorker(dir, env);
+
+    try {
+      await worker.waitFor(executorSessionStarted);
+
+      const drained = await runCommand(dir, env, ["drain", "--json"]);
+      expect(drained.code).toBe(0);
+      const ack = JSON.parse(drained.stdout) as Record<string, unknown>;
+      expect(ack).toEqual({
+        state: "draining",
+        since: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T.*Z$/) as unknown,
+      });
+
+      const [repeated, status] = await Promise.all([
+        runCommand(dir, env, ["drain", "--timeout", "1000", "--json"]),
+        runCommand(dir, env, ["status", "--json"]),
+      ]);
+      expect(repeated.code).toBe(0);
+      expect(JSON.parse(repeated.stdout)).toEqual(ack);
+      expect(status.code).toBe(0);
+      expect((JSON.parse(status.stdout) as { drain: unknown }).drain).toEqual({
+        since: ack.since,
+        reason: "drain",
+      });
+
+      expect(await worker.exited).toBe(0);
+      const events = await worker.events();
+      expect(events).not.toContainEqual(
+        expect.objectContaining({ event: "session.killed" }),
+      );
+      const draining = indexOfEvent(events, (event) => event.event === "worker.draining");
+      const finished = indexOfEvent(
+        events,
+        (event) =>
+          event.event === "task.finished" &&
+          event.taskId === "drain-1" &&
+          event.ok === true,
+      );
+      const summarized = indexOfEvent(
+        events,
+        (event) => event.event === "summary.finished" && event.ok === true,
+      );
+      expect(events[draining]).toMatchObject({ level: "info", reason: "drain" });
+      expect(events[draining]).not.toHaveProperty("timeoutMs");
+      expect(draining).toBeLessThan(finished);
+      expect(finished).toBeLessThan(summarized);
+      expect(events.at(-1)).toEqual({
+        ts: expect.any(String) as unknown,
+        level: "info",
+        event: "worker.stopped",
+        drained: true,
+      });
+      expect(
+        readSummaries(join(dir, ".brownie", "data", "memory.db"), "drain-1"),
+      ).toEqual([{ headline: "drained summary" }]);
+    } finally {
+      await stopWorker(worker);
+    }
+  }, 40_000);
+
+  it("brownie drain waits for a monitor cycle in flight while the executor idles, then the worker exits 0", async () => {
+    await seedProject(dir, {
+      settings: {
+        monitor: { model: "haiku", intervalMinutes: 1 },
+        executor: { model: "opus" },
+      },
+    });
+    const env = fakeClaudeCliEnv("ok", {
+      CI: "true",
+      FAKE_CLAUDE_MODE_HAIKU: "slow",
+      FAKE_CLAUDE_DELAY_MS_HAIKU: "5000",
+      FAKE_CLAUDE_RESULT_TEXT_HAIKU: JSON.stringify({ tasks: [] }),
+    });
+    const worker = spawnJsonWorker(dir, env);
+
+    try {
+      await worker.waitFor(
+        (event) => event.event === "session.init" && event.agent === "monitor",
+      );
+
+      const drained = await runCommand(dir, env, ["drain", "--json"]);
+      expect(drained.code).toBe(0);
+
+      expect(await worker.exited).toBe(0);
+      const events = await worker.events();
+      const isPaused = (agent: string) => (event: LogEvent) =>
+        event.event === "control.changed" &&
+        event.agent === agent &&
+        event.state === "paused";
+      const draining = indexOfEvent(events, (event) => event.event === "worker.draining");
+      const executorPaused = indexOfEvent(events, isPaused("executor"));
+      const cycleFinished = indexOfEvent(
+        events,
+        (event) => event.event === "cycle.finished" && event.ok === true,
+      );
+      const monitorPaused = indexOfEvent(events, isPaused("monitor"));
+      expect(draining).toBeLessThan(executorPaused);
+      expect(executorPaused).toBeLessThan(cycleFinished);
+      expect(cycleFinished).toBeLessThan(monitorPaused);
+      expect(monitorPaused).toBe(events.length - 2);
+      expect(events).not.toContainEqual(
+        expect.objectContaining({ event: "session.killed" }),
+      );
+      expect(events.at(-1)).toEqual({
+        ts: expect.any(String) as unknown,
+        level: "info",
+        event: "worker.stopped",
+        drained: true,
+      });
+    } finally {
+      await stopWorker(worker);
+    }
+  }, 40_000);
+
+  it("a drain deadline shorter than the session kills it and the worker exits 0, forced", async () => {
+    await seedProject(dir, {
+      settings: {
+        monitor: { model: "haiku", intervalMinutes: 1 },
+        executor: { model: "opus" },
+      },
+    });
+    const env = drainProjectEnv("drain-2", { FAKE_CLAUDE_DELAY_MS_OPUS: "20000" });
+    const worker = spawnJsonWorker(dir, env);
+
+    try {
+      await worker.waitFor(executorSessionStarted);
+
+      const drained = await runCommand(dir, env, ["drain", "--timeout", "500", "--json"]);
+      expect(drained.code).toBe(0);
+      const ack = JSON.parse(drained.stdout) as { since: string; until: string };
+      expect(Date.parse(ack.until) - Date.parse(ack.since)).toBe(500);
+
+      expect(await worker.exited).toBe(0);
+      const events = await worker.events();
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          event: "worker.draining",
+          reason: "drain",
+          timeoutMs: 500,
+        }),
+      );
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          agent: "executor",
+          event: "session.killed",
+          reason: "abort",
+        }),
+      );
+      expect(events).not.toContainEqual(
+        expect.objectContaining({ event: "task.finished", taskId: "drain-2" }),
+      );
+      expect(events.at(-1)).toEqual({
+        ts: expect.any(String) as unknown,
+        level: "info",
+        event: "worker.stopped",
+        drained: true,
+        forced: true,
+      });
+    } finally {
+      await stopWorker(worker);
+    }
+  }, 40_000);
+
+  it("SIGTERM under shutdownGraceMs lets the executor finish its session and summary, then the worker exits 0", async () => {
+    await seedProject(dir, {
+      settings: {
+        monitor: { model: "haiku", intervalMinutes: 1 },
+        executor: { model: "opus" },
+        summarizer: { model: "sonnet" },
+        shutdownGraceMs: 60_000,
+      },
+    });
+    const env = drainProjectEnv("graced-1", {
+      FAKE_CLAUDE_DELAY_MS_OPUS: "3000",
+      FAKE_CLAUDE_MODE_SONNET: "slow",
+      FAKE_CLAUDE_DELAY_MS_SONNET: "800",
+    });
+    const worker = spawnJsonWorker(dir, env);
+
+    try {
+      await worker.waitFor(executorSessionStarted);
+      worker.child.kill("SIGTERM");
+
+      expect(await worker.exited).toBe(0);
+      const events = await worker.events();
+      expect(events).not.toContainEqual(
+        expect.objectContaining({ event: "session.killed" }),
+      );
+      const draining = indexOfEvent(events, (event) => event.event === "worker.draining");
+      const finished = indexOfEvent(
+        events,
+        (event) =>
+          event.event === "task.finished" &&
+          event.taskId === "graced-1" &&
+          event.ok === true,
+      );
+      const summarized = indexOfEvent(
+        events,
+        (event) => event.event === "summary.finished" && event.ok === true,
+      );
+      expect(events[draining]).toMatchObject({ reason: "SIGTERM", timeoutMs: 60_000 });
+      expect(draining).toBeLessThan(finished);
+      expect(finished).toBeLessThan(summarized);
+      expect(events.at(-1)).toEqual({
+        ts: expect.any(String) as unknown,
+        level: "info",
+        event: "worker.stopped",
+        signal: "SIGTERM",
+        drained: true,
+      });
+    } finally {
+      await stopWorker(worker);
+    }
+  }, 40_000);
+
+  it("SIGTERM without shutdownGraceMs kills the session in flight, as before", async () => {
+    await seedProject(dir, {
+      settings: {
+        monitor: { model: "haiku", intervalMinutes: 1 },
+        executor: { model: "opus" },
+      },
+    });
+    const env = drainProjectEnv("ungraced-1", { FAKE_CLAUDE_DELAY_MS_OPUS: "20000" });
+    const worker = spawnJsonWorker(dir, env);
+
+    try {
+      await worker.waitFor(executorSessionStarted);
+      worker.child.kill("SIGTERM");
+
+      expect(await worker.exited).toBe(0);
+      const events = await worker.events();
+      expect(events).not.toContainEqual(
+        expect.objectContaining({ event: "worker.draining" }),
+      );
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          agent: "executor",
+          event: "session.killed",
+          reason: "abort",
+        }),
+      );
+      expect(events.at(-1)).toEqual({
+        ts: expect.any(String) as unknown,
+        level: "info",
+        event: "worker.stopped",
+        signal: "SIGTERM",
+      });
+    } finally {
+      await stopWorker(worker);
+    }
+  }, 40_000);
+
+  it("a second SIGTERM during the grace kills the session at once and the worker exits 0, forced", async () => {
+    await seedProject(dir, {
+      settings: {
+        monitor: { model: "haiku", intervalMinutes: 1 },
+        executor: { model: "opus" },
+        shutdownGraceMs: 60_000,
+      },
+    });
+    const env = drainProjectEnv("graced-2", { FAKE_CLAUDE_DELAY_MS_OPUS: "20000" });
+    const worker = spawnJsonWorker(dir, env);
+
+    try {
+      await worker.waitFor(executorSessionStarted);
+      worker.child.kill("SIGTERM");
+      await worker.waitFor((event) => event.event === "worker.draining");
+      worker.child.kill("SIGTERM");
+
+      expect(await worker.exited).toBe(0);
+      const events = await worker.events();
+      expect(events).toContainEqual(
+        expect.objectContaining({
+          agent: "executor",
+          event: "session.killed",
+          reason: "abort",
+        }),
+      );
+      expect(events.at(-1)).toEqual({
+        ts: expect.any(String) as unknown,
+        level: "info",
+        event: "worker.stopped",
+        signal: "SIGTERM",
+        drained: true,
+        forced: true,
+      });
+    } finally {
+      await stopWorker(worker);
+    }
+  }, 40_000);
 
   it("brownie status fails cleanly when no worker is running", async () => {
     const result = await runCommand(dir, fakeClaudeCliEnv("ok"), ["status"]);

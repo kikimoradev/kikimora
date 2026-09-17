@@ -1,5 +1,7 @@
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AgentController } from "../src/control.js";
+import { DrainController } from "../src/drain.js";
 import type { TaskStore } from "../src/tasks.js";
 import type { SessionResult, Task } from "../src/types.js";
 import { Waker } from "../src/waker.js";
@@ -885,6 +887,223 @@ describe("runExecutorLoop", () => {
 
     abort.abort();
     await promise;
+  });
+});
+
+describe("runExecutorLoop under a drain", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.readFile.mockResolvedValue("identity\n");
+    mocks.writeMcpConfig.mockResolvedValue(join("data", "mcp", "executor.json"));
+  });
+
+  it("waits for the memory summary before the executor comes to rest and the worker exits", async () => {
+    let finishSession: (result: SessionResult) => void = () => undefined;
+    let finishSummary: () => void = () => undefined;
+    mocks.runSession.mockImplementation(
+      () =>
+        new Promise<SessionResult>((resolvePromise) => {
+          finishSession = resolvePromise;
+        }),
+    );
+    const summarize = vi.fn(
+      () =>
+        new Promise<void>((resolvePromise) => {
+          finishSummary = resolvePromise;
+        }),
+    );
+    const takeNext = vi
+      .fn()
+      .mockResolvedValueOnce(task("current"))
+      .mockResolvedValue(task("next"));
+    const complete = vi.fn().mockResolvedValue(undefined);
+    const store = {
+      takeNext,
+      complete,
+      fail: vi.fn(),
+      requeue: vi.fn(),
+    } as unknown as TaskStore;
+    const shutdown = new AbortController();
+    const executorControl = new AgentController(() => {
+      drain.noteSettled();
+    });
+    const monitorControl = new AgentController(() => undefined, "paused");
+    const drainFinished = vi.fn(() => {
+      shutdown.abort();
+    });
+    const drain = new DrainController(
+      { monitor: monitorControl, executor: executorControl },
+      drainFinished,
+    );
+
+    const loop = runExecutorLoop(
+      buildConfig(),
+      store,
+      new Waker(),
+      createExecutorReporterSpy().reporter,
+      { summarize },
+      executorControl,
+      buildGates(),
+      shutdown.signal,
+    );
+    await vi.waitFor(() => expect(mocks.runSession).toHaveBeenCalledTimes(1));
+
+    drain.request("drain", undefined);
+    finishSession(ok());
+    await vi.waitFor(() => expect(summarize).toHaveBeenCalledTimes(1));
+    await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
+
+    expect(complete).toHaveBeenCalledWith("current");
+    expect(executorControl.state).toBe("pausing");
+    expect(drainFinished).not.toHaveBeenCalled();
+
+    finishSummary();
+    await loop;
+
+    expect(executorControl.state).toBe("paused");
+    expect(drainFinished).toHaveBeenCalledTimes(1);
+    expect(drain.settled).toBe(true);
+    expect(takeNext).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe("runExecutorLoop while a session is being prepared", () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    mocks.readFile.mockResolvedValue("identity\n");
+  });
+
+  function pendingMcpWrite(): { finish: () => void } {
+    const handle = { finish: (): void => undefined };
+    mocks.writeMcpConfig.mockImplementationOnce(
+      () =>
+        new Promise<string>((resolvePromise) => {
+          handle.finish = () => {
+            resolvePromise(join("data", "mcp", "executor.json"));
+          };
+        }),
+    );
+    return handle;
+  }
+
+  function claimingStore() {
+    const takeNext = vi
+      .fn()
+      .mockResolvedValueOnce({ ...task("claimed"), attempts: 1 })
+      .mockResolvedValue(undefined);
+    const release = vi.fn().mockResolvedValue(undefined);
+    const fail = vi.fn().mockResolvedValue(undefined);
+    const store = { takeNext, release, fail } as unknown as TaskStore;
+    return { store, takeNext, release, fail };
+  }
+
+  it("a drain returns the claimed task to the queue and starts no session", async () => {
+    const write = pendingMcpWrite();
+    const { store, takeNext, release, fail } = claimingStore();
+    const reporter = createExecutorReporterSpy();
+    const shutdown = new AbortController();
+    const executorControl = new AgentController(() => {
+      drain.noteSettled();
+    });
+    const monitorControl = new AgentController(() => undefined, "paused");
+    const drainFinished = vi.fn(() => {
+      shutdown.abort();
+    });
+    const drain = new DrainController(
+      { monitor: monitorControl, executor: executorControl },
+      drainFinished,
+    );
+
+    const loop = runExecutorLoop(
+      buildConfig(),
+      store,
+      new Waker(),
+      reporter.reporter,
+      createTaskSummarizerSpy().summarizer,
+      executorControl,
+      buildGates(),
+      shutdown.signal,
+    );
+    await vi.waitFor(() => expect(mocks.writeMcpConfig).toHaveBeenCalledTimes(1));
+
+    drain.request("drain", undefined);
+    write.finish();
+    await loop;
+
+    expect(release).toHaveBeenCalledWith("claimed");
+    expect(fail).not.toHaveBeenCalled();
+    expect(mocks.runSession).not.toHaveBeenCalled();
+    expect(reporter.taskStarted).not.toHaveBeenCalled();
+    expect(reporter.taskFinished).not.toHaveBeenCalled();
+    expect(takeNext).toHaveBeenCalledTimes(1);
+    expect(drainFinished).toHaveBeenCalledTimes(1);
+    expect(drain.settled).toBe(true);
+  });
+
+  it("an abort leaves the claimed task alone and starts no session", async () => {
+    const write = pendingMcpWrite();
+    const { store, release, fail } = claimingStore();
+    const reporter = createExecutorReporterSpy();
+    const shutdown = new AbortController();
+
+    const loop = runExecutorLoop(
+      buildConfig(),
+      store,
+      new Waker(),
+      reporter.reporter,
+      createTaskSummarizerSpy().summarizer,
+      noopController(),
+      buildGates(),
+      shutdown.signal,
+    );
+    await vi.waitFor(() => expect(mocks.writeMcpConfig).toHaveBeenCalledTimes(1));
+
+    shutdown.abort();
+    write.finish();
+    await loop;
+
+    expect(release).not.toHaveBeenCalled();
+    expect(fail).not.toHaveBeenCalled();
+    expect(mocks.runSession).not.toHaveBeenCalled();
+    expect(reporter.taskStarted).not.toHaveBeenCalled();
+  });
+
+  it("a prompt that cannot be read still fails the started task", async () => {
+    mocks.writeMcpConfig.mockResolvedValue(join("data", "mcp", "executor.json"));
+    mocks.readFile.mockRejectedValueOnce(new Error("ENOENT: executor.prompt.md"));
+    const { store, fail, release } = claimingStore();
+    const reporter = createExecutorReporterSpy();
+    const shutdown = new AbortController();
+
+    const loop = runExecutorLoop(
+      buildConfig(),
+      store,
+      new Waker(),
+      reporter.reporter,
+      createTaskSummarizerSpy().summarizer,
+      noopController(),
+      buildGates(),
+      shutdown.signal,
+    );
+    await vi.waitFor(() =>
+      expect(fail).toHaveBeenCalledWith("claimed", "ENOENT: executor.prompt.md"),
+    );
+
+    expect(reporter.taskStarted).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "claimed" }),
+    );
+    expect(reporter.taskFinished).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: "claimed",
+        ok: false,
+        error: "ENOENT: executor.prompt.md",
+      }),
+    );
+    expect(release).not.toHaveBeenCalled();
+    expect(mocks.runSession).not.toHaveBeenCalled();
+
+    shutdown.abort();
+    await loop;
   });
 });
 

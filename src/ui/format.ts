@@ -1,5 +1,6 @@
 import { formatResume } from "../active-hours.js";
 import type { AgentControlState } from "../control.js";
+import type { DrainSnapshot } from "../drain.js";
 import type {
   ExecutorPhase,
   ExecutorTaskOutcome,
@@ -98,6 +99,14 @@ export function formatControlLabel(
   return phaseKind === "session" || phaseKind === "summary"
     ? `⏸ finishing · ${phaseLabel}`
     : "⏸ pausing…";
+}
+
+export function formatDrainNotice(drain: DrainSnapshot, now: number): string {
+  const deadline =
+    drain.until === undefined
+      ? ""
+      : ` · stops in ${formatCountdown(drain.until - now)} at the latest`;
+  return `⏏ draining — exits after the current session${deadline}`;
 }
 
 export function formatHeaderStats(

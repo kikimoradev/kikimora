@@ -4,7 +4,7 @@ import type { JSX } from "react";
 import type { WorkerStatus } from "../status.js";
 import type { WorkerConfig } from "../types.js";
 import { executorPanelModel, monitorPanelModel } from "./agent-visuals.js";
-import { formatHeaderStats, formatInterval } from "./format.js";
+import { formatDrainNotice, formatHeaderStats, formatInterval } from "./format.js";
 import { theme } from "./theme.js";
 
 function shortenPath(path: string): string {
@@ -82,6 +82,11 @@ export function Header({ config, version, status, now }: HeaderProps): JSX.Eleme
       <Text dimColor wrap="truncate-end">
         {formatHeaderStats(status.stats, status.tasks, now - status.startedAt)}
       </Text>
+      {status.drain === undefined ? null : (
+        <Text color={theme.warn} wrap="truncate-end">
+          {formatDrainNotice(status.drain, now)}
+        </Text>
+      )}
       {status.update === undefined ? null : (
         <Text color={theme.accent} wrap="truncate-end">
           {status.update.state === "installed"

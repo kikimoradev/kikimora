@@ -43,6 +43,9 @@ Every section is optional — `{}` is a valid file. A typical setup:
 | `monitor.mcpServers`          | _(none)_         | names from `mcpServers` the monitor gets                |
 | `executor.mcpServers`         | _(none)_         | names from `mcpServers` the executor gets               |
 | `browser`                     | `false`          | give both agents the bundled Playwright browser         |
+| `shutdownGraceMs`             | `0`              | how long `SIGTERM` drains before the worker stops       |
+
+`shutdownGraceMs` and what a drain waits for are explained in [Stopping the worker](deployment.md#stopping-the-worker).
 
 ## Changing settings at runtime
 
@@ -57,7 +60,7 @@ The dashboard exposes the everyday settings as slash commands — each one valid
 | `/days <days\|off>`         | `monitor.activeDays` (`off` clears it)                   |
 | `/config`                   | shows all current values                                 |
 
-The remaining keys (`streamPartial`, `sessionTimeoutMs`, `maxTaskAttempts`, `retryDelayMs`) are edited by hand and picked up on the next start — or patched live from a shell with `brownie settings patch` ([docs/control.md](control.md)). The agent prompts are also editable in place — `/prompt <monitor|executor>` opens them in the dashboard editor ([docs/prompts.md](prompts.md)).
+The remaining keys (`streamPartial`, `sessionTimeoutMs`, `maxTaskAttempts`, `retryDelayMs`, `shutdownGraceMs`) are edited by hand and picked up on the next start — or patched live from a shell with `brownie settings patch` ([docs/control.md](control.md)). The agent prompts are also editable in place — `/prompt <monitor|executor>` opens them in the dashboard editor ([docs/prompts.md](prompts.md)).
 
 ## MCP servers
 

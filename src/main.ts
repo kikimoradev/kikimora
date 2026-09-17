@@ -28,7 +28,7 @@ export async function runBrownie(options: RunBrownieOptions = {}): Promise<void>
   if (positional !== undefined) {
     logger.error(
       `Unknown command "${positional}" — available commands: init, status, version, pause, ` +
-        "resume, tasks, settings, prompt, context, memory, sessions, update, mcp; run plain brownie to start the worker.",
+        "resume, drain, tasks, settings, prompt, context, memory, sessions, update, mcp; run plain brownie to start the worker.",
     );
     process.exitCode = 1;
     return;

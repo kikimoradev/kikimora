@@ -1,6 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { z } from "zod";
 import { buildSchedule, parseActiveDays, parseTimeWindow } from "./active-hours.js";
+import { DRAIN_TIMEOUT_MAX_MS } from "./drain.js";
 import { assertReadable } from "./fs.js";
 import { MEMORY_SERVER_NAME, PLAYWRIGHT_SERVER_NAME } from "./mcp-config.js";
 import { projectPaths, systemPromptFiles } from "./paths.js";
@@ -90,6 +91,7 @@ export const settingsSchema = z
       .prefault({}),
     streamPartial: z.boolean().default(true),
     browser: z.boolean().default(false),
+    shutdownGraceMs: z.number().int().nonnegative().max(DRAIN_TIMEOUT_MAX_MS).default(0),
     mcpServers: z
       .record(z.string().regex(MCP_SERVER_NAME_PATTERN), mcpServerSchema)
       .default({}),
@@ -257,6 +259,7 @@ export async function loadWorkerConfig(
     },
     streamPartial: settings.streamPartial,
     browser: settings.browser,
+    shutdownGraceMs: settings.shutdownGraceMs,
     mcpServers: settings.mcpServers,
     cwd: project.projectDir,
     settingsFilePath: project.settingsFile,

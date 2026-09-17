@@ -70,23 +70,31 @@ export async function runExecutorLoop(
       continue;
     }
 
-    reporter.taskStarted(task);
     const start = Date.now();
+    const sessionInputs = Promise.all([
+      readFile(executor.promptPath, "utf8"),
+      readFile(executor.systemPromptPath, "utf8"),
+      contextFile.read(),
+      writeMcpConfig(config.dataDir, {
+        role: "executor",
+        servers: config.mcpServers,
+        selected: executor.mcpServers,
+        browser: config.browser,
+        memoryDbPath: config.memoryDbPath,
+        playwrightOutputDir: config.playwrightOutputDir,
+      }),
+    ]);
+    await sessionInputs.catch(() => undefined);
+    if (aborted()) break;
+    if (controller.state !== "running") {
+      await store.release(task.id);
+      continue;
+    }
+
+    reporter.taskStarted(task);
 
     try {
-      const [prompt, systemPrompt, context, mcpConfigPath] = await Promise.all([
-        readFile(executor.promptPath, "utf8"),
-        readFile(executor.systemPromptPath, "utf8"),
-        contextFile.read(),
-        writeMcpConfig(config.dataDir, {
-          role: "executor",
-          servers: config.mcpServers,
-          selected: executor.mcpServers,
-          browser: config.browser,
-          memoryDbPath: config.memoryDbPath,
-          playwrightOutputDir: config.playwrightOutputDir,
-        }),
-      ]);
+      const [prompt, systemPrompt, context, mcpConfigPath] = await sessionInputs;
 
       const result = await runSession(
         {

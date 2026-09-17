@@ -16,6 +16,7 @@ import {
   suggestions,
   type AgentControls,
   type CommandContext,
+  type DrainControls,
   type MemoryReader,
   type NoticeTone,
   type TaskControls,
@@ -124,6 +125,7 @@ export interface AppProps {
   config: WorkerConfig;
   version: string;
   controls: { monitor: AgentControls; executor: AgentControls };
+  drain: DrainControls;
   tasks: TaskControls;
   memory: MemoryReader;
   settings: SettingsController;
@@ -139,6 +141,7 @@ export function App({
   config,
   version,
   controls,
+  drain,
   tasks,
   memory,
   settings,
@@ -195,6 +198,7 @@ export function App({
       setView,
       monitorControl: controls.monitor,
       executorControl: controls.executor,
+      drain,
       tasks,
       memory,
       settings,
@@ -206,7 +210,7 @@ export function App({
         setNotice({ text, tone });
       },
     }),
-    [controls, tasks, memory, settings, prompts, context, waker, requestExit],
+    [controls, drain, tasks, memory, settings, prompts, context, waker, requestExit],
   );
 
   const editing = view.kind === "prompt" || view.kind === "context";
@@ -230,7 +234,10 @@ export function App({
   const inputHeight = interactive && !editing ? INPUT_HEIGHT : 0;
   const menuHeight = menuOpen ? Math.min(suggestionList.length, SUGGESTION_WINDOW) : 0;
   const shutdownHeight = status.shutdownSignal === undefined ? 0 : 1;
-  const headerHeight = HEADER_HEIGHT + (status.update === undefined ? 0 : 1);
+  const headerHeight =
+    HEADER_HEIGHT +
+    (status.drain === undefined ? 0 : 1) +
+    (status.update === undefined ? 0 : 1);
   const contentHeight = Math.max(
     6,
     rows -

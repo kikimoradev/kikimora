@@ -5,6 +5,7 @@ import { createContextFileAccess } from "./context-file.js";
 import { buildControlStatus } from "./control-protocol.js";
 import { startControlServer } from "./control-server.js";
 import { AgentController } from "./control.js";
+import { DrainController } from "./drain.js";
 import { runExecutorLoop } from "./executor.js";
 import type { LoopGates } from "./gates.js";
 import { loadGlobalConfig } from "./global-config.js";
@@ -100,11 +101,6 @@ export async function startWorker(options: StartWorkerOptions = {}): Promise<voi
       ? null
       : createHeadlessReporters(headlessEmit, { verbose: options.verbose });
 
-  let shutdownSignal: string | undefined;
-  const signal = abortOnSignals((signalName) => {
-    shutdownSignal = signalName;
-    status.shutdownRequested(signalName);
-  });
   const waker = new Waker();
   const gates: LoopGates = {
     limit: new UsageLimitGate(),
@@ -124,6 +120,7 @@ export async function startWorker(options: StartWorkerOptions = {}): Promise<voi
       event: "control.changed",
       fields: { state },
     });
+    drain.noteSettled();
   }, initialControlState);
   const executorControl = new AgentController((state) => {
     if (state === "running") gates.auth.clear();
@@ -134,9 +131,49 @@ export async function startWorker(options: StartWorkerOptions = {}): Promise<voi
       event: "control.changed",
       fields: { state },
     });
+    drain.noteSettled();
   }, initialControlState);
+  const drainFinished = new AbortController();
+  const drain = new DrainController(
+    { monitor: monitorControl, executor: executorControl },
+    () => {
+      drainFinished.abort();
+    },
+    (snapshot) => {
+      status.drainRequested(snapshot);
+      headlessEmit?.({
+        level: "info",
+        event: "worker.draining",
+        fields: compactFields({
+          reason: snapshot.reason,
+          timeoutMs:
+            snapshot.until === undefined ? undefined : snapshot.until - snapshot.since,
+        }),
+      });
+    },
+  );
   status.setControl("monitor", initialControlState);
   status.setControl("executor", initialControlState);
+
+  let shutdownSignal: NodeJS.Signals | undefined;
+  const signal = AbortSignal.any([
+    abortOnSignals({
+      graceMsFor: (signalName) =>
+        signalName === "SIGTERM" && drain.snapshot === undefined
+          ? config.shutdownGraceMs
+          : 0,
+      onDrain: (signalName, graceMs) => {
+        shutdownSignal = signalName;
+        drain.request(signalName, graceMs);
+      },
+      onAbort: (signalName) => {
+        if (drainFinished.signal.aborted) return;
+        shutdownSignal = signalName;
+        status.shutdownRequested(signalName);
+      },
+    }),
+    drainFinished.signal,
+  ]);
 
   const settings = createSettingsController({
     config,
@@ -154,6 +191,7 @@ export async function startWorker(options: StartWorkerOptions = {}): Promise<voi
       socketPath: controlSocketPath(config.cwd),
       identity,
       controls: { monitor: monitorControl, executor: executorControl },
+      drain,
       tasks: store,
       memory,
       sessions,
@@ -185,6 +223,7 @@ export async function startWorker(options: StartWorkerOptions = {}): Promise<voi
         config,
         version: identity.version,
         controls: { monitor: monitorControl, executor: executorControl },
+        drain,
         tasks: store,
         memory,
         settings,
@@ -280,14 +319,20 @@ export async function startWorker(options: StartWorkerOptions = {}): Promise<voi
   } catch (err) {
     loopError = err;
   } finally {
+    drain.dispose();
     await controlServer.close();
     await Promise.all([monitorLog.close(), executorLog.close(), summarizerLog.close()]);
     dashboard?.unmount();
     await dashboard?.waitUntilExit();
+    const drained = drain.snapshot !== undefined;
     headlessEmit?.({
       level: "info",
       event: "worker.stopped",
-      fields: compactFields({ signal: shutdownSignal }),
+      fields: compactFields({
+        signal: shutdownSignal,
+        drained: drained ? true : undefined,
+        forced: drained && !drain.settled ? true : undefined,
+      }),
     });
     memory.close();
     status.dispose();

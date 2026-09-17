@@ -4,14 +4,21 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { sendControlRequest, WorkerNotRunningError } from "../src/control-client.js";
-import type { ControlStatus, WorkerIdentity } from "../src/control-protocol.js";
+import {
+  buildControlStatus,
+  type ControlStatus,
+  type WorkerIdentity,
+} from "../src/control-protocol.js";
 import {
   AlreadyRunningError,
+  RESUME_WHILE_DRAINING,
   startControlServer,
   type ControlServerDeps,
   type ControlServerHandle,
 } from "../src/control-server.js";
+import { DrainController } from "../src/drain.js";
 import type { SessionRecord } from "../src/sessions/index.js";
+import { WorkerStatusStore } from "../src/status.js";
 import type { Task } from "../src/types.js";
 
 function buildTask(overrides: Partial<Task> = {}): Task {
@@ -142,6 +149,7 @@ describe("startControlServer", () => {
   let socketPath: string;
   let abort: AbortController;
   let handles: ControlServerHandle[];
+  let drains: DrainController[];
 
   function controls() {
     return {
@@ -150,19 +158,34 @@ describe("startControlServer", () => {
     };
   }
 
+  function drainOf(agents: ReturnType<typeof controls>): DrainController {
+    const drain = new DrainController(
+      {
+        monitor: { pause: agents.monitor.pause, state: "pausing" },
+        executor: { pause: agents.executor.pause, state: "pausing" },
+      },
+      () => undefined,
+    );
+    drains.push(drain);
+    return drain;
+  }
+
   interface DepsOverrides {
     identity?: WorkerIdentity;
     buildStatus?: () => ControlStatus;
     controls?: ReturnType<typeof controls>;
+    drain?: DrainController;
     fakes?: FakeDeps;
   }
 
   function fullDeps(overrides: DepsOverrides = {}): ControlServerDeps & FakeDeps {
+    const agents = overrides.controls ?? controls();
     return {
       socketPath,
       identity: overrides.identity ?? buildIdentity(),
       buildStatus: overrides.buildStatus ?? (() => buildStatus()),
-      controls: overrides.controls ?? controls(),
+      controls: agents,
+      drain: overrides.drain ?? drainOf(agents),
       ...(overrides.fakes ?? fakeDeps()),
       signal: abort.signal,
     };
@@ -179,10 +202,12 @@ describe("startControlServer", () => {
     socketPath = tempSocketPath();
     abort = new AbortController();
     handles = [];
+    drains = [];
   });
 
   afterEach(async () => {
     for (const handle of handles) await handle.close();
+    for (const drain of drains) drain.dispose();
   });
 
   it("answers a status request with the built status", async () => {
@@ -215,6 +240,137 @@ describe("startControlServer", () => {
     expect(ctrl.executor.pause).toHaveBeenCalledTimes(1);
     expect(ctrl.executor.resume).toHaveBeenCalledTimes(1);
     expect(ctrl.monitor.resume).not.toHaveBeenCalled();
+  });
+
+  it("acknowledges a drain with its start and deadline and pauses both agents", async () => {
+    const ctrl = controls();
+    await startServer({ controls: ctrl });
+    const before = Date.now();
+
+    const response = await sendControlRequest(socketPath, {
+      cmd: "drain",
+      timeoutMs: 60_000,
+    });
+
+    expect(response.ok).toBe(true);
+    if (!response.ok) return;
+    const since = Date.parse(response.data.since);
+    expect(response.data.state).toBe("draining");
+    expect(since).toBeGreaterThanOrEqual(before);
+    expect(response.data.until).toBe(new Date(since + 60_000).toISOString());
+    expect(ctrl.monitor.pause).toHaveBeenCalledTimes(1);
+    expect(ctrl.executor.pause).toHaveBeenCalledTimes(1);
+  });
+
+  it("answers a repeated drain with the first acknowledgement, deadline unchanged", async () => {
+    const ctrl = controls();
+    await startServer({ controls: ctrl });
+
+    const first = await sendControlRequest(socketPath, {
+      cmd: "drain",
+      timeoutMs: 60_000,
+    });
+    const shorter = await sendControlRequest(socketPath, {
+      cmd: "drain",
+      timeoutMs: 1_000,
+    });
+    const open = await sendControlRequest(socketPath, { cmd: "drain" });
+
+    expect(shorter).toEqual(first);
+    expect(open).toEqual(first);
+    expect(ctrl.monitor.pause).toHaveBeenCalledTimes(1);
+  });
+
+  it("omits until from a drain without a timeout", async () => {
+    await startServer();
+
+    const raw = await rawRequest(socketPath, '{"cmd":"drain"}\n');
+
+    const response = JSON.parse(raw.trim()) as { ok: boolean; data: object };
+    expect(response.ok).toBe(true);
+    expect(Object.keys(response.data)).toEqual(["state", "since"]);
+  });
+
+  it("rejects a drain timeout out of range or an unknown field", async () => {
+    await startServer();
+
+    const errors = await Promise.all(
+      [
+        '{"cmd":"drain","timeoutMs":0}',
+        '{"cmd":"drain","timeoutMs":86400001}',
+        '{"cmd":"drain","timeoutMs":1.5}',
+        '{"cmd":"drain","force":true}',
+      ].map(async (line) => {
+        const response = JSON.parse(
+          (await rawRequest(socketPath, `${line}\n`)).trim(),
+        ) as {
+          ok: boolean;
+          error: string;
+        };
+        return response.error;
+      }),
+    );
+
+    expect(errors[0]).toMatch(/^Invalid drain request: timeoutMs: /);
+    expect(errors[1]).toMatch(/^Invalid drain request: timeoutMs: /);
+    expect(errors[2]).toMatch(/^Invalid drain request: timeoutMs: /);
+    expect(errors[3]).toMatch(/^Invalid drain request: \(root\): /);
+  });
+
+  it("refuses resume while draining and still accepts pause", async () => {
+    const ctrl = controls();
+    await startServer({ controls: ctrl });
+    await sendControlRequest(socketPath, { cmd: "drain" });
+
+    const resumed = await sendControlRequest(socketPath, { cmd: "resume", agent: "all" });
+    const paused = await sendControlRequest(socketPath, { cmd: "pause", agent: "all" });
+
+    expect(resumed).toEqual({ ok: false, error: RESUME_WHILE_DRAINING });
+    expect(ctrl.monitor.resume).not.toHaveBeenCalled();
+    expect(ctrl.executor.resume).not.toHaveBeenCalled();
+    expect(paused).toEqual({ ok: true });
+  });
+
+  it("reports the drain in status once one is requested", async () => {
+    const ctrl = controls();
+    const store = new WorkerStatusStore();
+    const drain = new DrainController(
+      {
+        monitor: { pause: ctrl.monitor.pause, state: "pausing" },
+        executor: { pause: ctrl.executor.pause, state: "pausing" },
+      },
+      () => undefined,
+      (snapshot) => {
+        store.drainRequested(snapshot);
+      },
+    );
+    drains.push(drain);
+    await startServer({
+      controls: ctrl,
+      drain,
+      buildStatus: () => {
+        store.flush();
+        return buildControlStatus({
+          snapshot: store.getSnapshot(),
+          identity: buildIdentity(),
+          headless: true,
+        });
+      },
+    });
+
+    const idle = await rawRequest(socketPath, '{"cmd":"status"}\n');
+    const ack = await sendControlRequest(socketPath, { cmd: "drain", timeoutMs: 5_000 });
+    const draining = await sendControlRequest(socketPath, { cmd: "status" });
+
+    expect(idle).not.toContain('"drain"');
+    expect(ack.ok && draining.ok).toBe(true);
+    if (!ack.ok || !draining.ok) return;
+    expect(draining.data.drain).toEqual({
+      since: ack.data.since,
+      until: ack.data.until,
+      reason: "drain",
+    });
+    store.dispose();
   });
 
   it("rejects an unrecognized request without crashing", async () => {
