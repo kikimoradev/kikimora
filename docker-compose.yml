@@ -1,5 +1,5 @@
 services:
-  brownie:
+  kikimora:
     build:
       context: .
       target: runtime
@@ -12,12 +12,12 @@ services:
     volumes:
       - ./:/workspace
       - /var/run/docker.sock:/var/run/docker.sock
-      - brownie-home:/home/brownie
+      - kikimora-home:/home/kikimora
     environment:
       TZ: ${TZ:-UTC}
       CLAUDE_CODE_OAUTH_TOKEN: ${CLAUDE_CODE_OAUTH_TOKEN:-}
       ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
-      BROWNIE_CONTROL_SOCKET: ${BROWNIE_CONTROL_SOCKET:-}
+      KIKIMORA_CONTROL_SOCKET: ${KIKIMORA_CONTROL_SOCKET:-}
 
 volumes:
-  brownie-home:
+  kikimora-home:

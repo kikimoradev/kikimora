@@ -15,7 +15,7 @@ function tempSocketPath(): string {
   socketCounter += 1;
   return join(
     tmpdir(),
-    `brownie-client-test-${String(process.pid)}-${String(socketCounter)}.sock`,
+    `kikimora-client-test-${String(process.pid)}-${String(socketCounter)}.sock`,
   );
 }
 

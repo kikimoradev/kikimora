@@ -14,12 +14,12 @@ describe("detectInstallMethod", () => {
   });
 
   it("detects npm global installs", () => {
-    expect(detectInstallMethod("/usr/local/lib/node_modules/@brownie-labs/brownie")).toBe(
+    expect(detectInstallMethod("/usr/local/lib/node_modules/@kikimoradev/kikimora")).toBe(
       "npm",
     );
     expect(
       detectInstallMethod(
-        "/Users/me/.nvm/versions/node/v22.16.0/lib/node_modules/@brownie-labs/brownie",
+        "/Users/me/.nvm/versions/node/v22.16.0/lib/node_modules/@kikimoradev/kikimora",
       ),
     ).toBe("npm");
   });
@@ -27,17 +27,17 @@ describe("detectInstallMethod", () => {
   it("detects pnpm, yarn and bun by path segment", () => {
     expect(
       detectInstallMethod(
-        "/Users/me/Library/pnpm/global/5/node_modules/@brownie-labs/brownie",
+        "/Users/me/Library/pnpm/global/5/node_modules/@kikimoradev/kikimora",
       ),
     ).toBe("pnpm");
     expect(
       detectInstallMethod(
-        "/Users/me/.config/yarn/global/node_modules/@brownie-labs/brownie",
+        "/Users/me/.config/yarn/global/node_modules/@kikimoradev/kikimora",
       ),
     ).toBe("yarn");
     expect(
       detectInstallMethod(
-        "/Users/me/.bun/install/global/node_modules/@brownie-labs/brownie",
+        "/Users/me/.bun/install/global/node_modules/@kikimoradev/kikimora",
       ),
     ).toBe("bun");
   });
@@ -45,7 +45,7 @@ describe("detectInstallMethod", () => {
   it("handles windows-style separators", () => {
     expect(
       detectInstallMethod(
-        "C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@brownie-labs\\brownie",
+        "C:\\Users\\me\\AppData\\Roaming\\npm\\node_modules\\@kikimoradev\\kikimora",
       ),
     ).toBe("npm");
   });
@@ -90,12 +90,12 @@ describe("runInstall", () => {
       'console.log("ARGS:" + JSON.stringify(process.argv.slice(2)));\n',
     );
 
-    const result = await runInstall("npm", "@brownie-labs/brownie", {
+    const result = await runInstall("npm", "@kikimoradev/kikimora", {
       env: pathEnv(dir),
     });
 
     expect(result.ok).toBe(true);
-    expect(result.output).toContain('["install","-g","@brownie-labs/brownie@latest"]');
+    expect(result.output).toContain('["install","-g","@kikimoradev/kikimora@latest"]');
   });
 
   it("fails when the manager exits non-zero", async () => {

@@ -48,11 +48,11 @@ function recordLine(record: SessionRecord): string {
   return parts.join(" ");
 }
 
-function resolvePath(brownieDir: string, path: string): string {
-  return isAbsolute(path) ? path : join(brownieDir, path);
+function resolvePath(kikimoraDir: string, path: string): string {
+  return isAbsolute(path) ? path : join(kikimoraDir, path);
 }
 
-function renderSession(record: SessionRecord, brownieDir: string): string[] {
+function renderSession(record: SessionRecord, kikimoraDir: string): string[] {
   const lines = [`session   ${record.sessionId}`, `agent     ${record.agent}`];
   if (record.taskId !== undefined) lines.push(`task      ${record.taskId}`);
   if (record.cycle !== undefined) lines.push(`cycle     ${String(record.cycle)}`);
@@ -64,8 +64,8 @@ function renderSession(record: SessionRecord, brownieDir: string): string[] {
     lines.push(`cost      $${record.costUsd.toFixed(4)}`);
   }
   if (record.numTurns !== undefined) lines.push(`turns     ${String(record.numTurns)}`);
-  lines.push(`log       ${resolvePath(brownieDir, record.logPath)}`);
-  lines.push(`jsonl     ${resolvePath(brownieDir, record.jsonlPath)}`);
+  lines.push(`log       ${resolvePath(kikimoraDir, record.logPath)}`);
+  lines.push(`jsonl     ${resolvePath(kikimoraDir, record.jsonlPath)}`);
   return lines;
 }
 
@@ -131,10 +131,10 @@ export async function runSessionsShow(
     write(JSON.stringify(response.data, null, 2));
     return;
   }
-  const { brownieDir } = projectPaths(options.projectDir);
-  for (const line of renderSession(response.data, brownieDir)) write(line);
+  const { kikimoraDir } = projectPaths(options.projectDir);
+  for (const line of renderSession(response.data, kikimoraDir)) write(line);
   if (options.log !== true) return;
-  const path = resolvePath(brownieDir, response.data.logPath);
+  const path = resolvePath(kikimoraDir, response.data.logPath);
   try {
     write("");
     write(await readFile(path, "utf8"));

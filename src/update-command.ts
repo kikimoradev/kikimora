@@ -21,11 +21,11 @@ export async function runUpdate(options: UpdateOptions = {}): Promise<void> {
       process.exitCode = 1;
       break;
     case "up-to-date":
-      logger.success(`brownie is up to date (${outcome.from}).`);
+      logger.success(`kikimora is up to date (${outcome.from}).`);
       break;
     case "available":
       logger.info(`Update available: ${outcome.from} → ${outcome.to ?? "?"}.`);
-      logger.info('Run "brownie update" to install it.');
+      logger.info('Run "kikimora update" to install it.');
       break;
     case "unmanaged": {
       const manual = installCommand("npm", deps.name);
@@ -39,12 +39,12 @@ export async function runUpdate(options: UpdateOptions = {}): Promise<void> {
     }
     case "updated":
       logger.success(
-        `Updated brownie ${outcome.from} → ${outcome.to ?? "?"}. Restart to apply.`,
+        `Updated kikimora ${outcome.from} → ${outcome.to ?? "?"}. Restart to apply.`,
       );
       break;
     case "failed":
       logger.error(
-        `Failed to update brownie ${outcome.from} → ${outcome.to ?? "?"} ` +
+        `Failed to update kikimora ${outcome.from} → ${outcome.to ?? "?"} ` +
           `via ${outcome.method}.`,
       );
       if (outcome.output) logger.error(outcome.output);
@@ -57,7 +57,7 @@ export async function runUpdate(options: UpdateOptions = {}): Promise<void> {
 
 async function reportAutoUpdateState(): Promise<void> {
   if (isAutoUpdaterDisabled()) {
-    logger.info("Auto-update is disabled (BROWNIE_DISABLE_AUTOUPDATER).");
+    logger.info("Auto-update is disabled (KIKIMORA_DISABLE_AUTOUPDATER).");
     return;
   }
   const config = await loadGlobalConfig();
@@ -70,7 +70,7 @@ async function reportAutoUpdateState(): Promise<void> {
 export const updateCommand = defineCommand({
   meta: {
     name: "update",
-    description: "Check npm for a newer brownie and install it.",
+    description: "Check npm for a newer kikimora and install it.",
   },
   args: {
     check: {

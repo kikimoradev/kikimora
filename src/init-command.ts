@@ -110,7 +110,7 @@ export async function runInit(options: InitOptions = {}): Promise<void> {
     if (!interactive) {
       logger.error(
         "No prompt files given — pass --monitor-prompt and --executor-prompt, " +
-          "or run brownie init in an interactive terminal to use the wizard.",
+          "or run kikimora init in an interactive terminal to use the wizard.",
       );
       process.exitCode = 1;
       return;
@@ -167,14 +167,14 @@ export async function runInit(options: InitOptions = {}): Promise<void> {
     logger.success(`Saved ${paths.executorPromptFile}`);
   }
   if (inputs.extras.context !== undefined) logger.success(`Saved ${paths.contextFile}`);
-  logger.info("Run brownie in the project directory to start the worker.");
+  logger.info("Run kikimora in the project directory to start the worker.");
 }
 
 export const initCommand = defineCommand({
   meta: {
     name: "init",
     description:
-      "Set up .brownie/ for the current project — non-interactive with " +
+      "Set up .kikimora/ for the current project — non-interactive with " +
       "--monitor-prompt/--executor-prompt/--settings/--context, or via the " +
       "wizard in a terminal.",
   },
@@ -189,7 +189,7 @@ export const initCommand = defineCommand({
     },
     settings: {
       type: "string",
-      description: "Path to a JSON file to write as .brownie/settings.json",
+      description: "Path to a JSON file to write as .kikimora/settings.json",
     },
     context: {
       type: "string",

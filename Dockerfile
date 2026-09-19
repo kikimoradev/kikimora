@@ -8,9 +8,9 @@ RUN pnpm build && pnpm pack --pack-destination /out
 
 FROM node:22-bookworm-slim AS runtime
 ARG CLAUDE_CODE_VERSION=2.1.268
-LABEL org.opencontainers.image.source="https://github.com/brownie-labs/brownie" \
-      org.opencontainers.image.description="brownie worker with a pinned Claude Code CLI" \
-      ai.brownie.claude-code.version="${CLAUDE_CODE_VERSION}"
+LABEL org.opencontainers.image.source="https://github.com/kikimoradev/kikimora" \
+      org.opencontainers.image.description="kikimora worker with a pinned Claude Code CLI" \
+      dev.kikimora.claude-code.version="${CLAUDE_CODE_VERSION}"
 RUN apt-get update \
   && apt-get install -y --no-install-recommends ca-certificates curl gnupg \
   && install -m 0755 -d /etc/apt/keyrings \
@@ -39,28 +39,28 @@ COPY --from=build /out /tmp/pkg
 RUN npm install -g "@anthropic-ai/claude-code@${CLAUDE_CODE_VERSION}" /tmp/pkg/*.tgz \
   && rm -rf /tmp/pkg \
   && claude --version
-RUN useradd --create-home brownie
-USER brownie
+RUN useradd --create-home kikimora
+USER kikimora
 WORKDIR /workspace
-ENV BROWNIE_LOG_FORMAT=json \
+ENV KIKIMORA_LOG_FORMAT=json \
     DISABLE_AUTOUPDATER=1 \
-    BROWNIE_DISABLE_AUTOUPDATER=1
+    KIKIMORA_DISABLE_AUTOUPDATER=1
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s \
-  CMD brownie status --json >/dev/null || exit 1
-CMD ["brownie"]
+  CMD kikimora status --json >/dev/null || exit 1
+CMD ["kikimora"]
 
 FROM runtime AS browser
 ARG PLAYWRIGHT_MCP_VERSION=0.0.80
-LABEL ai.brownie.playwright-mcp.version="${PLAYWRIGHT_MCP_VERSION}"
+LABEL dev.kikimora.playwright-mcp.version="${PLAYWRIGHT_MCP_VERSION}"
 USER root
 ENV PLAYWRIGHT_BROWSERS_PATH=/opt/playwright \
     PLAYWRIGHT_MCP_BROWSER=chromium
 RUN npm install -g "@playwright/mcp@${PLAYWRIGHT_MCP_VERSION}" \
   && playwright-mcp install-browser --with-deps --no-shell chromium \
-  && chown -R brownie:brownie "${PLAYWRIGHT_BROWSERS_PATH}" \
+  && chown -R kikimora:kikimora "${PLAYWRIGHT_BROWSERS_PATH}" \
   && chmod -R a+rX "${PLAYWRIGHT_BROWSERS_PATH}" \
   && rm -rf /var/lib/apt/lists/* /root/.npm \
   && playwright-mcp --version
-USER brownie
+USER kikimora
 
 FROM runtime

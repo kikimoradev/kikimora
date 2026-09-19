@@ -18,7 +18,7 @@ import { projectPaths } from "./paths.js";
 import { parseVersion } from "./update/version.js";
 
 const INSTALL_HINT = "https://docs.claude.com/en/docs/claude-code/setup";
-const CONFIGURE_HINT = "run brownie in an interactive terminal to complete setup";
+const CONFIGURE_HINT = "run kikimora in an interactive terminal to complete setup";
 const FTS5_HINT =
   "this Node.js build ships node:sqlite without the FTS5 extension — use Node.js >= 22.16 from nodejs.org (or any build compiled with SQLITE_ENABLE_FTS5)";
 const LOGIN_HINT =
@@ -26,7 +26,7 @@ const LOGIN_HINT =
 const AUTH_UNVERIFIED_LABEL =
   "Claude Code login (not verified — `claude auth status` unavailable)";
 const MISSING_CLAUDE_HINT = `command "${COMMAND}" not found in PATH — install Claude Code: ${INSTALL_HINT}`;
-const MISSING_PLAYWRIGHT_HINT = `command "${PLAYWRIGHT_MCP_COMMAND}" not found in PATH — browser: true requires the -browser image (ghcr.io/brownie-labs/brownie:<version>-browser) or a global @playwright/mcp install`;
+const MISSING_PLAYWRIGHT_HINT = `command "${PLAYWRIGHT_MCP_COMMAND}" not found in PATH — browser: true requires the -browser image (ghcr.io/kikimoradev/kikimora:<version>-browser) or a global @playwright/mcp install`;
 const CLAUDE_PROBE_TIMEOUT_MS = 10_000;
 const CLAUDE_VERSION_LINE = /^\s*(\S+)\s*\(Claude Code\)/m;
 

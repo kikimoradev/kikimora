@@ -28,7 +28,7 @@ jobs:
         run: |
           VERSION=$(node -p "require('./package.json').version")
           echo "version=$VERSION" >> "$GITHUB_OUTPUT"
-          if npm view "@brownie-labs/brownie@$VERSION" version >/dev/null 2>&1; then
+          if npm view "@kikimoradev/kikimora@$VERSION" version >/dev/null 2>&1; then
             echo "published=true" >> "$GITHUB_OUTPUT"
           else
             echo "published=false" >> "$GITHUB_OUTPUT"

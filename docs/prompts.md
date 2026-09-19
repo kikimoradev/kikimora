@@ -1,15 +1,15 @@
 # Prompts
 
-The sprite's personality is split between the package and your project. **System prompts** define who each agent is and how it behaves — they ship with the npm package and you normally never touch them. **Project prompts** carry your business context: what to watch, where, and how to work on it — they live in `.brownie/prompts/` and are yours to write (the first-run wizard collects the first version — paste markdown straight into its editor, Enter adds a line, Ctrl+D submits). Later, view and edit them without leaving the dashboard: `/prompt monitor` or `/prompt executor` opens the same editor with the current file content — Ctrl+D saves (the next session already uses it, since the agents re-read the prompt files every cycle), Esc closes without saving. From a shell, `brownie prompt get|set <agent>` does the same ([docs/control.md](control.md)). Next to them lives an optional **context file** — what the workspace itself is: the repositories, the APIs, the machine. It is edited the same way (`/context`, or `brownie context get|set`) and both agents get it on top of their prompt.
+The sprite's personality is split between the package and your project. **System prompts** define who each agent is and how it behaves — they ship with the npm package and you normally never touch them. **Project prompts** carry your business context: what to watch, where, and how to work on it — they live in `.kikimora/prompts/` and are yours to write (the first-run wizard collects the first version — paste markdown straight into its editor, Enter adds a line, Ctrl+D submits). Later, view and edit them without leaving the dashboard: `/prompt monitor` or `/prompt executor` opens the same editor with the current file content — Ctrl+D saves (the next session already uses it, since the agents re-read the prompt files every cycle), Esc closes without saving. From a shell, `kikimora prompt get|set <agent>` does the same ([docs/control.md](control.md)). Next to them lives an optional **context file** — what the workspace itself is: the repositories, the APIs, the machine. It is edited the same way (`/context`, or `kikimora context get|set`) and both agents get it on top of their prompt.
 
-| File                                  | Lives in     | Role                                                              |
-| ------------------------------------- | ------------ | ----------------------------------------------------------------- |
-| `prompts/monitor.system.md`           | the package  | who the monitor is and how it decides what counts as a task       |
-| `prompts/executor.system.md`          | the package  | the executor's working rules                                      |
-| `prompts/summarizer.system.md`        | the package  | how to distill a session into findings worth remembering          |
-| `.brownie/prompts/monitor.prompt.md`  | your project | what the monitor should check on every patrol                     |
-| `.brownie/prompts/executor.prompt.md` | your project | the task template (the task description is appended at the end)   |
-| `.brownie/prompts/context.md`         | your project | optional: what the workspace is, appended to both project prompts |
+| File                                   | Lives in     | Role                                                              |
+| -------------------------------------- | ------------ | ----------------------------------------------------------------- |
+| `prompts/monitor.system.md`            | the package  | who the monitor is and how it decides what counts as a task       |
+| `prompts/executor.system.md`           | the package  | the executor's working rules                                      |
+| `prompts/summarizer.system.md`         | the package  | how to distill a session into findings worth remembering          |
+| `.kikimora/prompts/monitor.prompt.md`  | your project | what the monitor should check on every patrol                     |
+| `.kikimora/prompts/executor.prompt.md` | your project | the task template (the task description is appended at the end)   |
+| `.kikimora/prompts/context.md`         | your project | optional: what the workspace is, appended to both project prompts |
 
 ## How the prompts compose
 
@@ -20,7 +20,7 @@ The sprite's personality is split between the package and your project. **System
 
 ## Example: a repo caretaker
 
-`.brownie/prompts/monitor.prompt.md` — what to look for:
+`.kikimora/prompts/monitor.prompt.md` — what to look for:
 
 ```markdown
 # Monitor: acme-shop repository
@@ -41,7 +41,7 @@ Include in every description: the exact commands or links you used, the error
 output if any, and what "done" means for the task.
 ```
 
-`.brownie/prompts/executor.prompt.md` — how to work:
+`.kikimora/prompts/executor.prompt.md` — how to work:
 
 ```markdown
 # Executor: acme-shop repository
@@ -50,7 +50,7 @@ You work in the acme-shop repository (pnpm, TypeScript, vitest).
 
 Rules:
 
-- Create a branch `brownie/<task-id>` off `main` for every task.
+- Create a branch `kikimora/<task-id>` off `main` for every task.
 - Run `pnpm check` before committing; never commit red.
 - Open a pull request with `gh pr create` and a description of what you did
   and why. Never push to `main` directly and never merge PRs.

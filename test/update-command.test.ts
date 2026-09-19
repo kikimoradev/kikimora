@@ -11,7 +11,7 @@ const { logger } = await import("../src/logger.js");
 
 function buildDeps(overrides: Partial<UpdateDeps> = {}): UpdateDeps {
   return {
-    name: "@brownie-labs/brownie",
+    name: "@kikimoradev/kikimora",
     current: "0.2.0",
     fetchLatest: vi.fn().mockResolvedValue("0.3.0"),
     detect: vi.fn<() => InstallMethod>().mockReturnValue("npm"),
@@ -38,9 +38,9 @@ describe("runUpdate", () => {
     const deps = buildDeps();
     await runUpdate({ deps });
 
-    expect(deps.install).toHaveBeenCalledWith("npm", "@brownie-labs/brownie");
+    expect(deps.install).toHaveBeenCalledWith("npm", "@kikimoradev/kikimora");
     expect(logger.success).toHaveBeenCalledWith(
-      expect.stringContaining("Updated brownie 0.2.0 → 0.3.0"),
+      expect.stringContaining("Updated kikimora 0.2.0 → 0.3.0"),
     );
     expect(process.exitCode).toBe(savedExitCode);
   });
@@ -67,7 +67,7 @@ describe("runUpdate", () => {
 
     expect(process.exitCode).toBe(1);
     expect(logger.info).toHaveBeenCalledWith(
-      expect.stringContaining("npm install -g @brownie-labs/brownie@latest"),
+      expect.stringContaining("npm install -g @kikimoradev/kikimora@latest"),
     );
   });
 

@@ -1,5 +1,5 @@
 name: Bug report
-description: Something in brownie does not work as documented
+description: Something in kikimora does not work as documented
 labels: [bug]
 body:
   - type: textarea
@@ -20,12 +20,12 @@ body:
     id: logs
     attributes:
       label: Logs
-      description: Relevant output — headless line logs, a fragment of a session log from `.brownie/logs/`, or `brownie status --json`. Redact anything private.
+      description: Relevant output — headless line logs, a fragment of a session log from `.kikimora/logs/`, or `kikimora status --json`. Redact anything private.
       render: text
   - type: input
     id: version
     attributes:
-      label: Brownie version
+      label: Kikimora version
       placeholder: "0.1.0"
     validations:
       required: true

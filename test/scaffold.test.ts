@@ -63,7 +63,7 @@ describe("writeProjectScaffold", () => {
     expect(await readFile(paths.executorPromptFile, "utf8")).toBe("new executor\n");
   });
 
-  it("works when only .brownie exists without the prompts directory", async () => {
+  it("works when only .kikimora exists without the prompts directory", async () => {
     const paths = projectPaths(join(dir, "fresh"));
 
     await writeProjectScaffold(paths, {

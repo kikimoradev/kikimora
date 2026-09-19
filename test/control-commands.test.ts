@@ -87,12 +87,12 @@ describe("runStatus", () => {
     await runStatus({ write });
 
     expect(mocks.sendControlRequest).toHaveBeenCalledWith(
-      expect.stringContaining("brownie-"),
+      expect.stringContaining("kikimora-"),
       { cmd: "status" },
     );
     const output = lines.join("\n");
     expect(lines[0]).toBe(
-      "brownie 1.0.0 · claude 2.1.268 · auth oauth · pid 4242 · up 1h 30m · headless",
+      "kikimora 1.0.0 · claude 2.1.268 · auth oauth · pid 4242 · up 1h 30m · headless",
     );
     expect(output).toContain("project   /srv/project");
     expect(output).toContain("monitor   running  sleeping · until");
@@ -170,7 +170,7 @@ describe("runStatus", () => {
     await runStatus({ write });
 
     expect(lines[0]).toContain(
-      "brownie 1.0.0 · claude unknown · auth unknown · pid 4242",
+      "kikimora 1.0.0 · claude unknown · auth unknown · pid 4242",
     );
   });
 
@@ -185,7 +185,7 @@ describe("runStatus", () => {
     await runStatus({ write });
 
     expect(lines[0]).toBe(
-      "brownie 1.0.0 · claude unknown · auth unknown · pid 4242 · up 1h 30m · headless",
+      "kikimora 1.0.0 · claude unknown · auth unknown · pid 4242 · up 1h 30m · headless",
     );
     expect(lines).toHaveLength(6);
   });
@@ -205,7 +205,7 @@ describe("runStatus", () => {
     await runStatus({ write });
 
     expect(logger.error).toHaveBeenCalledWith(
-      "No brownie worker is running in this project.",
+      "No kikimora worker is running in this project.",
     );
     expect(process.exitCode).toBe(1);
     expect(lines).toEqual([]);
@@ -220,9 +220,9 @@ describe("runStatus", () => {
     expect(process.exitCode).toBe(1);
   });
 
-  it("talks to the socket named by BROWNIE_CONTROL_SOCKET", async () => {
+  it("talks to the socket named by KIKIMORA_CONTROL_SOCKET", async () => {
     const restoreEnv = snapshotEnv();
-    process.env.BROWNIE_CONTROL_SOCKET = "/run/brownie/control.sock";
+    process.env.KIKIMORA_CONTROL_SOCKET = "/run/kikimora/control.sock";
     mocks.sendControlRequest.mockResolvedValue({ ok: true, data: buildStatus() });
 
     try {
@@ -231,14 +231,14 @@ describe("runStatus", () => {
       restoreEnv();
     }
 
-    expect(mocks.sendControlRequest).toHaveBeenCalledWith("/run/brownie/control.sock", {
+    expect(mocks.sendControlRequest).toHaveBeenCalledWith("/run/kikimora/control.sock", {
       cmd: "status",
     });
   });
 
-  it("rejects an invalid BROWNIE_CONTROL_SOCKET before contacting the worker", async () => {
+  it("rejects an invalid KIKIMORA_CONTROL_SOCKET before contacting the worker", async () => {
     const restoreEnv = snapshotEnv();
-    process.env.BROWNIE_CONTROL_SOCKET = "relative/control.sock";
+    process.env.KIKIMORA_CONTROL_SOCKET = "relative/control.sock";
 
     try {
       await runStatus({ write });
@@ -248,7 +248,7 @@ describe("runStatus", () => {
 
     expect(mocks.sendControlRequest).not.toHaveBeenCalled();
     expect(logger.error).toHaveBeenCalledWith(
-      expect.stringContaining("BROWNIE_CONTROL_SOCKET must be an absolute path"),
+      expect.stringContaining("KIKIMORA_CONTROL_SOCKET must be an absolute path"),
     );
     expect(process.exitCode).toBe(1);
   });
@@ -299,7 +299,7 @@ describe("runVersion", () => {
       cmd: "version",
     });
     expect(lines).toEqual([
-      "brownie   1.0.0",
+      "kikimora   1.0.0",
       "claude    2.1.268",
       "node      22.16.0",
       "auth      apiKey",
@@ -335,7 +335,7 @@ describe("runVersion", () => {
     await runVersion({ write });
 
     expect(logger.error).toHaveBeenCalledWith(
-      "No brownie worker is running in this project.",
+      "No kikimora worker is running in this project.",
     );
     expect(process.exitCode).toBe(1);
     expect(lines).toEqual([]);
@@ -489,7 +489,7 @@ describe("runControlAction", () => {
     await runControlAction("resume", undefined);
 
     expect(logger.error).toHaveBeenCalledWith(
-      "No brownie worker is running in this project.",
+      "No kikimora worker is running in this project.",
     );
     expect(process.exitCode).toBe(1);
   });
@@ -591,7 +591,7 @@ describe("runDrain", () => {
     await runDrain({ json: true, write });
 
     expect(logger.error).toHaveBeenCalledWith(
-      "No brownie worker is running in this project.",
+      "No kikimora worker is running in this project.",
     );
     expect(process.exitCode).toBe(1);
     expect(lines).toEqual([]);

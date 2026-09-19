@@ -26,7 +26,7 @@ describe("Wizard", () => {
   it("collects both prompts across two steps", async () => {
     const { lastFrame, onComplete, type, unmount } = await wizard();
 
-    expect(lastFrame()).toContain("🧌 Brownie setup");
+    expect(lastFrame()).toContain("Kikimora setup");
     expect(lastFrame()).toContain("What should the monitor watch?");
     expect(lastFrame()).toContain("step 1/2");
 

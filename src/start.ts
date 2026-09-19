@@ -60,15 +60,15 @@ export async function startWorker(options: StartWorkerOptions = {}): Promise<voi
   }
 
   const sessions = SessionIndex.on(memory.connection);
-  const brownieDir = projectPaths(config.cwd).brownieDir;
+  const kikimoraDir = projectPaths(config.cwd).kikimoraDir;
   const recordSessionsOf = (log: SessionLog): SessionRecorder => ({
     started: (session) => {
       const paths = log.pathsFor(session.sessionId);
       if (paths === undefined) return;
       sessions.started({
         ...session,
-        logPath: relative(brownieDir, paths.log),
-        jsonlPath: relative(brownieDir, paths.jsonl),
+        logPath: relative(kikimoraDir, paths.log),
+        jsonlPath: relative(kikimoraDir, paths.jsonl),
       });
     },
     finished: (session) => {

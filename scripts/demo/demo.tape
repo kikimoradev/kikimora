@@ -11,12 +11,12 @@ Set Padding 12
 Set TypingSpeed 70ms
 
 Hide
-Type `REPO="$PWD"; export PATH="$REPO/scripts/demo:$PATH"; brownie() { HOME="$REPO/scripts/demo" node --no-warnings "$REPO/dist/index.js"; }; node scripts/demo/setup.mjs; cd scripts/demo/acme-shop; clear`
+Type `REPO="$PWD"; export PATH="$REPO/scripts/demo:$PATH"; kikimora() { HOME="$REPO/scripts/demo" node --no-warnings "$REPO/dist/index.js"; }; node scripts/demo/setup.mjs; cd scripts/demo/acme-shop; clear`
 Enter
 Sleep 1s
 Show
 
-Type "brownie"
+Type "kikimora"
 Sleep 500ms
 Enter
 Sleep 2.5s

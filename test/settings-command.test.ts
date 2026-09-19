@@ -114,7 +114,7 @@ describe("settings commands", () => {
     mocks.sendControlRequest.mockResolvedValue({
       ok: false,
       error:
-        "Invalid configuration (.brownie/settings.json):\n  - monitor.intervalMinutes: bad",
+        "Invalid configuration (.kikimora/settings.json):\n  - monitor.intervalMinutes: bad",
     });
 
     await runSettingsPatch('{"monitor":{"intervalMinutes":-1}}', { write });

@@ -59,7 +59,7 @@ export async function seedProject(
     executorPrompt = "execute\n",
     context,
   } = options;
-  const promptsDir = join(dir, ".brownie", "prompts");
+  const promptsDir = join(dir, ".kikimora", "prompts");
   await mkdir(promptsDir, { recursive: true });
   await writeFile(join(promptsDir, "monitor.prompt.md"), monitorPrompt, "utf8");
   await writeFile(join(promptsDir, "executor.prompt.md"), executorPrompt, "utf8");
@@ -69,7 +69,7 @@ export async function seedProject(
   if (settings !== false) {
     const raw =
       typeof settings === "string" ? settings : `${JSON.stringify(settings, null, 2)}\n`;
-    await writeFile(join(dir, ".brownie", "settings.json"), raw, "utf8");
+    await writeFile(join(dir, ".kikimora", "settings.json"), raw, "utf8");
   }
 }
 
@@ -365,7 +365,7 @@ export function authFailureResult(overrides: Partial<SessionResult> = {}): Sessi
   };
 }
 
-export const testDataDir = join(tmpdir(), `brownie-test-data-${String(process.pid)}`);
+export const testDataDir = join(tmpdir(), `kikimora-test-data-${String(process.pid)}`);
 
 export function buildAgentConfig(overrides: Partial<AgentConfig> = {}): AgentConfig {
   return {
@@ -424,13 +424,13 @@ export function buildConfig(overrides: Partial<WorkerConfig> = {}): WorkerConfig
     shutdownGraceMs: 0,
     mcpServers: {},
     cwd: process.cwd(),
-    settingsFilePath: join(process.cwd(), ".brownie", "settings.json"),
-    contextFilePath: join(process.cwd(), ".brownie", "prompts", "context.md"),
-    tasksFilePath: join(process.cwd(), ".brownie", "data", "tasks.json"),
-    memoryDbPath: join(process.cwd(), ".brownie", "data", "memory.db"),
+    settingsFilePath: join(process.cwd(), ".kikimora", "settings.json"),
+    contextFilePath: join(process.cwd(), ".kikimora", "prompts", "context.md"),
+    tasksFilePath: join(process.cwd(), ".kikimora", "data", "tasks.json"),
+    memoryDbPath: join(process.cwd(), ".kikimora", "data", "memory.db"),
     dataDir: testDataDir,
     playwrightOutputDir: join(testDataDir, "playwright"),
-    logsDir: join(process.cwd(), ".brownie", "logs"),
+    logsDir: join(process.cwd(), ".kikimora", "logs"),
     ...overrides,
   };
 }

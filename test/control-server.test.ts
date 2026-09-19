@@ -141,7 +141,7 @@ function tempSocketPath(): string {
   socketCounter += 1;
   return join(
     tmpdir(),
-    `brownie-test-${String(process.pid)}-${String(socketCounter)}.sock`,
+    `kikimora-test-${String(process.pid)}-${String(socketCounter)}.sock`,
   );
 }
 
@@ -432,7 +432,7 @@ describe("startControlServer", () => {
     const fakes = fakeDeps();
     fakes.settings.patch.mockRejectedValue(
       new Error(
-        "Invalid configuration (.brownie/settings.json):\n  - monitor.intervalMinutes: bad",
+        "Invalid configuration (.kikimora/settings.json):\n  - monitor.intervalMinutes: bad",
       ),
     );
     await startServer({ fakes });
@@ -689,7 +689,7 @@ describe("startControlServer", () => {
 
     expect(response).toEqual({
       ok: false,
-      error: "Prompt file for executor is missing — run brownie init.",
+      error: "Prompt file for executor is missing — run kikimora init.",
     });
   });
 
@@ -703,7 +703,7 @@ describe("startControlServer", () => {
   });
 
   it("creates the socket directory when it is missing", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "brownie-socket-dir-"));
+    const dir = await mkdtemp(join(tmpdir(), "kikimora-socket-dir-"));
     socketPath = join(dir, "nested", "control.sock");
 
     try {
@@ -719,14 +719,14 @@ describe("startControlServer", () => {
   });
 
   it("explains a socket that cannot be opened", async () => {
-    const dir = await mkdtemp(join(tmpdir(), "brownie-socket-dir-"));
+    const dir = await mkdtemp(join(tmpdir(), "kikimora-socket-dir-"));
     const blocker = join(dir, "not-a-directory");
     await writeFile(blocker, "", "utf8");
     socketPath = join(blocker, "control.sock");
 
     try {
       await expect(startServer()).rejects.toThrow(
-        /Cannot open the control socket .*control\.sock .*BROWNIE_CONTROL_SOCKET/,
+        /Cannot open the control socket .*control\.sock .*KIKIMORA_CONTROL_SOCKET/,
       );
     } finally {
       await rm(dir, { recursive: true, force: true });

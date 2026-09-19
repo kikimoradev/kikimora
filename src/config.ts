@@ -9,7 +9,7 @@ import { EFFORT_LEVELS, type WorkerConfig } from "./types.js";
 
 export const COMMAND = "claude";
 
-export const SETTINGS_PATH_LABEL = ".brownie/settings.json";
+export const SETTINGS_PATH_LABEL = ".kikimora/settings.json";
 
 const validatedString = (validate: (value: string) => unknown) =>
   z
@@ -139,7 +139,7 @@ export async function loadSettings(settingsFile: string): Promise<Settings> {
     raw = await readFile(settingsFile, "utf8");
   } catch (err) {
     throw new Error(
-      `settings file missing: ${settingsFile} — run brownie in an interactive terminal to complete setup`,
+      `settings file missing: ${settingsFile} — run kikimora in an interactive terminal to complete setup`,
       { cause: err },
     );
   }
@@ -192,17 +192,17 @@ export function resolvePromptPaths(dirs: ConfigDirs = {}): WorkerPromptPaths {
 
 export const PROMPT_FILE_LABELS = {
   monitor: {
-    promptPath: "monitor prompt file (.brownie/prompts/monitor.prompt.md)",
-    systemPromptPath: "monitor system prompt file (bundled with brownie)",
+    promptPath: "monitor prompt file (.kikimora/prompts/monitor.prompt.md)",
+    systemPromptPath: "monitor system prompt file (bundled with kikimora)",
   },
   executor: {
-    promptPath: "executor prompt file (.brownie/prompts/executor.prompt.md)",
-    systemPromptPath: "executor system prompt file (bundled with brownie)",
+    promptPath: "executor prompt file (.kikimora/prompts/executor.prompt.md)",
+    systemPromptPath: "executor system prompt file (bundled with kikimora)",
   },
   summarizer: {
-    systemPromptPath: "summarizer system prompt file (bundled with brownie)",
+    systemPromptPath: "summarizer system prompt file (bundled with kikimora)",
   },
-  contextPath: "context file (.brownie/prompts/context.md, optional)",
+  contextPath: "context file (.kikimora/prompts/context.md, optional)",
 } as const;
 
 async function assertPromptPathsReadable(paths: WorkerPromptPaths): Promise<void> {

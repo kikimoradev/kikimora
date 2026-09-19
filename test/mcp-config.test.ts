@@ -74,7 +74,7 @@ describe("composeMcpConfig", () => {
     const dir = await createTempDir();
     try {
       const realEntry = join(dir, "entry.js");
-      const link = join(dir, "brownie");
+      const link = join(dir, "kikimora");
       await writeFile(realEntry, "", "utf8");
       await symlink(realEntry, link);
 

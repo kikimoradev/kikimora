@@ -41,10 +41,10 @@ describe("runConfigure", () => {
   beforeEach(async () => {
     dir = await createTempDir();
     io = fakeStdio();
-    settingsPath = join(dir, ".brownie", "settings.json");
-    gitignorePath = join(dir, ".brownie", ".gitignore");
-    monitorPromptPath = join(dir, ".brownie", "prompts", "monitor.prompt.md");
-    executorPromptPath = join(dir, ".brownie", "prompts", "executor.prompt.md");
+    settingsPath = join(dir, ".kikimora", "settings.json");
+    gitignorePath = join(dir, ".kikimora", ".gitignore");
+    monitorPromptPath = join(dir, ".kikimora", "prompts", "monitor.prompt.md");
+    executorPromptPath = join(dir, ".kikimora", "prompts", "executor.prompt.md");
   });
 
   afterEach(async () => {
@@ -193,7 +193,7 @@ describe("isConfigured", () => {
 
   it("returns false when a prompt file is missing", async () => {
     await seedProject(dir);
-    await rm(join(dir, ".brownie", "prompts", "executor.prompt.md"));
+    await rm(join(dir, ".kikimora", "prompts", "executor.prompt.md"));
     expect(isConfigured(dir)).toBe(false);
   });
 

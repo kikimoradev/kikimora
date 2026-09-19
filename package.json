@@ -1,5 +1,5 @@
 {
-  "name": "@brownie-labs/brownie",
+  "name": "@kikimoradev/kikimora",
   "version": "0.7.0",
   "description": "Autonomous two-agent Claude Code worker: a monitor that finds tasks, an executor that completes them, and long-term memory in between",
   "type": "module",
@@ -7,10 +7,10 @@
   "author": "Dawid Ch\u0142odnicki",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/brownie-labs/brownie.git"
+    "url": "git+https://github.com/kikimoradev/kikimora.git"
   },
-  "homepage": "https://github.com/brownie-labs/brownie#readme",
-  "bugs": "https://github.com/brownie-labs/brownie/issues",
+  "homepage": "https://github.com/kikimoradev/kikimora#readme",
+  "bugs": "https://github.com/kikimoradev/kikimora/issues",
   "keywords": [
     "claude-code",
     "claude",
@@ -24,7 +24,7 @@
     "anthropic"
   ],
   "bin": {
-    "brownie": "dist/index.js"
+    "kikimora": "dist/index.js"
   },
   "files": [
     "dist",

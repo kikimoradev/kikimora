@@ -42,7 +42,7 @@ function harness(options: {
     emit: vi.fn<HeadlessLogEmitter>(),
     controller,
     deps: {
-      name: "@brownie-labs/brownie",
+      name: "@kikimoradev/kikimora",
       current: "0.2.0",
       fetchLatest,
       detect: vi.fn<() => InstallMethod>().mockReturnValue(method),
@@ -154,7 +154,7 @@ describe("runAutoUpdateLoop", () => {
       emit: h.emit,
       signal: h.controller.signal,
       intervalMs: 1,
-      env: { BROWNIE_DISABLE_AUTOUPDATER: "1" },
+      env: { KIKIMORA_DISABLE_AUTOUPDATER: "1" },
     });
 
     expect(h.fetchLatest).not.toHaveBeenCalled();

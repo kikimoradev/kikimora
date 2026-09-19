@@ -3,7 +3,7 @@ import { mkdir, writeFile } from "node:fs/promises";
 import { createContextFileAccess } from "./context-file.js";
 import type { ProjectPaths } from "./paths.js";
 
-const BROWNIE_GITIGNORE = "data/\nlogs/\n";
+const KIKIMORA_GITIGNORE = "data/\nlogs/\n";
 
 export interface ProjectPrompts {
   monitorPrompt: string;
@@ -43,7 +43,7 @@ export async function writeProjectScaffold(
   }
 
   if (!existsSync(paths.gitignoreFile)) {
-    await writeFile(paths.gitignoreFile, BROWNIE_GITIGNORE, "utf8");
+    await writeFile(paths.gitignoreFile, KIKIMORA_GITIGNORE, "utf8");
   }
 
   return { wroteSettings };

@@ -8,17 +8,17 @@ Only the latest release receives security fixes.
 
 Please do not report security issues in public GitHub issues.
 
-Use [GitHub private vulnerability reporting](https://github.com/brownie-labs/brownie/security/advisories/new) to report privately. You will get a response within 7 days; fixes for confirmed vulnerabilities are released as fast as severity demands.
+Use [GitHub private vulnerability reporting](https://github.com/kikimoradev/kikimora/security/advisories/new) to report privately. You will get a response within 7 days; fixes for confirmed vulnerabilities are released as fast as severity demands.
 
 ## Threat model
 
-Brownie deliberately runs Claude Code sessions with `--permission-mode bypassPermissions` and full tool access in the directory it is started from. There is no sandbox — the prompts are the safety boundary, and the operator chooses what the agents may touch. That design is documented in the README and is not itself a vulnerability.
+Kikimora deliberately runs Claude Code sessions with `--permission-mode bypassPermissions` and full tool access in the directory it is started from. There is no sandbox — the prompts are the safety boundary, and the operator chooses what the agents may touch. That design is documented in the README and is not itself a vulnerability.
 
 **In scope** — examples of what we want to hear about:
 
 - another local user being able to read or control a running worker (control socket, log files, task store)
-- brownie itself writing credentials or other secrets somewhere unexpected (logs, memory database, task files)
-- a crafted project or configuration escaping the documented `.brownie/` layout (path traversal, symlink tricks)
+- kikimora itself writing credentials or other secrets somewhere unexpected (logs, memory database, task files)
+- a crafted project or configuration escaping the documented `.kikimora/` layout (path traversal, symlink tricks)
 - the MCP memory server exposing more than the `memory_search` / `memory_get` contract
 
 **Out of scope**:

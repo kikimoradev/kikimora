@@ -2,7 +2,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import {
-  BROWNIE_DIR_NAME,
+  KIKIMORA_DIR_NAME,
   CONTROL_SOCKET_ENV,
   controlSocketPath,
   InvalidControlSocketPathError,
@@ -14,24 +14,24 @@ import {
 import { snapshotEnv } from "./helpers.js";
 
 describe("projectPaths", () => {
-  it("derives the full .brownie layout from the project directory", () => {
+  it("derives the full .kikimora layout from the project directory", () => {
     const paths = projectPaths("/proj");
-    const brownieDir = join("/proj", BROWNIE_DIR_NAME);
+    const kikimoraDir = join("/proj", KIKIMORA_DIR_NAME);
     expect(paths).toEqual({
       projectDir: "/proj",
-      brownieDir,
-      settingsFile: join(brownieDir, "settings.json"),
-      promptsDir: join(brownieDir, "prompts"),
-      monitorPromptFile: join(brownieDir, "prompts", "monitor.prompt.md"),
-      executorPromptFile: join(brownieDir, "prompts", "executor.prompt.md"),
-      contextFile: join(brownieDir, "prompts", "context.md"),
-      dataDir: join(brownieDir, "data"),
-      tasksFile: join(brownieDir, "data", "tasks.json"),
-      memoryDbFile: join(brownieDir, "data", "memory.db"),
-      mcpDir: join(brownieDir, "data", "mcp"),
-      playwrightOutputDir: join(brownieDir, "data", "playwright"),
-      logsDir: join(brownieDir, "logs"),
-      gitignoreFile: join(brownieDir, ".gitignore"),
+      kikimoraDir,
+      settingsFile: join(kikimoraDir, "settings.json"),
+      promptsDir: join(kikimoraDir, "prompts"),
+      monitorPromptFile: join(kikimoraDir, "prompts", "monitor.prompt.md"),
+      executorPromptFile: join(kikimoraDir, "prompts", "executor.prompt.md"),
+      contextFile: join(kikimoraDir, "prompts", "context.md"),
+      dataDir: join(kikimoraDir, "data"),
+      tasksFile: join(kikimoraDir, "data", "tasks.json"),
+      memoryDbFile: join(kikimoraDir, "data", "memory.db"),
+      mcpDir: join(kikimoraDir, "data", "mcp"),
+      playwrightOutputDir: join(kikimoraDir, "data", "playwright"),
+      logsDir: join(kikimoraDir, "logs"),
+      gitignoreFile: join(kikimoraDir, ".gitignore"),
     });
   });
 
@@ -67,7 +67,7 @@ describe("controlSocketPath", () => {
     const second = controlSocketPath("/proj");
     expect(first).toBe(second);
     expect(first).not.toContain("/proj");
-    expect(first).toMatch(/brownie-\d+-[0-9a-f]{16}\.sock$/);
+    expect(first).toMatch(/kikimora-\d+-[0-9a-f]{16}\.sock$/);
   });
 
   it("gives different projects different sockets", () => {
@@ -86,15 +86,15 @@ describe("controlSocketPath", () => {
 
   it("uses a named pipe on Windows", () => {
     expect(controlSocketPath("/proj", { platform: "win32", env: {} })).toMatch(
-      /^\\\\\.\\pipe\\brownie-\d+-[0-9a-f]{16}$/,
+      /^\\\\\.\\pipe\\kikimora-\d+-[0-9a-f]{16}$/,
     );
   });
 
   describe(`${CONTROL_SOCKET_ENV} override`, () => {
     it("returns an absolute override verbatim regardless of the project", () => {
-      const env = { [CONTROL_SOCKET_ENV]: "/run/brownie/control.sock" };
-      expect(controlSocketPath("/proj-a", { env })).toBe("/run/brownie/control.sock");
-      expect(controlSocketPath("/proj-b", { env })).toBe("/run/brownie/control.sock");
+      const env = { [CONTROL_SOCKET_ENV]: "/run/kikimora/control.sock" };
+      expect(controlSocketPath("/proj-a", { env })).toBe("/run/kikimora/control.sock");
+      expect(controlSocketPath("/proj-b", { env })).toBe("/run/kikimora/control.sock");
     });
 
     it("treats an empty or blank value as unset", () => {
@@ -122,17 +122,17 @@ describe("controlSocketPath", () => {
     });
 
     it("passes a named pipe through unvalidated on Windows", () => {
-      const env = { [CONTROL_SOCKET_ENV]: "\\\\.\\pipe\\brownie-custom" };
+      const env = { [CONTROL_SOCKET_ENV]: "\\\\.\\pipe\\kikimora-custom" };
       expect(controlSocketPath("/proj", { env, platform: "win32" })).toBe(
-        "\\\\.\\pipe\\brownie-custom",
+        "\\\\.\\pipe\\kikimora-custom",
       );
     });
 
     it("reads the real environment by default", () => {
       const restoreEnv = snapshotEnv();
-      process.env[CONTROL_SOCKET_ENV] = "/tmp/brownie-env-test.sock";
+      process.env[CONTROL_SOCKET_ENV] = "/tmp/kikimora-env-test.sock";
       try {
-        expect(controlSocketPath("/proj")).toBe("/tmp/brownie-env-test.sock");
+        expect(controlSocketPath("/proj")).toBe("/tmp/kikimora-env-test.sock");
       } finally {
         restoreEnv();
       }

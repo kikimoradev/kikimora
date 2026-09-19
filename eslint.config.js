@@ -6,7 +6,7 @@ import prettier from "eslint-config-prettier";
 
 export default defineConfig(
   {
-    ignores: ["dist/", "coverage/", ".brownie/", "node_modules/", "scripts/"],
+    ignores: ["dist/", "coverage/", ".kikimora/", "node_modules/", "scripts/"],
   },
   js.configs.recommended,
   tseslint.configs.strictTypeChecked,

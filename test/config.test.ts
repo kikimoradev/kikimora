@@ -259,27 +259,27 @@ describe("loadSettings", () => {
 });
 
 describe("resolvePromptPaths", () => {
-  it("resolves project prompts under .brownie and system prompts from the given dir", () => {
+  it("resolves project prompts under .kikimora and system prompts from the given dir", () => {
     const paths = resolvePromptPaths({
       projectDir: "/proj",
       systemPromptsDir: "/sys",
     });
     expect(paths.monitor.promptPath).toBe(
-      join("/proj", ".brownie", "prompts", "monitor.prompt.md"),
+      join("/proj", ".kikimora", "prompts", "monitor.prompt.md"),
     );
     expect(paths.monitor.systemPromptPath).toBe(join("/sys", "monitor.system.md"));
     expect(paths.executor.promptPath).toBe(
-      join("/proj", ".brownie", "prompts", "executor.prompt.md"),
+      join("/proj", ".kikimora", "prompts", "executor.prompt.md"),
     );
     expect(paths.executor.systemPromptPath).toBe(join("/sys", "executor.system.md"));
     expect(paths.summarizer.systemPromptPath).toBe(join("/sys", "summarizer.system.md"));
-    expect(paths.contextPath).toBe(join("/proj", ".brownie", "prompts", "context.md"));
+    expect(paths.contextPath).toBe(join("/proj", ".kikimora", "prompts", "context.md"));
   });
 
   it("defaults to process.cwd() and the packaged prompts directory", () => {
     const paths = resolvePromptPaths();
     expect(paths.monitor.promptPath).toBe(
-      join(process.cwd(), ".brownie", "prompts", "monitor.prompt.md"),
+      join(process.cwd(), ".kikimora", "prompts", "monitor.prompt.md"),
     );
     expect(paths.monitor.systemPromptPath).toBe(
       join(packagePromptsDir, "monitor.system.md"),
@@ -329,7 +329,7 @@ describe("loadWorkerConfig", () => {
     expect(config.monitor.intervalMs).toBe(60_000);
     expect(config.monitor.sessionTimeoutMs).toBe(120_000);
     expect(config.monitor.promptPath).toBe(
-      join(dir, ".brownie", "prompts", "monitor.prompt.md"),
+      join(dir, ".kikimora", "prompts", "monitor.prompt.md"),
     );
     expect(config.monitor.systemPromptPath).toBe(
       join(systemPromptsDir, "monitor.system.md"),
@@ -338,12 +338,12 @@ describe("loadWorkerConfig", () => {
     expect(config.executor.effort).toBe("max");
     expect(config.summarizer.sessionTimeoutMs).toBe(90_000);
     expect(config.cwd).toBe(dir);
-    expect(config.settingsFilePath).toBe(join(dir, ".brownie", "settings.json"));
-    expect(config.tasksFilePath).toBe(join(dir, ".brownie", "data", "tasks.json"));
-    expect(config.memoryDbPath).toBe(join(dir, ".brownie", "data", "memory.db"));
-    expect(config.dataDir).toBe(join(dir, ".brownie", "data"));
-    expect(config.playwrightOutputDir).toBe(join(dir, ".brownie", "data", "playwright"));
-    expect(config.logsDir).toBe(join(dir, ".brownie", "logs"));
+    expect(config.settingsFilePath).toBe(join(dir, ".kikimora", "settings.json"));
+    expect(config.tasksFilePath).toBe(join(dir, ".kikimora", "data", "tasks.json"));
+    expect(config.memoryDbPath).toBe(join(dir, ".kikimora", "data", "memory.db"));
+    expect(config.dataDir).toBe(join(dir, ".kikimora", "data"));
+    expect(config.playwrightOutputDir).toBe(join(dir, ".kikimora", "data", "playwright"));
+    expect(config.logsDir).toBe(join(dir, ".kikimora", "logs"));
     expect(config.streamPartial).toBe(true);
     expect(config.shutdownGraceMs).toBe(0);
     expect(config.monitor.schedule).toBeNull();
@@ -381,7 +381,7 @@ describe("loadWorkerConfig", () => {
 
   it("throws when any prompt file is missing", async () => {
     await seedProject(dir);
-    await removeTempDir(join(dir, ".brownie", "prompts", "executor.prompt.md"));
+    await removeTempDir(join(dir, ".kikimora", "prompts", "executor.prompt.md"));
 
     await expect(loadWorkerConfig(dirs())).rejects.toThrow(/executor prompt file/);
   });

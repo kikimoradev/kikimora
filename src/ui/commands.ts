@@ -168,7 +168,7 @@ export const COMMANDS: readonly CommandSpec[] = [
         return;
       }
       if (ctx.drain.snapshot !== undefined) {
-        ctx.notice("draining — brownie exits after the current session", "error");
+        ctx.notice("draining — kikimora exits after the current session", "error");
         return;
       }
       const started = agents.filter((agent) => agentControl(ctx, agent).resume());
@@ -374,20 +374,20 @@ export const COMMANDS: readonly CommandSpec[] = [
   },
   {
     name: "drain",
-    summary: "let the current sessions finish, then shut down brownie",
+    summary: "let the current sessions finish, then shut down kikimora",
     run: (_args, ctx) => {
       const alreadyDraining = ctx.drain.snapshot !== undefined;
       ctx.drain.request("drain", undefined);
       ctx.notice(
         alreadyDraining
-          ? "already draining — brownie exits after the current session"
-          : "draining — brownie exits after the current session",
+          ? "already draining — kikimora exits after the current session"
+          : "draining — kikimora exits after the current session",
       );
     },
   },
   {
     name: "exit",
-    summary: "shut down brownie gracefully",
+    summary: "shut down kikimora gracefully",
     run: (_args, ctx) => {
       ctx.requestExit();
     },

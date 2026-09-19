@@ -3,12 +3,12 @@ import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
 const demoDir = resolve(dirname(fileURLToPath(import.meta.url)), "acme-shop");
-const brownieDir = join(demoDir, ".brownie");
+const kikimoraDir = join(demoDir, ".kikimora");
 
-rmSync(join(brownieDir, "data"), { recursive: true, force: true });
-rmSync(join(brownieDir, "logs"), { recursive: true, force: true });
-rmSync(join(brownieDir, "prompts"), { recursive: true, force: true });
-mkdirSync(brownieDir, { recursive: true });
+rmSync(join(kikimoraDir, "data"), { recursive: true, force: true });
+rmSync(join(kikimoraDir, "logs"), { recursive: true, force: true });
+rmSync(join(kikimoraDir, "prompts"), { recursive: true, force: true });
+mkdirSync(kikimoraDir, { recursive: true });
 
 const settings = {
   monitor: { model: "sonnet", intervalMinutes: 5 },
@@ -17,9 +17,9 @@ const settings = {
 };
 
 writeFileSync(
-  join(brownieDir, "settings.json"),
+  join(kikimoraDir, "settings.json"),
   `${JSON.stringify(settings, null, 2)}\n`,
 );
-writeFileSync(join(brownieDir, ".gitignore"), "data/\nlogs/\n");
+writeFileSync(join(kikimoraDir, ".gitignore"), "data/\nlogs/\n");
 
 console.log(`Demo project ready: ${demoDir}`);
