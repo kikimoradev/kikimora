@@ -50,9 +50,7 @@ export function Header({ config, version, status, now }: HeaderProps): JSX.Eleme
       <HeaderLine
         left={
           <Text wrap="truncate-end">
-            <Text color={theme.accent} bold>
-              {"Kikimora"}
-            </Text>
+            <Text bold>{"Kikimora"}</Text>
             <Text color={theme.muted}>{` v${version}`}</Text>
           </Text>
         }
@@ -88,7 +86,7 @@ export function Header({ config, version, status, now }: HeaderProps): JSX.Eleme
         </Text>
       )}
       {status.update === undefined ? null : (
-        <Text color={theme.accent} wrap="truncate-end">
+        <Text color={theme.info} wrap="truncate-end">
           {status.update.state === "installed"
             ? `⬆ updated to v${status.update.to} — restart to apply`
             : `⬆ update available v${status.update.from} → v${status.update.to} — run "kikimora update"`}

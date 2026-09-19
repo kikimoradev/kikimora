@@ -2,7 +2,6 @@ import { Box, Text } from "ink";
 import type { JSX } from "react";
 import { useState } from "react";
 import { PromptEditor } from "./prompt-editor.js";
-import { theme } from "./theme.js";
 
 export interface WizardResult {
   monitorPrompt: string;
@@ -30,9 +29,7 @@ export function Wizard({
   return (
     <Box flexDirection="column" gap={1}>
       <Text wrap="wrap">
-        <Text color={theme.accent} bold>
-          {"Kikimora setup"}
-        </Text>
+        <Text bold>{"Kikimora setup"}</Text>
         <Text dimColor>{` — ${INTRO}`}</Text>
       </Text>
       {step === "monitor" ? (

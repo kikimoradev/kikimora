@@ -97,7 +97,7 @@ function TailRow({ row }: { row: TailRowSpec }): JSX.Element {
       if (first && line.cont !== true) {
         return (
           <Text wrap="truncate-end">
-            <Text color={theme.accent}>{"⏺ "}</Text>
+            <Text>{"⏺ "}</Text>
             {chunk}
           </Text>
         );
@@ -107,7 +107,7 @@ function TailRow({ row }: { row: TailRowSpec }): JSX.Element {
       if (first) {
         return (
           <Text wrap="truncate-end">
-            <Text color={theme.accent}>{"⏺ "}</Text>
+            <Text>{"⏺ "}</Text>
             <Text bold>{line.tool ?? "?"}</Text>
             {chunk ? <Text dimColor>{`(${chunk}`}</Text> : null}
           </Text>

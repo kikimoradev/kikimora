@@ -196,14 +196,9 @@ export function PromptEditor({
 
   return (
     <Box flexDirection="column">
-      <Box
-        borderStyle="round"
-        borderColor={theme.accent}
-        paddingX={1}
-        flexDirection="column"
-      >
+      <Box borderStyle="round" paddingX={1} flexDirection="column">
         <Box justifyContent="space-between" gap={2}>
-          <Text color={theme.accent} bold wrap="truncate-end">
+          <Text bold wrap="truncate-end">
             {title}
           </Text>
           {step === undefined ? null : <Text dimColor>{`step ${step}`}</Text>}

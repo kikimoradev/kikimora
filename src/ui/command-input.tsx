@@ -14,7 +14,7 @@ export function CommandInput({ value, cursor }: CommandInputProps): JSX.Element 
   return (
     <Box borderStyle="round" borderColor={theme.muted} paddingX={1}>
       <Text wrap="truncate-end">
-        <Text color={theme.accent}>{"> "}</Text>
+        <Text bold>{"> "}</Text>
         {before}
         <Text inverse>{at === "" ? " " : at}</Text>
         {after}

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The dashboard and the setup wizard are black and white. Color marks states only: green for done and successful, yellow for pending and warnings, red for failures, cyan for work in progress. A task count of zero is gray.
+
 ## [0.8.0] - 2026-09-19
 
 ### Changed

@@ -1,7 +1,7 @@
 export const theme = {
-  accent: "#4CAF50",
   ok: "green",
   warn: "yellow",
   error: "red",
+  info: "cyan",
   muted: "gray",
 } as const;
