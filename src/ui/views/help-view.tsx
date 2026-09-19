@@ -51,7 +51,7 @@ function HelpColumn({
       <Text bold>{title}</Text>
       {rows.slice(0, capacity).map((row, index) => (
         <Text key={index} wrap="truncate-end">
-          <Text color={theme.accent}>{row.label}</Text>
+          <Text bold>{row.label}</Text>
           <Text dimColor>{row.text}</Text>
         </Text>
       ))}

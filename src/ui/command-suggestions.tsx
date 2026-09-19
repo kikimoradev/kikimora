@@ -1,7 +1,6 @@
 import { Box, Text } from "ink";
 import type { JSX } from "react";
 import type { CommandSuggestion } from "./commands.js";
-import { theme } from "./theme.js";
 
 export const SUGGESTION_WINDOW = 10;
 
@@ -36,13 +35,9 @@ export function CommandSuggestions({
         const active = index === selected;
         return (
           <Text key={item.name} wrap="truncate-end">
-            <Text color={active ? theme.accent : theme.muted}>
-              {active ? "❯ " : "  "}
-            </Text>
-            <Text color={theme.accent} bold>
-              {head}
-            </Text>
-            {active ? <Text color={theme.accent}>{tail}</Text> : <Text>{tail}</Text>}
+            <Text dimColor={!active}>{active ? "❯ " : "  "}</Text>
+            <Text bold>{head}</Text>
+            {active ? <Text bold>{tail}</Text> : <Text>{tail}</Text>}
             <Text>{"  "}</Text>
             <Text dimColor={!active}>{item.summary}</Text>
           </Text>

@@ -2,6 +2,7 @@ import { Box, Text } from "ink";
 import type { JSX } from "react";
 import type { Task, TaskStatus } from "../types.js";
 import { formatAge } from "./format.js";
+import { theme } from "./theme.js";
 
 const STATUS_ORDER: Record<TaskStatus, number> = {
   in_progress: 0,
@@ -20,11 +21,11 @@ const STATUS_LABELS: Record<TaskStatus, string> = {
 };
 
 const STATUS_COLORS: Record<TaskStatus, string> = {
-  pending: "yellow",
-  in_progress: "cyan",
-  done: "green",
-  failed: "red",
-  cancelled: "gray",
+  pending: theme.warn,
+  in_progress: theme.info,
+  done: theme.ok,
+  failed: theme.error,
+  cancelled: theme.muted,
 };
 
 function sortTasks(tasks: readonly Task[]): Task[] {
@@ -51,6 +52,21 @@ export interface TaskTableProps {
   now: number;
 }
 
+interface StatusCountProps {
+  tasks: readonly Task[];
+  status: TaskStatus;
+  label: string;
+}
+
+function StatusCount({ tasks, status, label }: StatusCountProps): JSX.Element {
+  const count = countByStatus(tasks, status);
+  return count === 0 ? (
+    <Text color={theme.muted}>{`${label}: 0`}</Text>
+  ) : (
+    <Text color={STATUS_COLORS[status]}>{`${label}: ${String(count)}`}</Text>
+  );
+}
+
 export function TaskTable({ tasks, height, now }: TaskTableProps): JSX.Element {
   const maxRows = Math.max(1, height - 3);
   const sorted = sortTasks(tasks);
@@ -59,7 +75,7 @@ export function TaskTable({ tasks, height, now }: TaskTableProps): JSX.Element {
   return (
     <Box
       borderStyle="round"
-      borderColor="gray"
+      borderColor={theme.muted}
       flexDirection="column"
       paddingX={1}
       height={height}
@@ -67,13 +83,13 @@ export function TaskTable({ tasks, height, now }: TaskTableProps): JSX.Element {
     >
       <Text bold wrap="truncate-end">
         {"Tasks  "}
-        <Text color="yellow">pending: {countByStatus(tasks, "pending")}</Text>
+        <StatusCount tasks={tasks} status="pending" label="pending" />
         {" · "}
-        <Text color="cyan">in progress: {countByStatus(tasks, "in_progress")}</Text>
+        <StatusCount tasks={tasks} status="in_progress" label="in progress" />
         {" · "}
-        <Text color="green">done: {countByStatus(tasks, "done")}</Text>
+        <StatusCount tasks={tasks} status="done" label="done" />
         {" · "}
-        <Text color="red">failed: {countByStatus(tasks, "failed")}</Text>
+        <StatusCount tasks={tasks} status="failed" label="failed" />
       </Text>
       {tasks.length === 0 ? <Text dimColor>no tasks</Text> : null}
       {visible.map((task) => {

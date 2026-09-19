@@ -71,7 +71,7 @@ export function phaseColor(kind: string): string {
   switch (kind) {
     case "session":
     case "summary":
-      return theme.accent;
+      return theme.info;
     case "backoff":
     case "limitWait":
       return theme.warn;

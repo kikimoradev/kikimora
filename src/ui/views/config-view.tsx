@@ -121,7 +121,7 @@ export function ConfigView({ config, height }: ConfigViewProps): JSX.Element {
           </Text>
         ) : (
           <Text key={index} wrap="truncate-end">
-            <Text color={theme.accent}>{`  ${line.label.padEnd(LABEL_WIDTH)}`}</Text>
+            <Text bold>{`  ${line.label.padEnd(LABEL_WIDTH)}`}</Text>
             <Text>{line.value}</Text>
           </Text>
         ),
