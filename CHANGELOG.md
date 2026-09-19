@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.1] - 2026-09-19
+
 ### Changed
 
 - The dashboard and the setup wizard are black and white. Color marks states only: green for done and successful, yellow for pending and warnings, red for failures, cyan for work in progress. A task count of zero is gray.
@@ -196,7 +198,8 @@ Initial release.
 - Non-interactive `kikimora init` for provisioning, plus a first-run wizard in the terminal.
 - Reference `Dockerfile` and `docker-compose.yml`.
 
-[Unreleased]: https://github.com/kikimoradev/kikimora/compare/v0.8.0...HEAD
+[Unreleased]: https://github.com/kikimoradev/kikimora/compare/v0.8.1...HEAD
+[0.8.1]: https://github.com/kikimoradev/kikimora/compare/v0.8.0...v0.8.1
 [0.8.0]: https://github.com/kikimoradev/kikimora/compare/v0.7.0...v0.8.0
 [0.7.0]: https://github.com/kikimoradev/kikimora/compare/v0.6.0...v0.7.0
 [0.6.0]: https://github.com/kikimoradev/kikimora/compare/v0.5.1...v0.6.0

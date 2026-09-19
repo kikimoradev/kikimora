@@ -1,6 +1,6 @@
 {
   "name": "@kikimoradev/kikimora",
-  "version": "0.8.0",
+  "version": "0.8.1",
   "description": "Autonomous two-agent Claude Code worker: a monitor that finds tasks, an executor that completes them, and long-term memory in between",
   "type": "module",
   "license": "MIT",
