@@ -14,7 +14,7 @@ npm-debug.log*
 pnpm-debug.log*
 
 # Per-project worker state (settings, project prompts, data, logs)
-.brownie/
+.kikimora/
 
 # Generated demo project (scripts/demo/setup.mjs)
 scripts/demo/acme-shop/

@@ -166,7 +166,7 @@ describe("tasks commands", () => {
     await runTasksList({ write });
 
     expect(logger.error).toHaveBeenCalledWith(
-      "No brownie worker is running in this project.",
+      "No kikimora worker is running in this project.",
     );
     expect(process.exitCode).toBe(1);
     expect(lines).toEqual([]);

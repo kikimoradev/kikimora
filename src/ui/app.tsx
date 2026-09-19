@@ -404,7 +404,7 @@ export function App({
       case "prompt":
         return (
           <PromptEditor
-            title={`${view.agent} prompt (.brownie/prompts/${view.agent}.prompt.md)`}
+            title={`${view.agent} prompt (.kikimora/prompts/${view.agent}.prompt.md)`}
             hint="Enter: new line · Ctrl+D: save · Esc: close without saving"
             initialValue={view.content}
             maxVisibleLines={Math.max(4, contentHeight - 4)}

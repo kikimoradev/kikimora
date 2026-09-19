@@ -51,7 +51,7 @@ export function Header({ config, version, status, now }: HeaderProps): JSX.Eleme
         left={
           <Text wrap="truncate-end">
             <Text color={theme.accent} bold>
-              {"🧌 Brownie"}
+              {"Kikimora"}
             </Text>
             <Text color={theme.muted}>{` v${version}`}</Text>
           </Text>
@@ -91,7 +91,7 @@ export function Header({ config, version, status, now }: HeaderProps): JSX.Eleme
         <Text color={theme.accent} wrap="truncate-end">
           {status.update.state === "installed"
             ? `⬆ updated to v${status.update.to} — restart to apply`
-            : `⬆ update available v${status.update.from} → v${status.update.to} — run "brownie update"`}
+            : `⬆ update available v${status.update.from} → v${status.update.to} — run "kikimora update"`}
         </Text>
       )}
     </Box>

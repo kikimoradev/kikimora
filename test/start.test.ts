@@ -209,7 +209,7 @@ describe("startWorker", () => {
   it("passes preflight, builds config, opens the store and starts both loops", async () => {
     const config = buildConfig({
       cwd: dir,
-      tasksFilePath: join(dir, ".brownie", "data", "tasks.json"),
+      tasksFilePath: join(dir, ".kikimora", "data", "tasks.json"),
     });
     const { store } = stubHappyPath(config);
 
@@ -269,7 +269,7 @@ describe("startWorker", () => {
     expect(process.exitCode).toBe(savedExitCode);
     expect(mocks.startControlServer).toHaveBeenCalledWith(
       expect.objectContaining({
-        socketPath: expect.stringContaining("brownie-") as unknown,
+        socketPath: expect.stringContaining("kikimora-") as unknown,
         controls: { monitor: monitorController, executor: executorController },
         buildStatus: expect.any(Function) as unknown,
         tasks: store,
@@ -484,7 +484,7 @@ describe("startWorker", () => {
       });
     });
 
-    it("a signal during brownie drain stops at once, whatever the grace", async () => {
+    it("a signal during kikimora drain stops at once, whatever the grace", async () => {
       stubHappyPath(buildConfig({ cwd: dir, shutdownGraceMs: 120_000 }));
       const signals = captureSignals();
       blockUntilAborted();
@@ -702,7 +702,7 @@ describe("startWorker", () => {
   it("exits with code 1 when another worker already owns the control socket", async () => {
     stubHappyPath(buildConfig({ cwd: dir }));
     mocks.startControlServer.mockRejectedValue(
-      new Error("brownie is already running in this project (pid 123)."),
+      new Error("kikimora is already running in this project (pid 123)."),
     );
 
     await runStart({ stdout: jsonSink() });
@@ -937,13 +937,13 @@ describe("startWorker", () => {
   it("config loading error: logs, sets exitCode=1 and does not start the loops", async () => {
     mocks.ensureReady.mockResolvedValue(preflightResult(dir));
     mocks.loadWorkerConfig.mockRejectedValue(
-      new Error("Invalid configuration (.brownie/settings.json)"),
+      new Error("Invalid configuration (.kikimora/settings.json)"),
     );
 
     await runStart();
 
     expect(logger.error).toHaveBeenCalledWith(
-      "Invalid configuration (.brownie/settings.json)",
+      "Invalid configuration (.kikimora/settings.json)",
     );
     expect(process.exitCode).toBe(1);
     expect(mocks.runMonitorLoop).not.toHaveBeenCalled();

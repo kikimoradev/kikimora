@@ -9,7 +9,7 @@ export async function readRawSettings(
     raw = await readFile(settingsFile, "utf8");
   } catch (err) {
     throw new Error(
-      `settings file missing: ${settingsFile} — run brownie in an interactive terminal to complete setup`,
+      `settings file missing: ${settingsFile} — run kikimora in an interactive terminal to complete setup`,
       { cause: err },
     );
   }

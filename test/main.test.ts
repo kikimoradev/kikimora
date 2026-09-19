@@ -16,10 +16,10 @@ vi.mock("../src/logger.js", async () =>
   (await import("./helpers.js")).loggerModuleMock(),
 );
 
-const { mainCommand, parseStartPaused, runBrownie } = await import("../src/main.js");
+const { mainCommand, parseStartPaused, runKikimora } = await import("../src/main.js");
 const { logger } = await import("../src/logger.js");
 
-describe("runBrownie", () => {
+describe("runKikimora", () => {
   let savedExitCode: typeof process.exitCode;
 
   beforeEach(() => {
@@ -35,7 +35,7 @@ describe("runBrownie", () => {
   it("starts the worker directly when everything is configured", async () => {
     mocks.isConfigured.mockReturnValue(true);
 
-    await runBrownie({ interactive: true });
+    await runKikimora({ interactive: true });
 
     expect(mocks.isConfigured).toHaveBeenCalledTimes(1);
     expect(mocks.runConfigure).not.toHaveBeenCalled();
@@ -54,7 +54,7 @@ describe("runBrownie", () => {
       return Promise.resolve();
     });
 
-    await runBrownie({ interactive: true });
+    await runKikimora({ interactive: true });
 
     expect(mocks.runConfigure).toHaveBeenCalledTimes(1);
     expect(order).toEqual(["configure", "start"]);
@@ -64,7 +64,7 @@ describe("runBrownie", () => {
     mocks.isConfigured.mockReturnValue(false);
     mocks.runConfigure.mockResolvedValue(false);
 
-    await runBrownie({ interactive: true });
+    await runKikimora({ interactive: true });
 
     expect(mocks.startWorker).not.toHaveBeenCalled();
     expect(process.exitCode).toBe(savedExitCode);
@@ -73,7 +73,7 @@ describe("runBrownie", () => {
   it("skips the wizard without a TTY and lets preflight report the problem", async () => {
     mocks.isConfigured.mockReturnValue(false);
 
-    await runBrownie({ interactive: false });
+    await runKikimora({ interactive: false });
 
     expect(mocks.runConfigure).not.toHaveBeenCalled();
     expect(mocks.startWorker).toHaveBeenCalledTimes(1);
@@ -82,7 +82,7 @@ describe("runBrownie", () => {
   it("rejects a legacy subcommand with exit code 1", async () => {
     mocks.isConfigured.mockReturnValue(true);
 
-    await runBrownie({ positionals: ["start"], interactive: true });
+    await runKikimora({ positionals: ["start"], interactive: true });
 
     expect(logger.error).toHaveBeenCalledWith(
       expect.stringContaining('Unknown command "start"'),
@@ -95,7 +95,7 @@ describe("runBrownie", () => {
   it("passes headless options through to the worker", async () => {
     mocks.isConfigured.mockReturnValue(true);
 
-    await runBrownie({
+    await runKikimora({
       interactive: true,
       headless: true,
       logFormat: "json",
@@ -113,23 +113,23 @@ describe("runBrownie", () => {
   it("passes --paused through to the worker", async () => {
     mocks.isConfigured.mockReturnValue(true);
 
-    await runBrownie({ interactive: true, paused: true });
+    await runKikimora({ interactive: true, paused: true });
 
     expect(mocks.startWorker).toHaveBeenCalledWith(
       expect.objectContaining({ paused: true }),
     );
   });
 
-  it("reads BROWNIE_START_PAUSED when the flag is absent", async () => {
+  it("reads KIKIMORA_START_PAUSED when the flag is absent", async () => {
     const restoreEnv = snapshotEnv();
     mocks.isConfigured.mockReturnValue(true);
 
     try {
-      process.env.BROWNIE_START_PAUSED = "1";
-      await runBrownie({ interactive: true });
-      process.env.BROWNIE_START_PAUSED = "0";
-      await runBrownie({ interactive: true });
-      await runBrownie({ interactive: true, paused: true });
+      process.env.KIKIMORA_START_PAUSED = "1";
+      await runKikimora({ interactive: true });
+      process.env.KIKIMORA_START_PAUSED = "0";
+      await runKikimora({ interactive: true });
+      await runKikimora({ interactive: true, paused: true });
     } finally {
       restoreEnv();
     }
@@ -142,20 +142,20 @@ describe("runBrownie", () => {
   it("defaults to the pretty log format", async () => {
     mocks.isConfigured.mockReturnValue(true);
 
-    await runBrownie({ interactive: true });
+    await runKikimora({ interactive: true });
 
     expect(mocks.startWorker).toHaveBeenCalledWith(
       expect.objectContaining({ headless: false, logFormat: "pretty" }),
     );
   });
 
-  it("reads the log format from BROWNIE_LOG_FORMAT when no flag is given", async () => {
+  it("reads the log format from KIKIMORA_LOG_FORMAT when no flag is given", async () => {
     const restoreEnv = snapshotEnv();
-    process.env.BROWNIE_LOG_FORMAT = "json";
+    process.env.KIKIMORA_LOG_FORMAT = "json";
     mocks.isConfigured.mockReturnValue(true);
 
     try {
-      await runBrownie({ interactive: true });
+      await runKikimora({ interactive: true });
     } finally {
       restoreEnv();
     }
@@ -168,7 +168,7 @@ describe("runBrownie", () => {
   it("rejects an invalid log format with exit code 1", async () => {
     mocks.isConfigured.mockReturnValue(true);
 
-    await runBrownie({ interactive: true, logFormat: "logfmt" });
+    await runKikimora({ interactive: true, logFormat: "logfmt" });
 
     expect(logger.error).toHaveBeenCalledWith(
       expect.stringContaining('Invalid log format "logfmt"'),
@@ -180,7 +180,7 @@ describe("runBrownie", () => {
   it("skips the wizard when headless is forced even on first run", async () => {
     mocks.isConfigured.mockReturnValue(false);
 
-    await runBrownie({ interactive: true, headless: true });
+    await runKikimora({ interactive: true, headless: true });
 
     expect(mocks.runConfigure).not.toHaveBeenCalled();
     expect(mocks.startWorker).toHaveBeenCalledWith(
@@ -196,7 +196,7 @@ describe("runBrownie", () => {
     process.stdout.isTTY = false;
 
     try {
-      await runBrownie();
+      await runKikimora();
     } finally {
       process.stdin.isTTY = stdinTty;
       process.stdout.isTTY = stdoutTty;

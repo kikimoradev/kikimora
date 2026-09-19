@@ -5,7 +5,7 @@ const REQUEST_TIMEOUT_MS = 5_000;
 
 export class WorkerNotRunningError extends Error {
   constructor() {
-    super("No brownie worker is running in this project.");
+    super("No kikimora worker is running in this project.");
     this.name = "WorkerNotRunningError";
   }
 }

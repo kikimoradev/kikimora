@@ -8,7 +8,7 @@ import {
 
 function buildDeps(overrides: Partial<UpdateDeps> = {}): UpdateDeps {
   return {
-    name: "@brownie-labs/brownie",
+    name: "@kikimoradev/kikimora",
     current: "0.2.0",
     fetchLatest: vi.fn().mockResolvedValue("0.3.0"),
     detect: vi.fn<() => InstallMethod>().mockReturnValue("npm"),
@@ -51,7 +51,7 @@ describe("performUpdate", () => {
     const deps = buildDeps();
     const outcome = await performUpdate(deps, { install: true });
     expect(outcome).toMatchObject({ status: "updated", from: "0.2.0", to: "0.3.0" });
-    expect(deps.install).toHaveBeenCalledWith("npm", "@brownie-labs/brownie");
+    expect(deps.install).toHaveBeenCalledWith("npm", "@kikimoradev/kikimora");
   });
 
   it("reports availability without installing in check mode", async () => {

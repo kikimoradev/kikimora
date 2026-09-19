@@ -31,8 +31,8 @@ export class AlreadyRunningError extends Error {
   constructor(pid: number | undefined) {
     super(
       pid === undefined
-        ? "brownie is already running in this project."
-        : `brownie is already running in this project (pid ${String(pid)}).`,
+        ? "kikimora is already running in this project."
+        : `kikimora is already running in this project (pid ${String(pid)}).`,
     );
     this.name = "AlreadyRunningError";
   }
@@ -123,7 +123,7 @@ async function readPrompt(deps: ControlServerDeps, agent: PromptAgent): Promise<
     return await deps.prompts.read(agent);
   } catch (error) {
     if (isMissingFile(error)) {
-      throw new Error(`Prompt file for ${agent} is missing — run brownie init.`, {
+      throw new Error(`Prompt file for ${agent} is missing — run kikimora init.`, {
         cause: error,
       });
     }

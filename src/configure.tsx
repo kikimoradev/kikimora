@@ -82,7 +82,7 @@ export async function runConfigure(
   logger.success(`Saved ${paths.executorPromptFile}`);
   logger.info(
     "All other settings use defaults — change them from the dashboard (/model, /effort, " +
-      "/interval, /hours, /days) or by editing .brownie/settings.json.",
+      "/interval, /hours, /days) or by editing .kikimora/settings.json.",
   );
   return true;
 }

@@ -1,12 +1,12 @@
-# Contributing to Brownie
+# Contributing to Kikimora
 
-Thanks for helping the sprite! Contributions of all kinds are welcome — bug reports, docs, code.
+Bug reports, documentation and code contributions are welcome.
 
 ## Setup
 
-- Node.js ≥ 22.16 and [pnpm](https://pnpm.io) (`corepack enable` is enough)
+- Node.js `^22.16.0` or `>=24.0.0` and [pnpm](https://pnpm.io); `corepack enable` installs the pnpm version pinned in `package.json`.
 - `pnpm install`
-- `pnpm dev` starts brownie in watch mode (tsx); `pnpm start` runs it once
+- `pnpm dev` starts kikimora in watch mode (tsx); `pnpm start` runs it once.
 
 ## Before you open a PR
 
@@ -14,24 +14,26 @@ Thanks for helping the sprite! Contributions of all kinds are welcome — bug re
 pnpm check   # typecheck + lint + format:check + test
 ```
 
-CI runs the same command, so a green `pnpm check` locally means a green build.
+CI runs `pnpm check` and `pnpm build` on Ubuntu and macOS with Node 22.16 and 24 (`.github/workflows/ci.yml`).
 
-- **Tests are required.** Coverage thresholds (statements 92%, lines 94%) are enforced in `vitest.config.ts` — untested code fails the build. Tests live in `test/` and mirror `src/`. Claude sessions are tested against a fake binary (`test/fixtures/claude`) driven by `FAKE_CLAUDE_*` variables — never against the real CLI.
-- **Formatting is Prettier's job**: `pnpm format` fixes everything.
+- **Tests are required.** `vitest.config.ts` enforces coverage thresholds (statements 92%, branches 75%, functions 90%, lines 94%); code below them fails the build.
+- Tests live in `test/` and mirror `src/`.
+- Claude sessions are tested against a fake binary (`test/fixtures/claude`) driven by `FAKE_CLAUDE_*` variables. Tests do not call the real CLI.
+- **Prettier owns formatting**: `pnpm format` fixes it.
 
 ## Conventions
 
-- Code, user-facing messages, errors, and commit messages are in English.
-- No comments in the code — the code should speak for itself.
-- Agent prompt content lives **only** in markdown files (`prompts/*.system.md` in the package, `.brownie/prompts/*.prompt.md` in projects) — never as string constants in the code.
-- A new configuration option = a key in `settingsSchema` (`src/config.ts`) + a mapping in `loadWorkerConfig` + usually a wizard question in `src/configure.ts`.
+- Code, user-facing messages, errors and commit messages are in English.
+- No comments in the code.
+- Agent prompt content lives **only** in markdown files: `prompts/*.system.md` in the package, `.kikimora/prompts/*.prompt.md` in projects. Do not put it in string constants.
+- A new configuration option needs a key in `settingsSchema` (`src/config.ts`), a mapping in `loadWorkerConfig`, a leaf assignment in `applySettings` (`src/settings-controller.ts`), and usually a slash command in `src/ui/commands.ts`.
 - `src/paths.ts` is the single source of truth for the filesystem layout.
 
-See [CLAUDE.md](CLAUDE.md) for the full architecture walkthrough.
+[CLAUDE.md](CLAUDE.md) describes the architecture in full.
 
 ## Demo GIF
 
-The README demo is scripted and reproducible — after UI changes, re-record it:
+The README demo is scripted. Re-record it after UI changes:
 
 ```bash
 pnpm build
@@ -43,7 +45,17 @@ vhs scripts/demo/demo.tape   # requires https://github.com/charmbracelet/vhs
 
 1. Bump the version in `package.json` and move the entries in `CHANGELOG.md` from _Unreleased_ to a new dated section.
 2. Commit, then tag and push: `git tag vX.Y.Z && git push origin main --tags`.
-3. The [release workflow](.github/workflows/release.yml) runs `pnpm check`, publishes to npm through [trusted publishing](https://docs.npmjs.com/trusted-publishers) (OIDC — no tokens in secrets, provenance attached automatically), and creates the GitHub release with generated notes.
-4. The same tag triggers the [Docker workflow](.github/workflows/docker.yml), which builds both image variants (`runtime` and `browser` stages of the `Dockerfile`) natively on an x64 and an arm64 runner, pushes each architecture by digest and stitches them into one manifest list per variant: `ghcr.io/brownie-labs/brownie:<version>` and `ghcr.io/brownie-labs/brownie:<version>-browser` (`<version>` is the tag without the `v`; `<major>.<minor>` and `latest` move along). Layer cache lives in the same package under the `buildcache-amd64` and `buildcache-arm64` tags. The workflow can be re-run for an existing tag from the Actions tab (`Run workflow` → the tag name).
+3. The [release workflow](.github/workflows/release.yml) runs `pnpm check` and publishes to npm through [trusted publishing](https://docs.npmjs.com/trusted-publishers) (OIDC, no tokens in secrets; npm attaches provenance). It then creates the GitHub release with generated notes.
+4. The same tag triggers the [Docker workflow](.github/workflows/docker.yml). It builds both image variants (the `runtime` and `browser` stages of the `Dockerfile`) natively on an x64 and an arm64 runner and pushes each architecture by digest. It then joins them into one manifest list per variant:
+   - `ghcr.io/kikimoradev/kikimora:<version>`
+   - `ghcr.io/kikimoradev/kikimora:<version>-browser`
 
-One-time bootstrap for a brand-new package: npm only lets you configure a trusted publisher once the package exists, so publish the first version manually (`npm login && npm publish`), then add the trusted publisher on npmjs.com (package settings → Trusted Publisher → GitHub Actions, repository `brownie-labs/brownie`, workflow `release.yml`). Pushing the tag afterwards is safe — the workflow skips `npm publish` when the version is already in the registry and still creates the GitHub release.
+   `<version>` is the tag without the `v`; the `<major>.<minor>` and `latest` tags move with it. The layer cache lives in the same package under the `buildcache-amd64` and `buildcache-arm64` tags. To re-run the workflow for an existing tag, use `Run workflow` in the Actions tab and enter the tag name.
+
+### First release of a new package
+
+npm accepts a trusted publisher only for a package that already exists.
+
+1. Publish the first version by hand: `npm login && npm publish`.
+2. On npmjs.com, open the package settings, then Trusted Publisher, then GitHub Actions. Enter repository `kikimoradev/kikimora` and workflow `release.yml`.
+3. Push the tag. The workflow skips `npm publish` when the version is already in the registry and still creates the GitHub release.

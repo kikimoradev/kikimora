@@ -221,7 +221,7 @@ describe("App", () => {
     const { lastFrame, unmount } = await renderApp(props);
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("🧌 Brownie v1.2.3");
+    expect(frame).toContain("Kikimora v1.2.3");
     expect(frame).toContain("/tmp/ws");
     expect(frame).toContain("monitor");
     expect(frame).toContain("haiku · medium · every 5 min");
@@ -1008,7 +1008,7 @@ describe("App", () => {
       rendered,
       props,
       "/prompt monitor",
-      "monitor prompt (.brownie/prompts/monitor.prompt.md)",
+      "monitor prompt (.kikimora/prompts/monitor.prompt.md)",
     );
 
     const frame = lastFrame() ?? "";
@@ -1060,7 +1060,7 @@ describe("App", () => {
       rendered,
       props,
       "/prompt monitor",
-      "monitor prompt (.brownie/prompts/monitor.prompt.md)",
+      "monitor prompt (.kikimora/prompts/monitor.prompt.md)",
     );
     await type(stdin, CTRL_D);
 
@@ -1081,7 +1081,7 @@ describe("App", () => {
       rendered,
       props,
       "/context",
-      "context file (.brownie/prompts/context.md, optional)",
+      "context file (.kikimora/prompts/context.md, optional)",
     );
 
     const frame = lastFrame() ?? "";

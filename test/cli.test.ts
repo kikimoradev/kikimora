@@ -235,8 +235,8 @@ describe("CLI start (smoke E2E)", () => {
       FAKE_CLAUDE_PROMPT_OUT_SONNET: join(dir, "summary-prompt.txt"),
       FAKE_CLAUDE_ARGS_OUT_OPUS: join(dir, "executor-args.json"),
     });
-    const tasksPath = join(dir, ".brownie", "data", "tasks.json");
-    const memoryDbPath = join(dir, ".brownie", "data", "memory.db");
+    const tasksPath = join(dir, ".kikimora", "data", "tasks.json");
+    const memoryDbPath = join(dir, ".kikimora", "data", "memory.db");
 
     const result = await runCli(dir, env, () =>
       Promise.resolve(readSummaries(memoryDbPath, "e2e-1").length > 0),
@@ -260,15 +260,15 @@ describe("CLI start (smoke E2E)", () => {
     const mcpFlagIndex = executorArgs.indexOf("--mcp-config");
     expect(mcpFlagIndex).toBeGreaterThanOrEqual(0);
     const mcpConfigPath = executorArgs[mcpFlagIndex + 1] ?? "";
-    expect(mcpConfigPath).toContain(join(".brownie", "data", "mcp", "executor.json"));
+    expect(mcpConfigPath).toContain(join(".kikimora", "data", "mcp", "executor.json"));
     expect(executorArgs).toContain("--strict-mcp-config");
     expect(
-      await readFile(join(dir, ".brownie", "data", "mcp", "executor.json"), "utf8"),
+      await readFile(join(dir, ".kikimora", "data", "mcp", "executor.json"), "utf8"),
     ).toContain(memoryDbPath);
 
     const summarizerPrompt = await readFile(join(dir, "summary-prompt.txt"), "utf8");
     expect(summarizerPrompt).toContain("ID: e2e-1");
-    expect(summarizerPrompt).toContain(join(dir, ".brownie", "logs", "executor"));
+    expect(summarizerPrompt).toContain(join(dir, ".kikimora", "logs", "executor"));
 
     expect(readSummaries(memoryDbPath, "e2e-1")).toEqual([{ headline: "e2e summary" }]);
 
@@ -302,8 +302,8 @@ describe("CLI start (smoke E2E)", () => {
         summary: "The executor completed the test task.",
       }),
     });
-    const memoryDbPath = join(dir, ".brownie", "data", "memory.db");
-    const brownieDir = join(dir, ".brownie");
+    const memoryDbPath = join(dir, ".kikimora", "data", "memory.db");
+    const kikimoraDir = join(dir, ".kikimora");
     const outFd = openSync(join(dir, "worker-out.log"), "w");
     const errFd = openSync(join(dir, "worker-err.log"), "w");
     const worker = spawn(tsxBin, [entry, "--log-format", "json"], {
@@ -356,10 +356,10 @@ describe("CLI start (smoke E2E)", () => {
       expect(session?.logPath).toMatch(/^logs\/executor\/\d{4}-\d{2}-\d{2}\/.*\.log$/);
       expect(session?.jsonlPath).toBe(`${(session?.logPath ?? "").slice(0, -4)}.jsonl`);
 
-      const log = await readFile(join(brownieDir, session?.logPath ?? ""), "utf8");
+      const log = await readFile(join(kikimoraDir, session?.logPath ?? ""), "utf8");
       expect(log).toContain("Worker output");
 
-      const jsonl = (await readFile(join(brownieDir, session?.jsonlPath ?? ""), "utf8"))
+      const jsonl = (await readFile(join(kikimoraDir, session?.jsonlPath ?? ""), "utf8"))
         .trim()
         .split("\n")
         .map((line) => JSON.parse(line) as { ts: string; event: { type: string } });
@@ -372,7 +372,7 @@ describe("CLI start (smoke E2E)", () => {
 
       const shown = await runCommand(dir, env, ["sessions", "show", "exec-1"]);
       expect(shown.code).toBe(0);
-      expect(shown.stdout).toContain(join(brownieDir, session?.jsonlPath ?? ""));
+      expect(shown.stdout).toContain(join(kikimoraDir, session?.jsonlPath ?? ""));
 
       const unknown = await runCommand(dir, env, ["sessions", "show", "nope"]);
       expect(unknown.code).toBe(1);
@@ -387,7 +387,7 @@ describe("CLI start (smoke E2E)", () => {
     }
   }, 40_000);
 
-  it("exits with code 1 when preflight fails (no .brownie/settings.json)", async () => {
+  it("exits with code 1 when preflight fails (no .kikimora/settings.json)", async () => {
     const result = await runCli(dir, fakeClaudeCliEnv("ok"));
 
     expect(result.code).toBe(1);
@@ -486,7 +486,7 @@ describe("CLI start (smoke E2E)", () => {
     }
   }, 40_000);
 
-  it("answers brownie status --json and pause over the control socket", async () => {
+  it("answers kikimora status --json and pause over the control socket", async () => {
     await seedProject(dir, {
       settings: { monitor: { model: "haiku", intervalMinutes: 1 } },
     });
@@ -562,7 +562,7 @@ describe("CLI start (smoke E2E)", () => {
 
       const identityText = await runCommand(dir, env, ["version"]);
       expect(identityText.code).toBe(0);
-      expect(identityText.stdout).toContain(`brownie   ${packageVersion()}`);
+      expect(identityText.stdout).toContain(`kikimora   ${packageVersion()}`);
       expect(identityText.stdout).toContain("claude    2.1.300");
       expect(identityText.stdout).toContain("auth      oauth");
 
@@ -578,7 +578,7 @@ describe("CLI start (smoke E2E)", () => {
       const human = await runCommand(dir, env, ["status"]);
       expect(human.code).toBe(0);
       expect(human.stdout).toContain(
-        `brownie ${packageVersion()} · claude 2.1.300 · auth oauth · pid ${String(status?.pid)}`,
+        `kikimora ${packageVersion()} · claude 2.1.300 · auth oauth · pid ${String(status?.pid)}`,
       );
       expect(human.stdout).toContain("monitor");
       expect(human.stdout).toContain("executor");
@@ -626,9 +626,9 @@ describe("CLI start (smoke E2E)", () => {
       const context = await runCommand(dir, env, ["context", "get"]);
       expect(context.code).toBe(0);
       expect(context.stdout).toBe("# Workspace context\n\nacme-shop\n");
-      expect(await readFile(join(dir, ".brownie", "prompts", "context.md"), "utf8")).toBe(
-        "# Workspace context\n\nacme-shop\n",
-      );
+      expect(
+        await readFile(join(dir, ".kikimora", "prompts", "context.md"), "utf8"),
+      ).toBe("# Workspace context\n\nacme-shop\n");
 
       const memory = await runCommand(dir, env, ["memory", "recent", "--json"]);
       expect(memory.code).toBe(0);
@@ -639,7 +639,7 @@ describe("CLI start (smoke E2E)", () => {
     }
   }, 30_000);
 
-  it("brownie drain --json lets the executor finish its session and summary, then the worker exits 0", async () => {
+  it("kikimora drain --json lets the executor finish its session and summary, then the worker exits 0", async () => {
     await seedProject(dir, {
       settings: {
         monitor: { model: "haiku", intervalMinutes: 1 },
@@ -705,14 +705,14 @@ describe("CLI start (smoke E2E)", () => {
         drained: true,
       });
       expect(
-        readSummaries(join(dir, ".brownie", "data", "memory.db"), "drain-1"),
+        readSummaries(join(dir, ".kikimora", "data", "memory.db"), "drain-1"),
       ).toEqual([{ headline: "drained summary" }]);
     } finally {
       await stopWorker(worker);
     }
   }, 40_000);
 
-  it("brownie drain waits for a monitor cycle in flight while the executor idles, then the worker exits 0", async () => {
+  it("kikimora drain waits for a monitor cycle in flight while the executor idles, then the worker exits 0", async () => {
     await seedProject(dir, {
       settings: {
         monitor: { model: "haiku", intervalMinutes: 1 },
@@ -943,14 +943,14 @@ describe("CLI start (smoke E2E)", () => {
     }
   }, 40_000);
 
-  it("brownie status fails cleanly when no worker is running", async () => {
+  it("kikimora status fails cleanly when no worker is running", async () => {
     const result = await runCommand(dir, fakeClaudeCliEnv("ok"), ["status"]);
 
     expect(result.code).toBe(1);
-    expect(`${result.stdout}${result.stderr}`).toContain("No brownie worker is running");
+    expect(`${result.stdout}${result.stderr}`).toContain("No kikimora worker is running");
   }, 30_000);
 
-  it("brownie version needs a worker, brownie --version does not", async () => {
+  it("kikimora version needs a worker, kikimora --version does not", async () => {
     const env = fakeClaudeCliEnv("ok");
 
     const identity = await runCommand(dir, env, ["version"]);
@@ -958,7 +958,7 @@ describe("CLI start (smoke E2E)", () => {
 
     expect(identity.code).toBe(1);
     expect(`${identity.stdout}${identity.stderr}`).toContain(
-      "No brownie worker is running",
+      "No kikimora worker is running",
     );
     expect(installed.code).toBe(0);
     expect(`${installed.stdout}${installed.stderr}`).toContain(packageVersion());

@@ -144,8 +144,8 @@ describe("sessions commands", () => {
       "result    ok",
       "cost      $0.4183",
       "turns     24",
-      `log       ${join("/srv/project", ".brownie", "logs/executor/2026-09-14/17-44-12-sess-1.log")}`,
-      `jsonl     ${join("/srv/project", ".brownie", "logs/executor/2026-09-14/17-44-12-sess-1.jsonl")}`,
+      `log       ${join("/srv/project", ".kikimora", "logs/executor/2026-09-14/17-44-12-sess-1.log")}`,
+      `jsonl     ${join("/srv/project", ".kikimora", "logs/executor/2026-09-14/17-44-12-sess-1.jsonl")}`,
     ]);
   });
 
@@ -174,10 +174,10 @@ describe("sessions commands", () => {
     const dir = await createTempDir();
     try {
       const logPath = join("logs", "executor", "2026-09-14", "17-44-12-sess-1.log");
-      await mkdir(join(dir, ".brownie", "logs", "executor", "2026-09-14"), {
+      await mkdir(join(dir, ".kikimora", "logs", "executor", "2026-09-14"), {
         recursive: true,
       });
-      await writeFile(join(dir, ".brownie", logPath), "[17:44:12] hello\n", "utf8");
+      await writeFile(join(dir, ".kikimora", logPath), "[17:44:12] hello\n", "utf8");
       mocks.sendControlRequest.mockResolvedValue({
         ok: true,
         data: buildRecord({ logPath }),

@@ -248,7 +248,7 @@ describe("runInit", () => {
 
     expect(process.exitCode).toBe(1);
     expect(logger.error).toHaveBeenCalledWith(
-      expect.stringContaining("Invalid configuration (.brownie/settings.json):"),
+      expect.stringContaining("Invalid configuration (.kikimora/settings.json):"),
     );
     expect(logger.error).toHaveBeenCalledWith(
       expect.stringContaining('executor.mcpServers.0: unknown MCP server "sentry"'),

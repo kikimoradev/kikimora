@@ -6,7 +6,7 @@ body:
     id: problem
     attributes:
       label: Problem
-      description: What are you trying to do that brownie makes hard or impossible today?
+      description: The goal you are working toward and what in kikimora makes it hard or impossible today.
     validations:
       required: true
   - type: textarea

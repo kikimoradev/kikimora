@@ -267,9 +267,9 @@ describe("dispatchCommand", () => {
     expect(executorControl.state).toBe("pausing");
     expect(drainFinished).not.toHaveBeenCalled();
     expect(notices).toEqual([
-      { text: "draining — brownie exits after the current session", tone: "info" },
+      { text: "draining — kikimora exits after the current session", tone: "info" },
       {
-        text: "already draining — brownie exits after the current session",
+        text: "already draining — kikimora exits after the current session",
         tone: "info",
       },
     ]);
@@ -285,7 +285,7 @@ describe("dispatchCommand", () => {
     expect(monitorControl.state).toBe("pausing");
     expect(executorControl.state).toBe("pausing");
     expect(notices[1]).toEqual({
-      text: "draining — brownie exits after the current session",
+      text: "draining — kikimora exits after the current session",
       tone: "error",
     });
     drain.dispose();

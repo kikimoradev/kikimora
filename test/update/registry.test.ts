@@ -12,14 +12,14 @@ describe("fetchLatestVersion", () => {
   it("returns the version from the latest dist-tag", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ version: "1.4.2" }));
 
-    const version = await fetchLatestVersion("@brownie-labs/brownie", {
+    const version = await fetchLatestVersion("@kikimoradev/kikimora", {
       fetchImpl: fetchImpl as unknown as typeof fetch,
       registryBaseUrl: "https://registry.example",
     });
 
     expect(version).toBe("1.4.2");
     expect(fetchImpl).toHaveBeenCalledWith(
-      "https://registry.example/@brownie-labs/brownie/latest",
+      "https://registry.example/@kikimoradev/kikimora/latest",
       expect.objectContaining({ headers: { accept: "application/json" } }),
     );
   });

@@ -5,7 +5,7 @@ import { logger } from "./logger.js";
 import { packageVersion } from "./paths.js";
 import { startWorker } from "./start.js";
 
-export interface RunBrownieOptions {
+export interface RunKikimoraOptions {
   positionals?: string[] | undefined;
   interactive?: boolean | undefined;
   headless?: boolean | undefined;
@@ -23,18 +23,18 @@ export function parseStartPaused(raw: string | undefined): boolean {
   return value === "1" || value === "true";
 }
 
-export async function runBrownie(options: RunBrownieOptions = {}): Promise<void> {
+export async function runKikimora(options: RunKikimoraOptions = {}): Promise<void> {
   const [positional] = options.positionals ?? [];
   if (positional !== undefined) {
     logger.error(
       `Unknown command "${positional}" — available commands: init, status, version, pause, ` +
-        "resume, drain, tasks, settings, prompt, context, memory, sessions, update, mcp; run plain brownie to start the worker.",
+        "resume, drain, tasks, settings, prompt, context, memory, sessions, update, mcp; run plain kikimora to start the worker.",
     );
     process.exitCode = 1;
     return;
   }
 
-  const rawLogFormat = options.logFormat ?? process.env.BROWNIE_LOG_FORMAT;
+  const rawLogFormat = options.logFormat ?? process.env.KIKIMORA_LOG_FORMAT;
   const logFormat =
     rawLogFormat === undefined ? "pretty" : parseHeadlessLogFormat(rawLogFormat);
   if (logFormat === null) {
@@ -52,14 +52,14 @@ export async function runBrownie(options: RunBrownieOptions = {}): Promise<void>
   }
 
   const paused =
-    options.paused === true || parseStartPaused(process.env.BROWNIE_START_PAUSED);
+    options.paused === true || parseStartPaused(process.env.KIKIMORA_START_PAUSED);
 
   await startWorker({ headless, logFormat, verbose: options.verbose, paused });
 }
 
 export const mainCommand = defineCommand({
   meta: {
-    name: "brownie",
+    name: "kikimora",
     version: packageVersion(),
     description:
       "Two-agent Claude Code worker: the monitor reports tasks on a cycle, the executor completes them. " +
@@ -72,7 +72,7 @@ export const mainCommand = defineCommand({
     },
     "log-format": {
       type: "string",
-      description: "Headless log format: pretty or json (env: BROWNIE_LOG_FORMAT)",
+      description: "Headless log format: pretty or json (env: KIKIMORA_LOG_FORMAT)",
     },
     verbose: {
       type: "boolean",
@@ -81,11 +81,11 @@ export const mainCommand = defineCommand({
     paused: {
       type: "boolean",
       description:
-        "Boot both agents paused — wake them with brownie resume or /start (env: BROWNIE_START_PAUSED=1)",
+        "Boot both agents paused — wake them with kikimora resume or /start (env: KIKIMORA_START_PAUSED=1)",
     },
   },
   run: ({ args }) =>
-    runBrownie({
+    runKikimora({
       positionals: args._,
       headless: args.headless,
       logFormat: args["log-format"],

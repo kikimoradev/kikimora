@@ -5,9 +5,9 @@ import { dirname, isAbsolute, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
 
-export const BROWNIE_DIR_NAME = ".brownie";
+export const KIKIMORA_DIR_NAME = ".kikimora";
 
-export const FALLBACK_PACKAGE_NAME = "@brownie-labs/brownie";
+export const FALLBACK_PACKAGE_NAME = "@kikimoradev/kikimora";
 
 export const MCP_DIR_NAME = "mcp";
 
@@ -15,7 +15,7 @@ export const PLAYWRIGHT_DIR_NAME = "playwright";
 
 export interface ProjectPaths {
   projectDir: string;
-  brownieDir: string;
+  kikimoraDir: string;
   settingsFile: string;
   promptsDir: string;
   monitorPromptFile: string;
@@ -31,13 +31,13 @@ export interface ProjectPaths {
 }
 
 export function projectPaths(projectDir: string = process.cwd()): ProjectPaths {
-  const brownieDir = join(projectDir, BROWNIE_DIR_NAME);
-  const promptsDir = join(brownieDir, "prompts");
-  const dataDir = join(brownieDir, "data");
+  const kikimoraDir = join(projectDir, KIKIMORA_DIR_NAME);
+  const promptsDir = join(kikimoraDir, "prompts");
+  const dataDir = join(kikimoraDir, "data");
   return {
     projectDir,
-    brownieDir,
-    settingsFile: join(brownieDir, "settings.json"),
+    kikimoraDir,
+    settingsFile: join(kikimoraDir, "settings.json"),
     promptsDir,
     monitorPromptFile: join(promptsDir, "monitor.prompt.md"),
     executorPromptFile: join(promptsDir, "executor.prompt.md"),
@@ -47,12 +47,12 @@ export function projectPaths(projectDir: string = process.cwd()): ProjectPaths {
     memoryDbFile: join(dataDir, "memory.db"),
     mcpDir: join(dataDir, MCP_DIR_NAME),
     playwrightOutputDir: join(dataDir, PLAYWRIGHT_DIR_NAME),
-    logsDir: join(brownieDir, "logs"),
-    gitignoreFile: join(brownieDir, ".gitignore"),
+    logsDir: join(kikimoraDir, "logs"),
+    gitignoreFile: join(kikimoraDir, ".gitignore"),
   };
 }
 
-export const CONTROL_SOCKET_ENV = "BROWNIE_CONTROL_SOCKET";
+export const CONTROL_SOCKET_ENV = "KIKIMORA_CONTROL_SOCKET";
 
 export const UNIX_SOCKET_PATH_LIMIT = 104;
 
@@ -98,7 +98,7 @@ export function controlSocketPath(
     .digest("hex")
     .slice(0, 16);
   const uid = process.getuid?.() ?? 0;
-  const name = `brownie-${String(uid)}-${hash}`;
+  const name = `kikimora-${String(uid)}-${hash}`;
   return platform === "win32" ? `\\\\.\\pipe\\${name}` : join(tmpdir(), `${name}.sock`);
 }
 
@@ -106,9 +106,9 @@ export const packageRootDir = dirname(dirname(fileURLToPath(import.meta.url)));
 
 export const packagePromptsDir = join(packageRootDir, "prompts");
 
-export const globalBrownieDir = join(homedir(), BROWNIE_DIR_NAME);
+export const globalKikimoraDir = join(homedir(), KIKIMORA_DIR_NAME);
 
-export const globalConfigFile = join(globalBrownieDir, "config.json");
+export const globalConfigFile = join(globalKikimoraDir, "config.json");
 
 const packageManifestSchema = z.object({
   name: z.string().default(FALLBACK_PACKAGE_NAME),

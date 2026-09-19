@@ -73,7 +73,7 @@ export async function readTextSource(
 
 function describeRejection(cmd: string, error: string): string {
   return error === UNRECOGNIZED_REQUEST
-    ? `The running worker does not support "${cmd}" — it was started from an older brownie; restart it to pick up the installed version.`
+    ? `The running worker does not support "${cmd}" — it was started from an older kikimora; restart it to pick up the installed version.`
     : error;
 }
 
@@ -126,12 +126,12 @@ function orUnknown(value: string | undefined): string {
 }
 
 function identityLine(identity: WorkerIdentity): string {
-  return `brownie ${identity.version} · claude ${orUnknown(identity.claudeVersion)} · auth ${orUnknown(identity.authKind)} · pid ${String(identity.pid)}`;
+  return `kikimora ${identity.version} · claude ${orUnknown(identity.claudeVersion)} · auth ${orUnknown(identity.authKind)} · pid ${String(identity.pid)}`;
 }
 
 function renderIdentity(identity: WorkerIdentity): string[] {
   return [
-    `brownie   ${identity.version}`,
+    `kikimora   ${identity.version}`,
     `claude    ${orUnknown(identity.claudeVersion)}`,
     `node      ${identity.nodeVersion}`,
     `auth      ${orUnknown(identity.authKind)}`,
@@ -251,7 +251,7 @@ export async function runDrain(
 export const statusCommand = defineCommand({
   meta: {
     name: "status",
-    description: `Show the status of the brownie worker running in this project. ${SOCKET_ENV_HINT}`,
+    description: `Show the status of the kikimora worker running in this project. ${SOCKET_ENV_HINT}`,
   },
   args: {
     json: { type: "boolean", description: "Print the raw status as JSON" },
@@ -262,7 +262,7 @@ export const statusCommand = defineCommand({
 export const versionCommand = defineCommand({
   meta: {
     name: "version",
-    description: `Show the versions and identity of the brownie worker running in this project (brownie --version prints the installed CLI's version instead). ${SOCKET_ENV_HINT}`,
+    description: `Show the versions and identity of the kikimora worker running in this project (kikimora --version prints the installed CLI's version instead). ${SOCKET_ENV_HINT}`,
   },
   args: {
     json: { type: "boolean", description: "Print the raw identity as JSON" },

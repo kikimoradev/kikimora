@@ -29,6 +29,6 @@ export async function loadGlobalConfig(
 }
 
 export function isAutoUpdaterDisabled(env: NodeJS.ProcessEnv = process.env): boolean {
-  const value = env.BROWNIE_DISABLE_AUTOUPDATER?.trim().toLowerCase();
+  const value = env.KIKIMORA_DISABLE_AUTOUPDATER?.trim().toLowerCase();
   return value === "1" || value === "true";
 }

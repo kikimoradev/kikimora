@@ -74,17 +74,17 @@ describe("ensureReady", () => {
     await expect(ensureReady(dirs())).resolves.toEqual({
       paths: {
         monitor: {
-          promptPath: join(dir, ".brownie", "prompts", "monitor.prompt.md"),
+          promptPath: join(dir, ".kikimora", "prompts", "monitor.prompt.md"),
           systemPromptPath: join(systemPromptsDir, "monitor.system.md"),
         },
         executor: {
-          promptPath: join(dir, ".brownie", "prompts", "executor.prompt.md"),
+          promptPath: join(dir, ".kikimora", "prompts", "executor.prompt.md"),
           systemPromptPath: join(systemPromptsDir, "executor.system.md"),
         },
         summarizer: {
           systemPromptPath: join(systemPromptsDir, "summarizer.system.md"),
         },
-        contextPath: join(dir, ".brownie", "prompts", "context.md"),
+        contextPath: join(dir, ".kikimora", "prompts", "context.md"),
       },
       claude: {
         version: "2.1.268",
@@ -94,7 +94,7 @@ describe("ensureReady", () => {
     expect(logger.success).toHaveBeenCalledWith("Claude Code 2.1.268 (claude)");
     expect(logger.success).toHaveBeenCalledWith("Claude Code login (claude.ai)");
     expect(logger.error).not.toHaveBeenCalled();
-    expect(existsSync(join(dir, ".brownie", "prompts", "context.md"))).toBe(false);
+    expect(existsSync(join(dir, ".kikimora", "prompts", "context.md"))).toBe(false);
   });
 
   it("reports an unknown CLI version and login when claude prints nothing", async () => {
@@ -162,7 +162,7 @@ describe("ensureReady", () => {
   });
 
   it("throws with a configure hint when a prompt file is missing", async () => {
-    await removeTempDir(join(dir, ".brownie", "prompts"));
+    await removeTempDir(join(dir, ".kikimora", "prompts"));
     await expect(ensureReady(dirs())).rejects.toThrow(/interactive terminal/);
   });
 
@@ -174,7 +174,7 @@ describe("ensureReady", () => {
   });
 
   it("throws when the settings file is missing", async () => {
-    await removeTempDir(join(dir, ".brownie", "settings.json"));
+    await removeTempDir(join(dir, ".kikimora", "settings.json"));
     await expect(ensureReady(dirs())).rejects.toThrow(
       /Preflight failed[\s\S]*interactive terminal/,
     );

@@ -31,7 +31,7 @@ export function Wizard({
     <Box flexDirection="column" gap={1}>
       <Text wrap="wrap">
         <Text color={theme.accent} bold>
-          {"🧌 Brownie setup"}
+          {"Kikimora setup"}
         </Text>
         <Text dimColor>{` — ${INTRO}`}</Text>
       </Text>

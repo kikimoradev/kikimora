@@ -39,10 +39,10 @@ describe("loadGlobalConfig", () => {
 
 describe("isAutoUpdaterDisabled", () => {
   it("is true for 1/true and false otherwise", () => {
-    expect(isAutoUpdaterDisabled({ BROWNIE_DISABLE_AUTOUPDATER: "1" })).toBe(true);
-    expect(isAutoUpdaterDisabled({ BROWNIE_DISABLE_AUTOUPDATER: "true" })).toBe(true);
-    expect(isAutoUpdaterDisabled({ BROWNIE_DISABLE_AUTOUPDATER: "TRUE" })).toBe(true);
-    expect(isAutoUpdaterDisabled({ BROWNIE_DISABLE_AUTOUPDATER: "0" })).toBe(false);
+    expect(isAutoUpdaterDisabled({ KIKIMORA_DISABLE_AUTOUPDATER: "1" })).toBe(true);
+    expect(isAutoUpdaterDisabled({ KIKIMORA_DISABLE_AUTOUPDATER: "true" })).toBe(true);
+    expect(isAutoUpdaterDisabled({ KIKIMORA_DISABLE_AUTOUPDATER: "TRUE" })).toBe(true);
+    expect(isAutoUpdaterDisabled({ KIKIMORA_DISABLE_AUTOUPDATER: "0" })).toBe(false);
     expect(isAutoUpdaterDisabled({})).toBe(false);
   });
 });
