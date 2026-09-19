@@ -5,8 +5,8 @@ body:
   - type: textarea
     id: what-happened
     attributes:
-      label: What happened?
-      description: What did you do, what did you expect, and what happened instead?
+      label: What happened
+      description: What you did, what you expected, and what happened.
     validations:
       required: true
   - type: textarea
@@ -20,13 +20,13 @@ body:
     id: logs
     attributes:
       label: Logs
-      description: Relevant output — headless line logs, a fragment of a session log from `.kikimora/logs/`, or `kikimora status --json`. Redact anything private.
+      description: Relevant output, such as headless line logs, a fragment of a session log from `.kikimora/logs/`, or `kikimora status --json`. Redact anything private.
       render: text
   - type: input
     id: version
     attributes:
       label: Kikimora version
-      placeholder: "0.1.0"
+      placeholder: "0.7.0"
     validations:
       required: true
   - type: input
@@ -34,6 +34,6 @@ body:
     attributes:
       label: Environment
       description: OS, Node.js version, Claude Code version, TUI or headless
-      placeholder: macOS 15, Node 22.13, Claude Code 2.x, TUI
+      placeholder: macOS 15, Node 22.16, Claude Code 2.x, TUI
     validations:
       required: true

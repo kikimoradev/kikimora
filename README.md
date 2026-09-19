@@ -1,11 +1,13 @@
 <h1 align="center">
-  <img alt="Kikimora" src="https://raw.githubusercontent.com/kikimoradev/kikimora/main/assets/kikimora-logo.png" width="140"><br>
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/kikimoradev/kikimora/main/assets/kikimora-logo-dark.svg">
+    <img alt="Kikimora" src="https://raw.githubusercontent.com/kikimoradev/kikimora/main/assets/kikimora-logo.svg" width="96">
+  </picture><br>
   Kikimora
 </h1>
 
 <p align="center">
-  <strong>Your household sprite for the work you keep putting off. It works while you're not looking.</strong><br>
-  <em>Not the cake. The spirit.</em>
+  <strong>A CLI that runs Claude Code sessions in a monitor, executor and summarizer loop.</strong>
 </p>
 
 <p align="center">
@@ -19,7 +21,7 @@
   <img alt="Kikimora demo" src="https://raw.githubusercontent.com/kikimoradev/kikimora/main/assets/demo.gif" width="800">
 </p>
 
-Kikimora is a CLI that cyclically runs [Claude Code](https://claude.com/claude-code) sessions in a two-agent setup: the **monitor** watches for tasks, the **executor** completes them, and the **summarizer** writes findings to long-term memory. You sleep — the sprite tidies up.
+Kikimora is a CLI that runs [Claude Code](https://claude.com/claude-code) sessions in three roles. The **monitor** reports tasks, the **executor** completes them, and the **summarizer** writes findings to long-term memory.
 
 ```
         every N minutes (only during working hours)
@@ -43,41 +45,51 @@ Kikimora is a CLI that cyclically runs [Claude Code](https://claude.com/claude-c
 └───────────────────────────────────────────────┘
 ```
 
-Two loops run in parallel and talk only through the shared task store: the monitor patrols your sources on an interval and reports tasks as structured JSON; the executor wakes the moment tasks land and completes them one by one, with full tool access and searchable memory of past sessions.
+The monitor and executor loops run in parallel and share only the task store:
 
-## What can it do for you?
+- The monitor runs a session on an interval and returns tasks as JSON that matches an enforced schema.
+- New tasks wake the executor, which takes them one at a time.
+- Each executor session has full tool access and can search the summaries of earlier sessions.
+- After an executor session, the summarizer reads its log and stores a summary in memory.
 
-Whatever you describe in one markdown file. Some sprites people keep:
+The models in the diagram are the defaults.
 
-- **CI medic** — watch the pipeline on `main`, investigate red builds, open a fix PR.
-- **Issue triager** — pick up well-scoped bug reports and turn them into pull requests.
-- **Dependency groundskeeper** — notice pending patch updates, bump, run the tests.
-- **Backlog sweeper** — work through `TODO`s, flaky tests, and lint debt while you build features.
+## Use cases
 
-The monitor's patrol is just a prompt:
+The monitor prompt defines what counts as a task. Examples:
+
+- **CI repair**: watch the pipeline on `main`, investigate failed builds, open a fix PR.
+- **Issue triage**: pick up well-scoped bug reports and turn them into pull requests.
+- **Dependency updates**: detect pending patch updates, bump them, run the tests.
+- **Backlog work**: work through `TODO`s, flaky tests and lint findings.
+
+A monitor prompt for the first two:
 
 ```markdown
-1. **CI on main** — run `gh run list --branch main --limit 5`. If the latest
+1. **CI on main**: run `gh run list --branch main --limit 5`. If the latest
    run failed, report a task to investigate and fix it (id: `ci-<run-id>`).
-2. **Issues labeled `bug`** — for each issue describing a concrete,
+2. **Issues labeled `bug`**: for each issue describing a concrete,
    self-contained change, report a task with id `issue-<number>`.
 ```
 
 Full examples and prompt-writing tips: [docs/prompts.md](https://github.com/kikimoradev/kikimora/blob/main/docs/prompts.md).
 
-## Highlights
+## Features
 
-- 🔁 **Autonomous loop** — the monitor finds work, the executor does it; zero manual queuing (though `/task` adds work by hand).
-- 🧠 **Long-term memory** — SQLite + FTS5 exposed to the executor over MCP; the sprite learns from its own sessions.
-- 📺 **Interactive TUI** — a Claude-Code-style shell (Ink/React): live agent status, switchable views, slash commands.
-- ⏰ **Working hours** — a time window and days of the week (`08:00-18:00`, `mon-fri`); outside them the monitor rests.
-- 🔂 **Smart retries** — transient failures are retried, permanent ones fail fast; stalled tasks recover on restart.
-- ⛔ **Usage-limit aware** — when Claude Code hits its 5-hour or weekly limit, both agents park with a countdown and resume automatically after the reset; interrupted tasks go back to the queue without burning a retry.
-- 📝 **Prompts in files** — the entire personality lives in markdown, no prompts baked into the code.
+- **Task loop**: the monitor reports tasks and the executor completes them. `/task` adds a task by hand.
+- **Long-term memory**: SQLite with FTS5, exposed to the executor over MCP (`memory_search`, `memory_get`).
+- **Interactive TUI**: an Ink/React shell with live agent status, switchable views and slash commands.
+- **Working hours**: a time window and days of the week (`08:00-18:00`, `mon-fri`) limit when the monitor runs.
+- **Retries**: transient failures are retried up to `maxTaskAttempts`, other failures mark the task `failed`. Tasks left `in_progress` by a crash return to `pending` on the next start.
+- **Usage limits**: when Claude Code reports its 5-hour or weekly limit, both agents wait with a countdown until the reset plus 60 s. The interrupted task returns to the queue and the attempt is not counted.
+- **Prompts in files**: agent prompts are markdown files; the code contains no prompt text.
 
 ## Quick start
 
-You need Node.js ≥ 22.16 (an official build — kikimora's long-term memory needs SQLite with FTS5) and the [Claude Code CLI](https://claude.com/claude-code) (`claude`) installed and logged in.
+Requirements:
+
+- Node.js `^22.16.0` or `>=24.0.0` (the `engines` field), an official build: long-term memory needs `node:sqlite` with FTS5.
+- The [Claude Code CLI](https://claude.com/claude-code) (`claude`), installed and logged in.
 
 ```bash
 npm install -g @kikimoradev/kikimora
@@ -86,61 +98,71 @@ cd your-project
 kikimora          # first run asks for the two agent prompts, then opens the TUI
 ```
 
-The first-run wizard asks only two questions — what the monitor should watch and how the executor should work — in a multi-line editor built for pasting markdown (Enter adds a line, Ctrl+D submits). Everything else starts with sensible defaults you can change later with slash commands. Agents boot **paused** — nothing runs until you type `/start`.
+The first-run wizard asks for two prompts: what the monitor watches and how the executor works. Its multi-line editor accepts pasted markdown; Enter adds a line and Ctrl+D submits. All other settings start at their defaults and can be changed later with slash commands. In a terminal the agents start **paused** and run after `/start`.
 
-Working from a clone instead: `pnpm install && pnpm start`.
+From a clone: `pnpm install && pnpm start`.
 
 ## The TUI
 
-A shell in the style of Claude Code: a header with the live status of both agents (state, model, cost, task counters), a view in the middle, and a command input at the bottom (history, tab completion, pgup/pgdn scrolling):
+The screen has three parts:
 
-| Command                       | Effect                                                     |
-| ----------------------------- | ---------------------------------------------------------- |
-| `/dashboard`                  | combined view: both agents + the task table                |
-| `/monitor`, `/executor`       | one agent full-screen with its recent outcomes             |
-| `/tasks`                      | the full task list                                         |
-| `/memory [query]`             | browse long-term memory, optionally filtered by FTS search |
-| `/start [monitor\|executor]`  | start paused agents — agents boot paused                   |
-| `/pause [monitor\|executor]`  | graceful pause — the current session finishes first        |
-| `/drain`                      | let the current sessions finish, then shut down            |
-| `/task <description>`         | add a task by hand (the executor picks it up immediately)  |
-| `/retry <task-id>`            | requeue a failed task                                      |
-| `/cancel <task-id>`           | cancel a pending task                                      |
-| `/model <agent> <model>`      | set the model (`haiku`, `sonnet`, `opus`, `fable`)         |
-| `/effort <agent> <level>`     | set the reasoning effort (`low`…`max`)                     |
-| `/interval <minutes>`         | set how often the monitor looks for new tasks              |
-| `/hours <HH:MM-HH:MM\|off>`   | set the monitor working hours, `off` = 24/7                |
-| `/days <days\|off>`           | set the monitor working days (`mon-fri`), `off` = daily    |
-| `/prompt <monitor\|executor>` | view and edit an agent prompt — Ctrl+D saves, Esc closes   |
-| `/config`                     | show the current configuration                             |
-| `/help`                       | list all commands                                          |
-| `/exit`                       | graceful shutdown (same as ctrl+c)                         |
+- a header with the live status of both agents: state, model, cost, task counters;
+- the current view;
+- a command input with history, tab completion and PgUp/PgDn scrolling.
 
-Configuration commands persist to `.kikimora/settings.json` and apply live — the next agent session already uses the new value, no restart needed.
+| Command                       | Effect                                                                  |
+| ----------------------------- | ----------------------------------------------------------------------- |
+| `/dashboard`                  | combined view: both agents and the task table                           |
+| `/monitor`, `/executor`       | one agent full-screen with its recent outcomes                          |
+| `/tasks`                      | the full task list                                                      |
+| `/memory [query]`             | browse long-term memory, optionally filtered by FTS search              |
+| `/start [monitor\|executor]`  | start paused agents                                                     |
+| `/pause [monitor\|executor]`  | pause agents after the current session finishes                         |
+| `/drain`                      | let the current sessions finish, then shut down                         |
+| `/task <description>`         | add a task by hand; an idle executor takes it at once                   |
+| `/retry <task-id>`            | requeue a failed task                                                   |
+| `/cancel <task-id>`           | cancel a pending task                                                   |
+| `/model <agent> <model>`      | set the model (`haiku`, `sonnet`, `opus`, `fable`)                      |
+| `/effort <agent> <level>`     | set the reasoning effort (`low`, `medium`, `high`, `xhigh`, `max`)      |
+| `/interval <minutes>`         | set how often the monitor looks for new tasks                           |
+| `/hours <HH:MM-HH:MM\|off>`   | set the monitor working hours; `off` means 24/7                         |
+| `/days <days\|off>`           | set the monitor working days (`mon-fri`); `off` means every day         |
+| `/prompt <monitor\|executor>` | view and edit an agent prompt; Ctrl+D saves, Esc closes                 |
+| `/context`                    | view and edit the workspace context file; Ctrl+D saves, Esc closes      |
+| `/config`                     | show the current configuration                                          |
+| `/help`                       | list all commands                                                       |
+| `/exit`                       | stop at once, like Ctrl+C: running sessions are killed, logs are closed |
 
-## Headless & servers
+Configuration commands write to `.kikimora/settings.json` and take effect from the next agent session, without a restart.
 
-Without a TTY (systemd, Docker, CI, piping) kikimora skips the dashboard, starts the agents immediately, and prints structured line logs to stdout — human-readable by default, NDJSON with `--log-format json` for log aggregators. A running worker is controlled from a second shell over a local control socket:
+## Headless mode and servers
 
-| Command                                                    | Effect                                                                                                              |
-| ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
-| `kikimora`                                                 | start the worker (TUI in a terminal, headless without one)                                                          |
-| `kikimora --headless [--log-format json]`                  | force headless mode even in a terminal                                                                              |
-| `kikimora --paused`                                        | boot with both agents paused; `kikimora resume` starts them                                                         |
-| `kikimora init --monitor-prompt <f> --executor-prompt <f>` | non-interactive setup for servers (cloud-init, Ansible); `--settings <f>` and `--context <f>` write those files too |
-| `kikimora status [--json]`                                 | live status of the running worker (doubles as a health check)                                                       |
-| `kikimora version [--json]`                                | kikimora, Claude Code and Node versions, auth kind, pid of the worker                                               |
-| `kikimora pause [monitor\|executor]`                       | graceful pause, same as `/pause` in the TUI                                                                         |
-| `kikimora resume [monitor\|executor]`                      | resume paused agents                                                                                                |
-| `kikimora drain [--timeout <ms>]`                          | let the current sessions finish, then exit (with a deadline, kill what still runs)                                  |
-| `kikimora tasks\|settings\|prompt\|memory …`               | edit the queue, settings, prompts and memory of the running worker                                                  |
-| `kikimora update [--check]`                                | update to the newest published version (auto-updates in the background too)                                         |
+Without a TTY (systemd, Docker, CI, a pipe), kikimora skips the dashboard and starts the agents immediately. It prints line logs to stdout: human-readable by default, NDJSON with `--log-format json`. A second shell controls the running worker over a local control socket.
 
-A second `kikimora` in the same project refuses to start while one is already running. The control socket, its subcommands and wire protocol: [docs/control.md](https://github.com/kikimoradev/kikimora/blob/main/docs/control.md). The full server story — the NDJSON event schema, a DigitalOcean/systemd runbook, authentication without a browser, the reference `Dockerfile` + `docker-compose.yml`, and the prebuilt images on GHCR (`ghcr.io/kikimoradev/kikimora`, plus a `-browser` variant with Chromium for Playwright MCP): [docs/deployment.md](https://github.com/kikimoradev/kikimora/blob/main/docs/deployment.md).
+| Command                                                         | Effect                                                                                                      |
+| --------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
+| `kikimora`                                                      | start the worker (TUI in a terminal, headless without one)                                                  |
+| `kikimora --headless [--log-format json]`                       | force headless mode in a terminal                                                                           |
+| `kikimora --paused`                                             | start with both agents paused; `kikimora resume` starts them                                                |
+| `kikimora init --monitor-prompt <f> --executor-prompt <f>`      | non-interactive setup (cloud-init, Ansible); `--settings <f>` and `--context <f>` write those files as well |
+| `kikimora status [--json]`                                      | live status of the running worker; exits `1` without one, so it works as a health check                     |
+| `kikimora version [--json]`                                     | kikimora, Claude Code and Node versions, auth kind and pid of the running worker                            |
+| `kikimora pause [monitor\|executor]`                            | pause after the current session, same as `/pause`                                                           |
+| `kikimora resume [monitor\|executor]`                           | resume paused agents                                                                                        |
+| `kikimora drain [--timeout <ms>]`                               | let the current sessions finish, then exit; after the timeout, kill what still runs                         |
+| `kikimora tasks\|settings\|prompt\|context\|memory\|sessions …` | manage the running worker's queue, settings, prompts, context and memory, and list its sessions             |
+| `kikimora update [--check]`                                     | update to the newest published version; a running worker also checks in the background                      |
+
+A second `kikimora` in the same project exits with an error while one is running.
+
+- The control socket, its subcommands and the wire protocol: [docs/control.md](https://github.com/kikimoradev/kikimora/blob/main/docs/control.md).
+- The NDJSON event schema, a systemd runbook, authentication without a browser, the reference `Dockerfile` and `docker-compose.yml`, and the prebuilt images `ghcr.io/kikimoradev/kikimora` (plus a `-browser` variant with Chromium for Playwright MCP): [docs/deployment.md](https://github.com/kikimoradev/kikimora/blob/main/docs/deployment.md).
 
 ## Configuration
 
-Like Claude Code's `.claude/`, all per-project state lives in `.kikimora/` inside the directory you run kikimora from: `settings.json`, the two project prompts, and runtime data (tasks, memory, logs — gitignored automatically). The settings file is a strictly validated JSON where every section is optional — change it with the slash commands above or by hand:
+Per-project state lives in `.kikimora/` inside the directory kikimora runs from, like Claude Code's `.claude/`. It holds `settings.json`, the project prompts and runtime data (tasks, memory, logs). The runtime data directories are listed in `.kikimora/.gitignore`, which setup writes.
+
+`settings.json` is validated strictly and every section is optional. Change it with the slash commands above or by hand:
 
 ```json
 {
@@ -153,28 +175,26 @@ Like Claude Code's `.claude/`, all per-project state lives in `.kikimora/` insid
 }
 ```
 
-All settings, the full directory layout, and what to commit: [docs/configuration.md](https://github.com/kikimoradev/kikimora/blob/main/docs/configuration.md).
+All settings, the directory layout and what to commit: [docs/configuration.md](https://github.com/kikimoradev/kikimora/blob/main/docs/configuration.md).
 
-## Security & costs
+## Security and costs
 
-> **⚠️ The sprite works directly in your project.** Agent sessions run with `--permission-mode bypassPermissions` and full tool access **in the directory you run `kikimora` from** — there is no isolated sandbox. Run it in projects you trust it with: well-considered prompts, no secrets within reach, version control as your safety net. Treat tasks reported by the monitor like any input to an autonomous agent — the prompts define the boundaries.
+> **Warning: agents work directly in your project.** Sessions run with `--permission-mode bypassPermissions` and full tool access **in the directory `kikimora` runs from**. Kikimora provides no sandbox. Run it only in projects where that is acceptable: reviewed prompts, no secrets within reach, version control to undo changes. Tasks reported by the monitor are input to an autonomous agent; the prompts set the boundaries.
 
-Kikimora spends real tokens: every patrol is a session, every task is a session. Interval × models = your bill, so start conservative — a longer `intervalMinutes`, `sonnet` on the executor — and scale up once you trust the prompts. `fable` is the most capable and the most expensive tier (roughly twice the price of `opus`), so reserve it for the executor on work that earns it. Working hours keep the sprite from patrolling an empty repo at 3 a.m.
+Each monitor patrol and each task is a Claude Code session, and each session is billed. The bill scales with the interval and the models. Start with a long `intervalMinutes` and `sonnet` on the executor, then scale up once the prompts behave.
+
+On the Anthropic API, `fable` costs twice the per-token rate of `opus` ($10 and $50 against $5 and $25 per million input and output tokens, Anthropic pricing as of June 2026). Use it on the executor for work that needs it. Working hours stop the monitor from patrolling outside the configured window.
 
 ## Development
 
 ```bash
 pnpm dev              # start with watch (tsx)
-pnpm check            # typecheck + lint + format:check + test — before every commit
+pnpm check            # typecheck + lint + format:check + test, before every commit
 pnpm build            # tsup -> dist/
 ```
 
-Claude sessions are tested against a fake `claude` binary (`test/fixtures/claude`) — no real API calls. Coverage thresholds are enforced. See [CONTRIBUTING.md](https://github.com/kikimoradev/kikimora/blob/main/CONTRIBUTING.md).
+Tests run Claude sessions against a fake `claude` binary (`test/fixtures/claude`) and make no API calls. Coverage thresholds are enforced. See [CONTRIBUTING.md](https://github.com/kikimoradev/kikimora/blob/main/CONTRIBUTING.md).
 
 ## License
 
 [MIT](https://github.com/kikimoradev/kikimora/blob/main/LICENSE) © Kikimora
-
-## Why "Kikimora"? 🧌
-
-In British folklore a **kikimora** is a household spirit that, at night — while the household sleeps — quietly finishes their work for them. It has two iron rules: it works unbidden, and it vanishes when watched. Ours is a touch more modern: instead of a bowl of milk it takes tokens, and instead of sweeping the room it closes out your tasks. Watching is allowed (that's what the dashboard is for).

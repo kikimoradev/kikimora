@@ -2,27 +2,25 @@
 
 ## Supported versions
 
-Only the latest release receives security fixes.
+Security fixes go into the latest release only.
 
 ## Reporting a vulnerability
 
-Please do not report security issues in public GitHub issues.
-
-Use [GitHub private vulnerability reporting](https://github.com/kikimoradev/kikimora/security/advisories/new) to report privately. You will get a response within 7 days; fixes for confirmed vulnerabilities are released as fast as severity demands.
+Report security issues through [GitHub private vulnerability reporting](https://github.com/kikimoradev/kikimora/security/advisories/new), not in public GitHub issues. Reports get a response within 7 days. Fixes for confirmed vulnerabilities are released on a schedule set by their severity.
 
 ## Threat model
 
-Kikimora deliberately runs Claude Code sessions with `--permission-mode bypassPermissions` and full tool access in the directory it is started from. There is no sandbox — the prompts are the safety boundary, and the operator chooses what the agents may touch. That design is documented in the README and is not itself a vulnerability.
+Kikimora runs Claude Code sessions with `--permission-mode bypassPermissions` and full tool access in the directory it is started from. It provides no sandbox. The prompts are the safety boundary, and the operator decides what the agents may touch. The README documents this design, and it is not a vulnerability in itself.
 
-**In scope** — examples of what we want to hear about:
+**In scope**, for example:
 
-- another local user being able to read or control a running worker (control socket, log files, task store)
-- kikimora itself writing credentials or other secrets somewhere unexpected (logs, memory database, task files)
-- a crafted project or configuration escaping the documented `.kikimora/` layout (path traversal, symlink tricks)
-- the MCP memory server exposing more than the `memory_search` / `memory_get` contract
+- another local user reading or controlling a running worker (control socket, log files, task store);
+- kikimora writing credentials or other secrets to an unexpected place (logs, memory database, task files);
+- a crafted project or configuration writing outside the documented `.kikimora/` layout (path traversal, symlinks);
+- the MCP memory server exposing more than its `memory_search` and `memory_get` tools.
 
 **Out of scope**:
 
-- an agent doing something undesirable that the configured prompts allowed — prompt design is the operator's responsibility
-- prompt injection through content the agents read while working; this is an inherent limitation of autonomous agents (see "Security & costs" in the README)
-- vulnerabilities in Claude Code itself — report those to [Anthropic](https://www.anthropic.com/security)
+- an agent action that the configured prompts allowed; prompt design is the operator's responsibility;
+- prompt injection through content the agents read while working, a limitation of autonomous agents (see "Security and costs" in the README);
+- vulnerabilities in Claude Code itself; report those to [Anthropic](https://www.anthropic.com/security).

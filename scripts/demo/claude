@@ -1,5 +1,17 @@
 #!/usr/bin/env node
 
+if (process.argv.includes("--version")) {
+  process.stdout.write("2.1.268 (Claude Code)\n");
+  process.exit(0);
+}
+
+if (process.argv[2] === "auth" && process.argv[3] === "status") {
+  process.stdout.write(
+    `${JSON.stringify({ loggedIn: true, authMethod: "claude.ai" })}\n`,
+  );
+  process.exit(0);
+}
+
 const modelIndex = process.argv.indexOf("--model");
 const model = modelIndex >= 0 ? process.argv[modelIndex + 1] : "sonnet";
 const sessionId = `demo-${model}-${process.pid}`;
