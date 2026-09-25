@@ -1,6 +1,11 @@
 import { render } from "ink-testing-library";
 import { describe, expect, it, vi } from "vitest";
-import { PromptEditor, type PromptEditorProps } from "../../src/ui/prompt-editor.js";
+import {
+  cursorRowIndex,
+  PromptEditor,
+  visualRows,
+  type PromptEditorProps,
+} from "../../src/ui/prompt-editor.js";
 import { eventually, inputReady, makeStdinLossless } from "../helpers.js";
 
 const ARROW_UP = "\u001B[A";
@@ -15,6 +20,12 @@ const CTRL_C = "\u0003";
 const CTRL_D = "\u0004";
 const ENTER = "\r";
 const TAB = "\t";
+const DELETE = "\u001B[3~";
+const CTRL_A = "\u0001";
+const CTRL_E = "\u0005";
+const CTRL_K = "\u000B";
+const CTRL_U = "\u0015";
+const CTRL_W = "\u0017";
 
 async function tick(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 20));
@@ -42,13 +53,46 @@ async function editor(overrides: Partial<PromptEditorProps> = {}) {
 }
 
 describe("PromptEditor", () => {
-  it("shows the title, step, placeholder and hint", async () => {
-    const { lastFrame, unmount } = await editor({ placeholder: "e.g. GitHub issues" });
+  it("shows the title and step in the border, the placeholder and the key hints", async () => {
+    const { lastFrame, unmount } = await editor({
+      placeholder: "e.g. GitHub issues",
+      description: "where to look",
+    });
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("What should the monitor watch?");
-    expect(frame).toContain("step 1/2");
+    expect(frame).toMatch(/╭─ What should the monitor watch\? ─+ 1\/2 ─╮/);
+    expect(frame).toMatch(/╰─ where to look ─+╯/);
     expect(frame).toContain("e.g. GitHub issues");
-    expect(frame).toContain("Enter: new line · Ctrl+D: submit · Esc: cancel");
+    expect(frame).toContain("enter new line · ctrl+d submit · esc cancel");
+    expect(frame).toContain("1 line · 0 chars");
+    unmount();
+  });
+
+  it("names the submit and cancel actions it was given", async () => {
+    const { lastFrame, unmount } = await editor({
+      submitLabel: "save",
+      cancelLabel: "close without saving",
+    });
+    expect(lastFrame()).toContain("ctrl+d save · esc close without saving");
+    unmount();
+  });
+
+  it("marks unsaved changes when there is no step", async () => {
+    const { lastFrame, type, unmount } = await editor({
+      step: undefined,
+      initialValue: "saved",
+    });
+    expect(lastFrame()).not.toContain("modified");
+    await type("!");
+    await eventually(() => {
+      expect(lastFrame()).toContain("modified");
+    });
+    expect(lastFrame()).toContain("1 line · 6 chars");
+    unmount();
+  });
+
+  it("fills the given height even with little content", async () => {
+    const { lastFrame, unmount } = await editor({ maxVisibleLines: 6, fill: true });
+    expect((lastFrame() ?? "").split("\n")).toHaveLength(9);
     unmount();
   });
 
@@ -172,14 +216,80 @@ describe("PromptEditor", () => {
     const { lastFrame, type, unmount } = await editor({ maxVisibleLines: 3 });
     await type("l1\rl2\rl3\rl4\rl5");
     await eventually(() => {
-      expect(lastFrame()).toContain("… 2 more lines above");
+      expect(lastFrame()).toContain("↑ 2 more · 1/2");
     });
     await type(ARROW_UP);
     await type(ARROW_UP);
     await type(ARROW_UP);
     await type(ARROW_UP);
     await eventually(() => {
-      expect(lastFrame()).toContain("… 2 more lines below");
+      expect(lastFrame()).toContain("↓ 2 more");
+    });
+    expect(lastFrame()).not.toContain("↑ 2 more");
+    unmount();
+  });
+
+  it("counts wrapped rows in the viewport so the frame never outgrows it", async () => {
+    const { lastFrame, type, unmount } = await editor({ maxVisibleLines: 3, width: 24 });
+    await type("x".repeat(100));
+    await eventually(() => {
+      expect(lastFrame()).toContain("↑ 3 more");
+    });
+    expect((lastFrame() ?? "").split("\n")).toHaveLength(6);
+    unmount();
+  });
+
+  it("moves up and down through the rows of a wrapped line", async () => {
+    const { onSubmit, type, unmount } = await editor({ width: 14 });
+    await type("abcdefghijklmnopqrst");
+    await type(ARROW_UP);
+    await type("^");
+    await type(ARROW_DOWN);
+    await type("$");
+    await type(CTRL_D);
+    await eventually(() => {
+      expect(onSubmit).toHaveBeenCalledWith("abcdefghij^klmnopqrst$");
+    });
+    unmount();
+  });
+
+  it("supports readline keys within a line", async () => {
+    const { onSubmit, type, unmount } = await editor();
+    await type("keep drop this");
+    await type(CTRL_W);
+    await type(CTRL_W);
+    await type(CTRL_A);
+    await type(">");
+    await type(CTRL_E);
+    await type("!");
+    await type(ENTER);
+    await type("gone");
+    await type(CTRL_U);
+    await type("tail cut");
+    await type(ARROW_LEFT);
+    await type(ARROW_LEFT);
+    await type(ARROW_LEFT);
+    await type(CTRL_K);
+    await type(CTRL_D);
+    await eventually(() => {
+      expect(onSubmit).toHaveBeenCalledWith(">keep !\ntail");
+    });
+    unmount();
+  });
+
+  it("forward delete removes the next character and joins at the end of a line", async () => {
+    const { onSubmit, type, unmount } = await editor();
+    await type("ab");
+    await type(ENTER);
+    await type("cd");
+    await type(ARROW_UP);
+    await type(END);
+    await type(DELETE);
+    await type(HOME);
+    await type(DELETE);
+    await type(CTRL_D);
+    await eventually(() => {
+      expect(onSubmit).toHaveBeenCalledWith("bcd");
     });
     unmount();
   });
@@ -206,7 +316,7 @@ describe("PromptEditor", () => {
     });
     await type("now filled");
     await eventually(() => {
-      expect(lastFrame()).toContain("Enter: new line");
+      expect(lastFrame()).toContain("enter new line");
     });
     unmount();
   });
@@ -237,5 +347,22 @@ describe("PromptEditor", () => {
       expect(second.onCancel).toHaveBeenCalledTimes(1);
     });
     second.unmount();
+  });
+});
+
+describe("visualRows", () => {
+  it("splits long lines into rows of the given width and keeps a row for the cursor", () => {
+    expect(visualRows(["abcdef", ""], 3)).toEqual([
+      { line: 0, start: 0, text: "abc" },
+      { line: 0, start: 3, text: "def" },
+      { line: 0, start: 6, text: "" },
+      { line: 1, start: 0, text: "" },
+    ]);
+  });
+
+  it("finds the row that holds the cursor", () => {
+    const rows = visualRows(["abcdef", "gh"], 4);
+    expect(cursorRowIndex(rows, { lines: ["abcdef", "gh"], row: 0, col: 5 }, 4)).toBe(1);
+    expect(cursorRowIndex(rows, { lines: ["abcdef", "gh"], row: 1, col: 2 }, 4)).toBe(2);
   });
 });

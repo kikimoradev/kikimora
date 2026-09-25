@@ -1,87 +1,155 @@
 import { Box, Text } from "ink";
 import type { JSX } from "react";
-import { COMMANDS } from "../commands.js";
-import { theme } from "../theme.js";
+import { COMMAND_GROUPS, COMMANDS } from "../commands.js";
+import { Panel } from "../panel.js";
+import { describeWindow, listWindow, PANEL_BORDER_ROWS } from "../scroll.js";
 import { wrapText } from "../wrap.js";
 
 export interface HelpViewProps {
   width: number;
   height: number;
+  offset?: number | undefined;
 }
 
-const KEYS: readonly [string, string][] = [
-  ["↑/↓", "pick a suggestion / browse command history"],
-  ["tab", "complete the selected command / switch panel"],
-  ["pgup/pgdn", "scroll the focused panel"],
-  ["ctrl+o", "expand or collapse tool output"],
-  ["esc", "clear the input / follow the tail"],
-  ["ctrl+c", "quit"],
+type HelpEntries = readonly (readonly [string, string])[];
+
+const KEY_SECTIONS: readonly [string, HelpEntries][] = [
+  [
+    "Keys",
+    [
+      ["tab", "switch panel · complete a command or value"],
+      ["↑/↓", "pick a suggestion · browse history"],
+      ["pgup/pgdn", "scroll the focused panel or list"],
+      ["esc", "clear the input · follow the tail"],
+      ["ctrl+o", "expand or collapse tool output"],
+      ["ctrl+c", "quit"],
+    ],
+  ],
+  [
+    "Editing",
+    [
+      ["ctrl+a/e", "start / end of the line"],
+      ["alt+←/→", "previous / next word"],
+      ["ctrl+w", "delete the previous word"],
+      ["ctrl+u/k", "delete to the start / end of the line"],
+    ],
+  ],
 ];
 
-interface HelpRow {
-  label: string;
-  text: string;
+const COMMAND_LABEL_WIDTH = 28;
+const KEY_LABEL_WIDTH = 11;
+const COLUMN_GAP = 3;
+const KEYS_COLUMN_WIDTH = 56;
+export const HELP_TWO_COLUMN_WIDTH = 140;
+
+type HelpLine =
+  | { kind: "title"; text: string }
+  | { kind: "entry"; label: string; text: string }
+  | { kind: "gap" };
+
+export type HelpRow = readonly (HelpLine | undefined)[];
+
+function commandSections(): [string, HelpEntries][] {
+  return COMMAND_GROUPS.map((group) => [
+    group,
+    COMMANDS.filter((command) => command.group === group).map(
+      (command) =>
+        [
+          `/${command.name}${command.args === undefined ? "" : ` ${command.args}`}`,
+          command.summary,
+        ] as const,
+    ),
+  ]);
 }
 
-function columnRows(
-  entries: readonly [string, string][],
+function sectionLines(
+  sections: readonly [string, HelpEntries][],
   labelWidth: number,
   columnWidth: number,
-): HelpRow[] {
+): HelpLine[] {
   const textWidth = Math.max(10, columnWidth - labelWidth);
-  return entries.flatMap(([label, summary]) =>
-    wrapText(summary, textWidth, textWidth).map((chunk, index) => ({
-      label: index === 0 ? label.padEnd(labelWidth) : " ".repeat(labelWidth),
-      text: chunk,
-    })),
-  );
+  return sections.flatMap(([title, entries], index): HelpLine[] => [
+    ...(index === 0 ? [] : [{ kind: "gap" } as const]),
+    { kind: "title", text: title },
+    ...entries.flatMap(([label, summary]) =>
+      wrapText(summary, textWidth, textWidth).map((chunk, chunkIndex): HelpLine => ({
+        kind: "entry",
+        label: chunkIndex === 0 ? label.padEnd(labelWidth) : " ".repeat(labelWidth),
+        text: chunk,
+      })),
+    ),
+  ]);
 }
 
-function HelpColumn({
-  title,
-  rows,
-  capacity,
+export function helpColumns(width: number): number[] {
+  const inner = Math.max(30, width - 4);
+  if (inner < HELP_TWO_COLUMN_WIDTH) return [inner];
+  return [inner - KEYS_COLUMN_WIDTH - COLUMN_GAP, KEYS_COLUMN_WIDTH];
+}
+
+export function helpRows(width: number): HelpRow[] {
+  const [commandsWidth = 30, keysWidth] = helpColumns(width);
+  const commands = sectionLines(commandSections(), COMMAND_LABEL_WIDTH, commandsWidth);
+  if (keysWidth === undefined) {
+    return [
+      ...commands,
+      { kind: "gap" } as const,
+      ...sectionLines(KEY_SECTIONS, KEY_LABEL_WIDTH, commandsWidth),
+    ].map((line) => [line]);
+  }
+  const keys = sectionLines(KEY_SECTIONS, KEY_LABEL_WIDTH, keysWidth);
+  return Array.from({ length: Math.max(commands.length, keys.length) }, (_, index) => [
+    commands[index],
+    keys[index],
+  ]);
+}
+
+function Line({
+  line,
+  width,
 }: {
-  title: string;
-  rows: HelpRow[];
-  capacity: number;
+  line: HelpLine | undefined;
+  width: number | undefined;
 }): JSX.Element {
+  if (line === undefined || line.kind === "gap") {
+    return (
+      <Box width={width} flexShrink={0}>
+        <Text> </Text>
+      </Box>
+    );
+  }
   return (
-    <Box flexDirection="column" flexBasis={0} flexGrow={1} overflow="hidden">
-      <Text bold>{title}</Text>
-      {rows.slice(0, capacity).map((row, index) => (
-        <Text key={index} wrap="truncate-end">
-          <Text bold>{row.label}</Text>
-          <Text dimColor>{row.text}</Text>
+    <Box width={width} flexShrink={0} overflow="hidden">
+      {line.kind === "title" ? (
+        <Text bold>{line.text}</Text>
+      ) : (
+        <Text wrap="truncate-end">
+          {line.label}
+          <Text dimColor>{line.text}</Text>
         </Text>
-      ))}
+      )}
     </Box>
   );
 }
 
-export function HelpView({ width, height }: HelpViewProps): JSX.Element {
-  const columnWidth = Math.max(30, Math.floor((width - 6) / 2));
-  const capacity = Math.max(1, height - 3);
-  const commandRows = columnRows(
-    COMMANDS.map((command) => [
-      `/${command.name}${command.args === undefined ? "" : ` ${command.args}`}`,
-      command.summary,
-    ]),
-    27,
-    columnWidth,
-  );
-  const keyRows = columnRows(KEYS, 11, columnWidth);
+export function HelpView({ width, height, offset = 0 }: HelpViewProps): JSX.Element {
+  const window = listWindow(helpRows(width), height - PANEL_BORDER_ROWS, offset);
+  const columns = helpColumns(width);
+  const range = describeWindow(window);
   return (
-    <Box
-      borderStyle="round"
-      borderColor={theme.muted}
-      paddingX={1}
+    <Panel
+      title="Help"
+      aside={<Text dimColor>type / to open the command menu</Text>}
+      footerAside={range === undefined ? undefined : <Text dimColor>{range}</Text>}
       height={height}
-      overflow="hidden"
     >
-      <HelpColumn title="Commands" rows={commandRows} capacity={capacity} />
-      <Box width={2} />
-      <HelpColumn title="Keys" rows={keyRows} capacity={capacity} />
-    </Box>
+      {window.visible.map((row, index) => (
+        <Box key={index} height={1} gap={COLUMN_GAP}>
+          {row.map((line, column) => (
+            <Line key={column} line={line} width={columns[column]} />
+          ))}
+        </Box>
+      ))}
+    </Panel>
   );
 }

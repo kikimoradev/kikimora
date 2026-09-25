@@ -3,7 +3,10 @@ import { AgentController } from "../../src/control.js";
 import { DrainController } from "../../src/drain.js";
 import type { TaskSummaryRecord } from "../../src/memory/store.js";
 import {
+  argumentGhost,
   buildManualTask,
+  COMMAND_GROUPS,
+  commandMenu,
   COMMANDS,
   dispatchCommand,
   parseCommand,
@@ -153,6 +156,7 @@ describe("suggestions", () => {
     expect(suggestions("/")).toHaveLength(COMMANDS.length);
     expect(suggestions("/")[0]).toEqual({
       name: COMMANDS[0]?.name,
+      args: COMMANDS[0]?.args,
       summary: COMMANDS[0]?.summary,
     });
   });
@@ -267,10 +271,10 @@ describe("dispatchCommand", () => {
     expect(executorControl.state).toBe("pausing");
     expect(drainFinished).not.toHaveBeenCalled();
     expect(notices).toEqual([
-      { text: "draining — kikimora exits after the current session", tone: "info" },
+      { text: "draining — kikimora exits after the current session", tone: "warn" },
       {
         text: "already draining — kikimora exits after the current session",
-        tone: "info",
+        tone: "warn",
       },
     ]);
     drain.dispose();
@@ -317,7 +321,7 @@ describe("dispatchCommand", () => {
     cancel.mockResolvedValue(false);
     await dispatchCommand("/cancel t-2", ctx);
     expect(notices).toEqual([
-      { text: "task t-1 cancelled", tone: "info" },
+      { text: "task t-1 cancelled", tone: "ok" },
       {
         text: 'no pending task "t-2" — only pending tasks can be cancelled',
         tone: "error",
@@ -367,7 +371,7 @@ describe("dispatchCommand", () => {
     expect(settings.setModel).toHaveBeenCalledWith("executor", "sonnet");
     expect(notices[0]).toEqual({
       text: "executor model set to sonnet — applies from the next session",
-      tone: "info",
+      tone: "ok",
     });
   });
 
@@ -399,7 +403,7 @@ describe("dispatchCommand", () => {
     expect(settings.setEffort).toHaveBeenCalledWith("monitor", "high");
     expect(notices[0]).toEqual({
       text: "monitor effort set to high — applies from the next session",
-      tone: "info",
+      tone: "ok",
     });
   });
 
@@ -419,7 +423,7 @@ describe("dispatchCommand", () => {
     expect(settings.setIntervalMinutes).toHaveBeenCalledWith(2.5);
     expect(notices[0]).toEqual({
       text: "monitor interval set to 2 min 30 s — applies after the current cycle",
-      tone: "info",
+      tone: "ok",
     });
   });
 
@@ -554,7 +558,90 @@ describe("buildManualTask", () => {
   });
 });
 
+describe("commandMenu", () => {
+  it("lists commands with their argument syntax while the name is typed", () => {
+    const menu = commandMenu("/mo");
+    expect(menu.argument).toBe(false);
+    expect(menu.matchLength).toBe(3);
+    expect(menu.items).toEqual([
+      {
+        key: "monitor",
+        label: "/monitor",
+        args: undefined,
+        summary: "show the monitor agent in full detail",
+        apply: "/monitor",
+      },
+      {
+        key: "model",
+        label: "/model",
+        args: "<agent> <model>",
+        summary: "set the model for monitor, executor, or summarizer",
+        apply: "/model",
+      },
+    ]);
+  });
+
+  it("offers the values of the argument under the cursor", () => {
+    const agents = commandMenu("/model ");
+    expect(agents.argument).toBe(true);
+    expect(agents.items.map((item) => item.label)).toEqual([
+      "monitor",
+      "executor",
+      "summarizer",
+    ]);
+    expect(agents.items[0]?.apply).toBe("/model monitor ");
+
+    const models = commandMenu("/model executor so");
+    expect(models.matchLength).toBe(2);
+    expect(models.items).toEqual([
+      { key: "sonnet", label: "sonnet", apply: "/model executor sonnet" },
+    ]);
+  });
+
+  it("offers nothing once the argument is complete or has no values", () => {
+    expect(commandMenu("/pause monitor").items).toEqual([]);
+    expect(commandMenu("/task fix").items).toEqual([]);
+    expect(commandMenu("/model executor sonnet ").items).toEqual([]);
+    expect(commandMenu("/nope x").items).toEqual([]);
+    expect(commandMenu("/model  x").items).toEqual([]);
+  });
+
+  it("completes the case-insensitive command name", () => {
+    expect(commandMenu("/PAUSE ex").items.map((item) => item.apply)).toEqual([
+      "/PAUSE executor",
+    ]);
+  });
+});
+
+describe("argumentGhost", () => {
+  it("shows the whole syntax after an exact command name", () => {
+    expect(argumentGhost("/model")).toBe(" <agent> <model>");
+  });
+
+  it("shows the placeholders still missing", () => {
+    expect(argumentGhost("/model ")).toBe("<agent> <model>");
+    expect(argumentGhost("/model exec")).toBe(" <model>");
+    expect(argumentGhost("/model executor ")).toBe("<model>");
+    expect(argumentGhost("/task ")).toBe("<description>");
+  });
+
+  it("shows nothing when every argument is there or the command takes none", () => {
+    expect(argumentGhost("/model executor sonnet")).toBeUndefined();
+    expect(argumentGhost("/task fix the deploy")).toBeUndefined();
+    expect(argumentGhost("/dashboard")).toBeUndefined();
+    expect(argumentGhost("/nope ")).toBeUndefined();
+    expect(argumentGhost("/model  x")).toBeUndefined();
+    expect(argumentGhost("plain")).toBeUndefined();
+  });
+});
+
 describe("COMMANDS", () => {
+  it("assigns every command to a known group, in group order", () => {
+    const order = COMMANDS.map((command) => COMMAND_GROUPS.indexOf(command.group));
+    expect(order.every((index) => index >= 0)).toBe(true);
+    expect([...order].sort((a, b) => a - b)).toEqual(order);
+  });
+
   it("has unique names and summaries for /help", () => {
     const names = COMMANDS.map((command) => command.name);
     expect(new Set(names).size).toBe(names.length);

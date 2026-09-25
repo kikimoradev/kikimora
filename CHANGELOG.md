@@ -7,6 +7,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Tab completes command values in the TUI (agents, models, effort levels, `off`), and the input shows the missing arguments as a gray hint, e.g. `/model <agent> <model>`.
+- Readline keys in the command line and in the prompt editor: Ctrl+A/E, Ctrl+W, Ctrl+U/K, Alt+←/→ and forward Delete.
+- PgUp/PgDn scrolls `/tasks`, `/memory`, `/config` and `/help`; the panel border shows the visible range.
+- Below 100 columns the dashboard shows one agent at a time with tabs; Tab switches between them.
+- A spinner marks a running session, and the task table spins next to the task in progress.
+
+### Changed
+
+- The TUI is redesigned: panels carry their title, model and last outcome in the border, the header is one line, and a status bar at the bottom shows the view, one dot per agent and the keys that apply right now. Hierarchy comes from weight (bold titles, plain content, dim metadata), so titles no longer blend with the text below them.
+- Command results appear in the status bar with ✔/✖/⚠ for five seconds and no longer shift the layout.
+- Durations read `3.7s`, `42s`, `12m 05s`, `1h 02m`; costs show three decimals below a dollar; reset times read `14:00`, `tomorrow 09:00` or `Mon 09:00`. Glyphs are single-width, with no emoji.
+- The task table has aligned status, id, title and age columns, and a failed task's error sits on its own line.
+- Each session starts with a divider line (model, tools, session id), so consecutive sessions in a panel no longer run together.
+- `/help` groups commands by topic; `/config` names the command that changes each entry and uses two columns on wide terminals.
+- The setup wizard puts each question in the editor border, summarizes the first answer during the second step, and shows line and character counts.
+
+### Fixed
+
+- The task table no longer glues the `in progress` status to the task id.
+- `/config` no longer silently cuts off entries that do not fit on the screen.
+- The prompt editor no longer grows past the screen when long lines wrap; the viewport and the arrow keys follow wrapped rows.
+- A failed `/prompt` or `/context` save now shows its error inside the editor instead of behind it.
+- The header says `1 cycle` instead of `1 cycles`.
+
 ## [0.8.1] - 2026-09-19
 
 ### Changed

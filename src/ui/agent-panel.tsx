@@ -1,30 +1,34 @@
 import { Box, Text } from "ink";
-import type { JSX } from "react";
+import type { JSX, ReactNode } from "react";
 import { formatDroppedLines } from "../session-events.js";
 import type { TailLine, TailTone } from "../status.js";
-import { theme } from "./theme.js";
+import type { AgentPanelModel } from "./agent-visuals.js";
+import type { OutcomeLine, StatusLine } from "./format.js";
+import { Panel, PanelTitle } from "./panel.js";
+import { StatusGlyph } from "./status-glyph.js";
+import { glyphs, theme, toneColor } from "./theme.js";
 import { capRows, wrapText } from "./wrap.js";
 
 export interface AgentPanelProps {
   title: string;
-  borderColor: string;
-  phaseLabel: string;
-  phaseColor: string;
-  tail: readonly TailLine[];
-  outcomeLabel?: string | undefined;
-  outcomeColor: string;
+  subtitle: string;
+  heading?: ReactNode;
+  model: AgentPanelModel;
   width: number;
   height: number;
-  focused: boolean;
+  active: boolean;
   scrollOffset: number;
   expanded: boolean;
+  showOutcome?: boolean | undefined;
 }
 
 const PANEL_CHROME_WIDTH = 4;
+const PANEL_CHROME_ROWS = 4;
 const MIN_INNER_WIDTH = 16;
 const TOOL_MAX_ROWS = 2;
 const RESULT_MAX_ROWS = 3;
 const EXPANDED_MAX_ROWS = 40;
+const RULE = glyphs.rule.repeat(512);
 
 interface TailRowSpec {
   line: TailLine;
@@ -90,6 +94,22 @@ function noticeColor(tone: TailTone | undefined): string {
   }
 }
 
+function SessionRule({ text }: { text: string }): JSX.Element {
+  return (
+    <Box height={1}>
+      <Box flexShrink={1} overflow="hidden">
+        <Text
+          dimColor
+          wrap="truncate-end"
+        >{`${glyphs.rule}${glyphs.rule} ${text} `}</Text>
+      </Box>
+      <Box flexGrow={1} flexBasis={0} height={1} overflow="hidden">
+        <Text dimColor>{RULE}</Text>
+      </Box>
+    </Box>
+  );
+}
+
 function TailRow({ row }: { row: TailRowSpec }): JSX.Element {
   const { line, chunk, first } = row;
   switch (line.kind) {
@@ -97,7 +117,7 @@ function TailRow({ row }: { row: TailRowSpec }): JSX.Element {
       if (first && line.cont !== true) {
         return (
           <Text wrap="truncate-end">
-            <Text>{"⏺ "}</Text>
+            <Text>{`${glyphs.bullet} `}</Text>
             {chunk}
           </Text>
         );
@@ -107,7 +127,7 @@ function TailRow({ row }: { row: TailRowSpec }): JSX.Element {
       if (first) {
         return (
           <Text wrap="truncate-end">
-            <Text>{"⏺ "}</Text>
+            <Text>{`${glyphs.bullet} `}</Text>
             <Text bold>{line.tool ?? "?"}</Text>
             {chunk ? <Text dimColor>{`(${chunk}`}</Text> : null}
           </Text>
@@ -115,7 +135,7 @@ function TailRow({ row }: { row: TailRowSpec }): JSX.Element {
       }
       return <Text dimColor wrap="truncate-end">{`    ${chunk}`}</Text>;
     case "result": {
-      const text = first ? `  ⎿ ${chunk}` : `    ${chunk}`;
+      const text = first ? `  ${glyphs.result} ${chunk}` : `    ${chunk}`;
       if (line.tone === "error") {
         return (
           <Text color={theme.error} wrap="truncate-end">
@@ -135,6 +155,8 @@ function TailRow({ row }: { row: TailRowSpec }): JSX.Element {
           {chunk}
         </Text>
       );
+    case "session":
+      return <SessionRule text={chunk} />;
     case "notice":
       return (
         <Text color={noticeColor(line.tone)} wrap="truncate-end">
@@ -144,59 +166,97 @@ function TailRow({ row }: { row: TailRowSpec }): JSX.Element {
   }
 }
 
+function StatusRow({ status }: { status: StatusLine }): JSX.Element {
+  return (
+    <Box height={1} gap={1}>
+      <StatusGlyph status={status} />
+      <Box flexGrow={1} flexShrink={1} flexBasis={0} overflow="hidden">
+        <Text dimColor={status.tone === "muted"} wrap="truncate-end">
+          {status.text}
+        </Text>
+      </Box>
+      {status.aside === undefined ? null : (
+        <Box flexShrink={0}>
+          <Text dimColor>{status.aside}</Text>
+        </Box>
+      )}
+    </Box>
+  );
+}
+
+export function OutcomeText({ outcome }: { outcome: OutcomeLine }): JSX.Element {
+  return (
+    <Text wrap="truncate-end">
+      <Text color={toneColor(outcome.tone)}>{`${outcome.glyph} `}</Text>
+      {outcome.text}
+    </Text>
+  );
+}
+
+function Rule(): JSX.Element {
+  return (
+    <Box height={1} overflow="hidden" flexShrink={0}>
+      <Text dimColor>{RULE}</Text>
+    </Box>
+  );
+}
+
 export function AgentPanel({
   title,
-  borderColor,
-  phaseLabel,
-  phaseColor,
-  tail,
-  outcomeLabel,
-  outcomeColor,
+  subtitle,
+  heading,
+  model,
   width,
   height,
-  focused,
+  active,
   scrollOffset,
   expanded,
+  showOutcome = true,
 }: AgentPanelProps): JSX.Element {
   const innerWidth = Math.max(MIN_INNER_WIDTH, width - PANEL_CHROME_WIDTH);
-  const allRows = tail.flatMap((line) => rowsFor(line, innerWidth, expanded));
-  const chromeLines = 4 + (outcomeLabel === undefined ? 0 : 1);
-  const fullCapacity = Math.max(0, height - chromeLines);
-  const scrolled = scrollOffset > 0 && allRows.length > fullCapacity;
-  const capacity = scrolled ? Math.max(1, fullCapacity - 1) : fullCapacity;
+  const allRows = model.tail.flatMap((line) => rowsFor(line, innerWidth, expanded));
+  const capacity = Math.max(0, height - PANEL_CHROME_ROWS);
+
+  const scrolled = scrollOffset > 0 && allRows.length > capacity;
   const offset = scrolled ? Math.min(scrollOffset, allRows.length - capacity) : 0;
   const end = allRows.length - offset;
   const visible = allRows.slice(Math.max(0, end - capacity), end);
+  const outcome = showOutcome ? model.outcome : undefined;
   return (
-    <Box
-      borderStyle={focused ? "bold" : "round"}
-      borderColor={borderColor}
-      flexDirection="column"
-      flexBasis={0}
-      flexGrow={1}
-      paddingX={1}
+    <Panel
+      title={
+        heading ?? (
+          <PanelTitle active={active} subtitle={subtitle}>
+            {title}
+          </PanelTitle>
+        )
+      }
+      aside={
+        scrolled ? <Text dimColor>{`↓ ${offset} newer · esc to follow`}</Text> : undefined
+      }
+      footer={outcome === undefined ? undefined : <OutcomeText outcome={outcome} />}
+      footerAside={
+        outcome === undefined ? undefined : <Text dimColor>{outcome.meta}</Text>
+      }
+      active={active}
+      width={width}
       height={height}
-      overflow="hidden"
     >
-      <Text bold>{title}</Text>
-      <Text color={phaseColor} wrap="truncate-end">
-        {phaseLabel}
-      </Text>
-      <Box flexDirection="column" flexGrow={1} overflow="hidden">
-        {visible.map((row, index) => (
-          <TailRow key={index} row={row} />
-        ))}
-      </Box>
-      {scrolled ? (
-        <Text dimColor wrap="truncate-end">
-          {`↓ ${offset} newer lines · esc: follow`}
-        </Text>
-      ) : null}
-      {outcomeLabel === undefined ? null : (
-        <Text color={outcomeColor} wrap="truncate-end">
-          {outcomeLabel}
-        </Text>
+      <StatusRow status={model.status} />
+      {visible[0]?.line.kind === "session" ? null : <Rule />}
+      {visible.length === 0 ? (
+        <Box flexGrow={1} justifyContent="center" alignItems="center">
+          <Text dimColor wrap="truncate-end">
+            {model.emptyHint}
+          </Text>
+        </Box>
+      ) : (
+        <Box flexDirection="column" flexGrow={1} overflow="hidden">
+          {visible.map((row, index) => (
+            <TailRow key={index} row={row} />
+          ))}
+        </Box>
       )}
-    </Box>
+    </Panel>
   );
 }

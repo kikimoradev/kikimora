@@ -7,13 +7,13 @@ import {
   type SessionEvent,
   type SessionEventSink,
 } from "./session-events.js";
-import { formatDuration } from "./timing.js";
 import type { Task } from "./types.js";
+import { formatCost, formatElapsed } from "./units.js";
 
 export type TailTone = "ok" | "warn" | "error";
 
 export interface TailLine {
-  kind: "message" | "tool" | "result" | "meta" | "notice";
+  kind: "message" | "tool" | "result" | "meta" | "notice" | "session";
   text: string;
   tool?: string | undefined;
   cont?: boolean | undefined;
@@ -146,11 +146,11 @@ function summaryTailLine(outcome: SummaryOutcome): TailLine {
       text: `✖ memory summary failed (${outcome.taskId}) · ${outcome.error ?? "unknown error"}`,
     };
   }
-  const cost = outcome.costUsd != null ? ` · $${outcome.costUsd.toFixed(4)}` : "";
+  const cost = outcome.costUsd != null ? ` · ${formatCost(outcome.costUsd)}` : "";
   return {
     kind: "notice",
     tone: "ok",
-    text: `✔ memory saved (${outcome.taskId}) · ${formatDuration(outcome.durationMs)}${cost}`,
+    text: `✔ memory saved (${outcome.taskId}) · ${formatElapsed(outcome.durationMs)}${cost}`,
   };
 }
 
@@ -434,8 +434,8 @@ export class WorkerStatusStore {
     switch (event.type) {
       case "init":
         this.pushTail(state, {
-          kind: "meta",
-          text: `model ${event.model} · ${formatToolCount(event.toolCount)} · ${event.sessionId}`,
+          kind: "session",
+          text: `${event.model} · ${formatToolCount(event.toolCount)} · ${event.sessionId}`,
         });
         break;
       case "text":

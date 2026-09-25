@@ -36,7 +36,7 @@ export type View =
       entries: readonly TaskSummaryRecord[];
     };
 
-export type NoticeTone = "info" | "error";
+export type NoticeTone = "ok" | "info" | "warn" | "error";
 
 export type AgentControls = Pick<AgentController, "pause" | "resume" | "state">;
 
@@ -57,16 +57,30 @@ export interface CommandContext {
   notice(text: string, tone?: NoticeTone): void;
 }
 
+export const COMMAND_GROUPS = [
+  "Views",
+  "Agents",
+  "Tasks",
+  "Settings",
+  "Files",
+  "Session",
+] as const;
+
+export type CommandGroup = (typeof COMMAND_GROUPS)[number];
+
 export interface CommandSpec {
   name: string;
+  group: CommandGroup;
   args?: string | undefined;
   summary: string;
+  complete?: ((argIndex: number) => readonly string[]) | undefined;
   run(args: string, ctx: CommandContext): void | Promise<void>;
 }
 
 const MEMORY_VIEW_LIMIT = 20;
 
 const AGENT_NAMES = ["monitor", "executor"] as const;
+const OFF = ["off"] as const;
 type AgentName = (typeof AGENT_NAMES)[number];
 
 function resolveAgents(args: string): AgentName[] | null {
@@ -92,6 +106,7 @@ function joinNames(agents: readonly AgentName[]): string {
 export const COMMANDS: readonly CommandSpec[] = [
   {
     name: "dashboard",
+    group: "Views",
     summary: "show the combined monitor + executor + tasks view",
     run: (_args, ctx) => {
       ctx.setView({ kind: "dashboard" });
@@ -99,6 +114,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   },
   {
     name: "monitor",
+    group: "Views",
     summary: "show the monitor agent in full detail",
     run: (_args, ctx) => {
       ctx.setView({ kind: "monitor" });
@@ -106,6 +122,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   },
   {
     name: "executor",
+    group: "Views",
     summary: "show the executor agent in full detail",
     run: (_args, ctx) => {
       ctx.setView({ kind: "executor" });
@@ -113,6 +130,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   },
   {
     name: "tasks",
+    group: "Views",
     summary: "show the full task list",
     run: (_args, ctx) => {
       ctx.setView({ kind: "tasks" });
@@ -120,6 +138,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   },
   {
     name: "memory",
+    group: "Views",
     args: "[query]",
     summary: "browse long-term memory, optionally filtered by a search query",
     run: (args, ctx) => {
@@ -140,8 +159,26 @@ export const COMMANDS: readonly CommandSpec[] = [
     },
   },
   {
+    name: "config",
+    group: "Views",
+    summary: "show the current configuration",
+    run: (_args, ctx) => {
+      ctx.setView({ kind: "config" });
+    },
+  },
+  {
+    name: "help",
+    group: "Views",
+    summary: "list all commands",
+    run: (_args, ctx) => {
+      ctx.setView({ kind: "help" });
+    },
+  },
+  {
     name: "pause",
+    group: "Agents",
     args: "[monitor|executor]",
+    complete: (index) => (index === 0 ? AGENT_NAMES : []),
     summary: "gracefully pause agents — the current session finishes first",
     run: (args, ctx) => {
       const agents = resolveAgents(args);
@@ -159,7 +196,9 @@ export const COMMANDS: readonly CommandSpec[] = [
   },
   {
     name: "start",
+    group: "Agents",
     args: "[monitor|executor]",
+    complete: (index) => (index === 0 ? AGENT_NAMES : []),
     summary: "start paused agents — they boot paused until you start them",
     run: (args, ctx) => {
       const agents = resolveAgents(args);
@@ -176,11 +215,12 @@ export const COMMANDS: readonly CommandSpec[] = [
       const parts: string[] = [];
       if (started.length > 0) parts.push(`started ${joinNames(started)}`);
       if (skipped.length > 0) parts.push(`${joinNames(skipped)} already running`);
-      ctx.notice(parts.join(" · "));
+      ctx.notice(parts.join(" · "), started.length > 0 ? "ok" : "info");
     },
   },
   {
     name: "task",
+    group: "Tasks",
     args: "<description>",
     summary: "add a task for the executor by hand",
     run: async (args, ctx) => {
@@ -196,11 +236,12 @@ export const COMMANDS: readonly CommandSpec[] = [
         return;
       }
       ctx.waker.notify();
-      ctx.notice(`task ${candidate.id} added`);
+      ctx.notice(`task ${candidate.id} added`, "ok");
     },
   },
   {
     name: "retry",
+    group: "Tasks",
     args: "<task-id>",
     summary: "requeue a failed task",
     run: async (args, ctx) => {
@@ -211,7 +252,7 @@ export const COMMANDS: readonly CommandSpec[] = [
       }
       if (await ctx.tasks.retry(id)) {
         ctx.waker.notify();
-        ctx.notice(`task ${id} requeued`);
+        ctx.notice(`task ${id} requeued`, "ok");
       } else {
         ctx.notice(`no failed task "${id}"`, "error");
       }
@@ -219,6 +260,7 @@ export const COMMANDS: readonly CommandSpec[] = [
   },
   {
     name: "cancel",
+    group: "Tasks",
     args: "<task-id>",
     summary: "cancel a pending task",
     run: async (args, ctx) => {
@@ -228,7 +270,7 @@ export const COMMANDS: readonly CommandSpec[] = [
         return;
       }
       if (await ctx.tasks.cancel(id)) {
-        ctx.notice(`task ${id} cancelled`);
+        ctx.notice(`task ${id} cancelled`, "ok");
       } else {
         ctx.notice(
           `no pending task "${id}" — only pending tasks can be cancelled`,
@@ -239,7 +281,9 @@ export const COMMANDS: readonly CommandSpec[] = [
   },
   {
     name: "model",
+    group: "Settings",
     args: "<agent> <model>",
+    complete: (index) => [CONFIG_AGENTS, MODELS][index] ?? [],
     summary: "set the model for monitor, executor, or summarizer",
     run: async (args, ctx) => {
       const tokens = splitArgs(args);
@@ -253,12 +297,14 @@ export const COMMANDS: readonly CommandSpec[] = [
       }
       const agent = parseConfigAgent(agentRaw);
       await ctx.settings.setModel(agent, model);
-      ctx.notice(`${agent} model set to ${model} — applies from the next session`);
+      ctx.notice(`${agent} model set to ${model} — applies from the next session`, "ok");
     },
   },
   {
     name: "effort",
+    group: "Settings",
     args: "<agent> <level>",
+    complete: (index) => [CONFIG_AGENTS, EFFORT_LEVELS][index] ?? [],
     summary: "set the reasoning effort for monitor, executor, or summarizer",
     run: async (args, ctx) => {
       const tokens = splitArgs(args);
@@ -272,11 +318,15 @@ export const COMMANDS: readonly CommandSpec[] = [
       }
       const agent = parseConfigAgent(agentRaw);
       await ctx.settings.setEffort(agent, effort);
-      ctx.notice(`${agent} effort set to ${effort} — applies from the next session`);
+      ctx.notice(
+        `${agent} effort set to ${effort} — applies from the next session`,
+        "ok",
+      );
     },
   },
   {
     name: "interval",
+    group: "Settings",
     args: "<minutes>",
     summary: "set how often the monitor looks for new tasks",
     run: async (args, ctx) => {
@@ -289,12 +339,15 @@ export const COMMANDS: readonly CommandSpec[] = [
       await ctx.settings.setIntervalMinutes(minutes);
       ctx.notice(
         `monitor interval set to ${formatInterval(minutes * 60_000)} — applies after the current cycle`,
+        "ok",
       );
     },
   },
   {
     name: "hours",
+    group: "Settings",
     args: "<HH:MM-HH:MM|off>",
+    complete: (index) => (index === 0 ? OFF : []),
     summary: "set the monitor working hours, or off to run 24/7",
     run: async (args, ctx) => {
       const spec = args.trim();
@@ -307,16 +360,18 @@ export const COMMANDS: readonly CommandSpec[] = [
       }
       if (spec.toLowerCase() === "off") {
         await ctx.settings.setActiveHours(null);
-        ctx.notice("monitor hours cleared — running 24/7");
+        ctx.notice("monitor hours cleared — running 24/7", "ok");
         return;
       }
       await ctx.settings.setActiveHours(spec);
-      ctx.notice(`monitor hours set to ${spec}`);
+      ctx.notice(`monitor hours set to ${spec}`, "ok");
     },
   },
   {
     name: "days",
+    group: "Settings",
     args: "<days|off>",
+    complete: (index) => (index === 0 ? OFF : []),
     summary: "set the monitor working days (e.g. mon-fri), or off to run daily",
     run: async (args, ctx) => {
       const spec = args.trim();
@@ -329,16 +384,18 @@ export const COMMANDS: readonly CommandSpec[] = [
       }
       if (spec.toLowerCase() === "off") {
         await ctx.settings.setActiveDays(null);
-        ctx.notice("monitor days cleared — running daily");
+        ctx.notice("monitor days cleared — running daily", "ok");
         return;
       }
       await ctx.settings.setActiveDays(spec);
-      ctx.notice(`monitor days set to ${spec}`);
+      ctx.notice(`monitor days set to ${spec}`, "ok");
     },
   },
   {
     name: "prompt",
+    group: "Files",
     args: "<monitor|executor>",
+    complete: (index) => (index === 0 ? PROMPT_AGENTS : []),
     summary: "view and edit an agent prompt — Ctrl+D saves, Esc closes",
     run: async (args, ctx) => {
       const raw = args.trim();
@@ -353,27 +410,15 @@ export const COMMANDS: readonly CommandSpec[] = [
   },
   {
     name: "context",
+    group: "Files",
     summary: "view and edit the workspace context — Ctrl+D saves, Esc closes",
     run: async (_args, ctx) => {
       ctx.setView({ kind: "context", content: await ctx.context.read() });
     },
   },
   {
-    name: "config",
-    summary: "show the current configuration",
-    run: (_args, ctx) => {
-      ctx.setView({ kind: "config" });
-    },
-  },
-  {
-    name: "help",
-    summary: "list all commands",
-    run: (_args, ctx) => {
-      ctx.setView({ kind: "help" });
-    },
-  },
-  {
     name: "drain",
+    group: "Session",
     summary: "let the current sessions finish, then shut down kikimora",
     run: (_args, ctx) => {
       const alreadyDraining = ctx.drain.snapshot !== undefined;
@@ -382,11 +427,13 @@ export const COMMANDS: readonly CommandSpec[] = [
         alreadyDraining
           ? "already draining — kikimora exits after the current session"
           : "draining — kikimora exits after the current session",
+        "warn",
       );
     },
   },
   {
     name: "exit",
+    group: "Session",
     summary: "shut down kikimora gracefully",
     run: (_args, ctx) => {
       ctx.requestExit();
@@ -409,6 +456,7 @@ export function parseCommand(line: string): { name: string; args: string } | nul
 
 export interface CommandSuggestion {
   name: string;
+  args?: string | undefined;
   summary: string;
 }
 
@@ -417,8 +465,98 @@ export function suggestions(value: string): CommandSuggestion[] {
   const prefix = value.slice(1).toLowerCase();
   return COMMANDS.filter((command) => command.name.startsWith(prefix)).map((command) => ({
     name: command.name,
+    args: command.args,
     summary: command.summary,
   }));
+}
+
+export interface MenuItem {
+  key: string;
+  label: string;
+  args?: string | undefined;
+  summary?: string | undefined;
+  apply: string;
+}
+
+export interface Menu {
+  items: readonly MenuItem[];
+  matchLength: number;
+  argument: boolean;
+}
+
+interface ArgumentContext {
+  spec: CommandSpec;
+  head: string;
+  prefix: string;
+  index: number;
+}
+
+function argumentContext(value: string): ArgumentContext | undefined {
+  const match = /^\/(\S+) (.*)$/s.exec(value);
+  if (match === null) return undefined;
+  const [, name = "", rest = ""] = match;
+  const spec = COMMANDS.find((command) => command.name === name.toLowerCase());
+  if (spec === undefined) return undefined;
+  const tokens = rest.split(" ");
+  const prefix = tokens.pop() ?? "";
+  if (tokens.some((token) => token === "")) return undefined;
+  return {
+    spec,
+    head: value.slice(0, value.length - prefix.length),
+    prefix,
+    index: tokens.length,
+  };
+}
+
+function argumentItems(context: ArgumentContext): MenuItem[] {
+  const { spec, head, prefix, index } = context;
+  const values = spec.complete?.(index) ?? [];
+  const hasNext = (spec.complete?.(index + 1) ?? []).length > 0;
+  const lowered = prefix.toLowerCase();
+  return values
+    .filter((candidate) => candidate.startsWith(lowered) && candidate !== lowered)
+    .map((candidate) => ({
+      key: candidate,
+      label: candidate,
+      apply: `${head}${candidate}${hasNext ? " " : ""}`,
+    }));
+}
+
+export function commandMenu(value: string): Menu {
+  const context = argumentContext(value);
+  if (context !== undefined) {
+    return {
+      items: argumentItems(context),
+      matchLength: context.prefix.length,
+      argument: true,
+    };
+  }
+  return {
+    items: suggestions(value).map((item) => ({
+      key: item.name,
+      label: `/${item.name}`,
+      args: item.args,
+      summary: item.summary,
+      apply: `/${item.name}`,
+    })),
+    matchLength: value.length,
+    argument: false,
+  };
+}
+
+export function argumentGhost(value: string): string | undefined {
+  const exact = /^\/(\S+)$/.exec(value);
+  const name = exact?.[1] ?? /^\/(\S+) /.exec(value)?.[1];
+  if (name === undefined) return undefined;
+  const spec = COMMANDS.find((command) => command.name === name.toLowerCase());
+  if (spec?.args === undefined) return undefined;
+  const placeholders = spec.args.split(" ");
+  if (exact !== null) return ` ${spec.args}`;
+  const context = argumentContext(value);
+  if (context === undefined) return undefined;
+  const remaining = placeholders.slice(context.index + (context.prefix === "" ? 0 : 1));
+  if (remaining.length === 0) return undefined;
+  return `${context.prefix === "" ? "" : " "}${remaining.join(" ")}`;
 }
 
 export async function dispatchCommand(line: string, ctx: CommandContext): Promise<void> {

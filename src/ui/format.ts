@@ -8,13 +8,41 @@ import type {
   MonitorPhase,
   WorkerStats,
 } from "../status.js";
-import { formatDuration } from "../timing.js";
 import type { Task, TaskStatus } from "../types.js";
+import { formatCost, formatElapsed, formatUptime } from "../units.js";
+import { glyphs, type Tone } from "./theme.js";
+
+export { formatCost, formatElapsed, formatUptime } from "../units.js";
 
 const STALL_THRESHOLD_MS = 120_000;
+const DAY_MS = 86_400_000;
+const WEEKDAYS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"] as const;
+
+export interface StatusLine {
+  glyph: string;
+  tone: Tone;
+  text: string;
+  aside?: string | undefined;
+  busy: boolean;
+}
+
+export interface OutcomeLine {
+  glyph: string;
+  tone: Tone;
+  text: string;
+  meta: string;
+}
 
 function pad2(value: number): string {
   return value.toString().padStart(2, "0");
+}
+
+export function plural(count: number, singular: string, pluralForm: string): string {
+  return count === 1 ? singular : pluralForm;
+}
+
+export function countLabel(count: number, singular: string, pluralForm: string): string {
+  return `${String(count)} ${plural(count, singular, pluralForm)}`;
 }
 
 export function formatCountdown(msLeft: number): string {
@@ -37,45 +65,116 @@ export function formatInterval(ms: number): string {
   return parts.join(" ");
 }
 
-function formatLimitWait(resumeAt: number, now: number): string {
-  return `⛔ usage limit reached · resume ${formatResume(new Date(resumeAt))} (in ${formatCountdown(resumeAt - now)})`;
+function startOfDay(timestamp: number): number {
+  const date = new Date(timestamp);
+  return new Date(date.getFullYear(), date.getMonth(), date.getDate()).getTime();
 }
 
-function formatAuthBlocked(reason: string): string {
-  return `⛔ authentication failed · ${reason} · fix credentials, then /start`;
+export function formatWhen(at: number, now: number): string {
+  const date = new Date(at);
+  const time = `${pad2(date.getHours())}:${pad2(date.getMinutes())}`;
+  const days = Math.round((startOfDay(at) - startOfDay(now)) / DAY_MS);
+  if (days === 0) return time;
+  if (days === 1) return `tomorrow ${time}`;
+  if (days > 1 && days < 7) return `${WEEKDAYS[date.getDay()] ?? ""} ${time}`;
+  return formatResume(date);
 }
 
-export function formatMonitorPhase(phase: MonitorPhase, now: number): string {
+function resumeAside(resumeAt: number, now: number): string {
+  return `resumes ${formatWhen(resumeAt, now)} · in ${formatCountdown(resumeAt - now)}`;
+}
+
+function limitWait(resumeAt: number, now: number): StatusLine {
+  return {
+    glyph: glyphs.warn,
+    tone: "warn",
+    text: "usage limit reached",
+    aside: resumeAside(resumeAt, now),
+    busy: false,
+  };
+}
+
+function authBlocked(reason: string): StatusLine {
+  return {
+    glyph: glyphs.error,
+    tone: "error",
+    text: `authentication failed · ${reason} · fix credentials, then /start`,
+    busy: false,
+  };
+}
+
+export function formatMonitorPhase(phase: MonitorPhase, now: number): StatusLine {
   switch (phase.kind) {
     case "starting":
-      return "starting…";
+      return { glyph: glyphs.active, tone: "info", text: "starting…", busy: true };
     case "offHours":
-      return `⏸ outside working hours · resume ${formatResume(new Date(phase.resumeAt))} (in ${formatCountdown(phase.resumeAt - now)})`;
+      return {
+        glyph: glyphs.paused,
+        tone: "muted",
+        text: "outside working hours",
+        aside: resumeAside(phase.resumeAt, now),
+        busy: false,
+      };
     case "limitWait":
-      return formatLimitWait(phase.resumeAt, now);
+      return limitWait(phase.resumeAt, now);
     case "authBlocked":
-      return formatAuthBlocked(phase.reason);
+      return authBlocked(phase.reason);
     case "session":
-      return `▶ cycle #${phase.cycle} · running ${formatDuration(now - phase.startedAt)}`;
+      return {
+        glyph: glyphs.active,
+        tone: "info",
+        text: `cycle #${phase.cycle}`,
+        aside: formatElapsed(now - phase.startedAt),
+        busy: true,
+      };
     case "sleeping":
-      return `⏳ next cycle in ${formatCountdown(phase.nextCycleAt - now)}`;
+      return {
+        glyph: glyphs.idle,
+        tone: "muted",
+        text: "next cycle",
+        aside: `in ${formatCountdown(phase.nextCycleAt - now)}`,
+        busy: false,
+      };
   }
 }
 
-export function formatExecutorPhase(phase: ExecutorPhase, now: number): string {
+export function formatExecutorPhase(phase: ExecutorPhase, now: number): StatusLine {
   switch (phase.kind) {
     case "waiting":
-      return "⏳ waiting for tasks";
+      return {
+        glyph: glyphs.idle,
+        tone: "muted",
+        text: "waiting for tasks",
+        busy: false,
+      };
     case "limitWait":
-      return formatLimitWait(phase.resumeAt, now);
+      return limitWait(phase.resumeAt, now);
     case "authBlocked":
-      return formatAuthBlocked(phase.reason);
+      return authBlocked(phase.reason);
     case "session":
-      return `▶ ${phase.task.id}: ${phase.task.title} · running ${formatDuration(now - phase.startedAt)}`;
+      return {
+        glyph: glyphs.active,
+        tone: "info",
+        text: `${phase.task.id} · ${phase.task.title}`,
+        aside: formatElapsed(now - phase.startedAt),
+        busy: true,
+      };
     case "summary":
-      return `✎ summarizing ${phase.task.id} to memory · running ${formatDuration(now - phase.startedAt)}`;
+      return {
+        glyph: glyphs.summary,
+        tone: "info",
+        text: `summarizing ${phase.task.id} to memory`,
+        aside: formatElapsed(now - phase.startedAt),
+        busy: true,
+      };
     case "backoff":
-      return `↻ retrying ${phase.task.id} in ${formatCountdown(phase.resumeAt - now)}`;
+      return {
+        glyph: glyphs.retry,
+        tone: "warn",
+        text: `retrying ${phase.task.id}`,
+        aside: `in ${formatCountdown(phase.resumeAt - now)}`,
+        busy: false,
+      };
   }
 }
 
@@ -86,19 +185,33 @@ export function detectStall(
 ): string | undefined {
   const idleMs = now - (lastEventAt ?? startedAt);
   if (idleMs < STALL_THRESHOLD_MS) return undefined;
-  return `⚠ no output for ${formatInterval(idleMs)}`;
+  return `no output for ${formatInterval(idleMs)}`;
 }
 
-export function formatControlLabel(
+export function withStall(line: StatusLine, stall: string | undefined): StatusLine {
+  if (stall === undefined) return line;
+  return {
+    ...line,
+    glyph: glyphs.warn,
+    tone: "warn",
+    text: `${line.text} · ${stall}`,
+    busy: false,
+  };
+}
+
+export function withControl(
   control: AgentControlState,
   phaseKind: string,
-  phaseLabel: string,
-): string | undefined {
-  if (control === "running" || phaseKind === "authBlocked") return undefined;
-  if (control === "paused") return "⏸ paused";
-  return phaseKind === "session" || phaseKind === "summary"
-    ? `⏸ finishing · ${phaseLabel}`
-    : "⏸ pausing…";
+  line: StatusLine,
+): StatusLine {
+  if (control === "running" || phaseKind === "authBlocked") return line;
+  if (control === "paused") {
+    return { glyph: glyphs.paused, tone: "warn", text: "paused", busy: false };
+  }
+  if (phaseKind === "session" || phaseKind === "summary") {
+    return { ...line, tone: "warn", text: `finishing · ${line.text}` };
+  }
+  return { glyph: glyphs.paused, tone: "warn", text: "pausing…", busy: false };
 }
 
 export function formatDrainNotice(drain: DrainSnapshot, now: number): string {
@@ -106,22 +219,27 @@ export function formatDrainNotice(drain: DrainSnapshot, now: number): string {
     drain.until === undefined
       ? ""
       : ` · stops in ${formatCountdown(drain.until - now)} at the latest`;
-  return `⏏ draining — exits after the current session${deadline}`;
+  return `draining — exits after the current session${deadline}`;
 }
 
-export function formatHeaderStats(
-  stats: WorkerStats,
-  tasks: readonly Task[],
-  uptimeMs: number,
-): string {
-  const count = (status: TaskStatus): number =>
-    tasks.filter((task) => task.status === status).length;
-  return (
-    `↑ ${formatInterval(uptimeMs)} · $${stats.totalCostUsd.toFixed(2)}` +
-    ` · ${stats.cycles} cycles` +
-    ` · tasks ${count("pending")} pending / ${count("in_progress")} running` +
-    ` / ${count("done")} done / ${count("failed")} failed`
-  );
+export function formatHeaderStats(stats: WorkerStats, uptimeMs: number): string {
+  return [
+    `${glyphs.uptime} ${formatUptime(uptimeMs)}`,
+    formatCost(stats.totalCostUsd),
+    countLabel(stats.cycles, "cycle", "cycles"),
+  ].join(" · ");
+}
+
+export function countTasks(tasks: readonly Task[]): Record<TaskStatus, number> {
+  const counts: Record<TaskStatus, number> = {
+    pending: 0,
+    in_progress: 0,
+    done: 0,
+    failed: 0,
+    cancelled: 0,
+  };
+  for (const task of tasks) counts[task.status] += 1;
+  return counts;
 }
 
 export function formatAge(isoDate: string, now: number): string {
@@ -136,41 +254,62 @@ export function formatAge(isoDate: string, now: number): string {
   return `${Math.floor(hours / 24)}d ago`;
 }
 
-function formatCost(costUsd: number | undefined): string {
-  return costUsd != null ? ` · $${costUsd.toFixed(4)}` : "";
+function outcomeMeta(durationMs: number, costUsd: number | undefined): string {
+  const duration = formatElapsed(durationMs);
+  return costUsd == null ? duration : `${duration} · ${formatCost(costUsd)}`;
 }
 
-function plural(count: number, singular: string, pluralForm: string): string {
-  return count === 1 ? singular : pluralForm;
-}
-
-export function formatMonitorOutcome(outcome: MonitorCycleOutcome): string {
-  const base = `cycle #${outcome.cycle} · ${formatDuration(outcome.durationMs)}${formatCost(outcome.costUsd)}`;
-  if (!outcome.ok) return `✖ ${base} · ${outcome.error ?? "unknown error"}`;
-  const added =
+export function formatMonitorOutcome(outcome: MonitorCycleOutcome): OutcomeLine {
+  const meta = outcomeMeta(outcome.durationMs, outcome.costUsd);
+  const cycle = `cycle #${outcome.cycle}`;
+  if (!outcome.ok) {
+    return {
+      glyph: glyphs.error,
+      tone: "error",
+      text: `${cycle} · ${outcome.error ?? "unknown error"}`,
+      meta,
+    };
+  }
+  const parts = [
+    cycle,
     outcome.addedTasks > 0
-      ? `+${outcome.addedTasks} ${plural(outcome.addedTasks, "task", "tasks")}`
-      : "no new tasks";
-  const duplicates =
-    outcome.skippedDuplicates > 0
-      ? ` · ${outcome.skippedDuplicates} ${plural(outcome.skippedDuplicates, "duplicate", "duplicates")} skipped`
-      : "";
-  return `✔ ${base} · ${added}${duplicates}`;
+      ? `+${countLabel(outcome.addedTasks, "task", "tasks")}`
+      : "no new tasks",
+  ];
+  if (outcome.skippedDuplicates > 0) {
+    parts.push(
+      `${countLabel(outcome.skippedDuplicates, "duplicate", "duplicates")} skipped`,
+    );
+  }
+  return { glyph: glyphs.ok, tone: "ok", text: parts.join(" · "), meta };
 }
 
-export function formatExecutorOutcome(outcome: ExecutorTaskOutcome): string {
-  const base = `${outcome.taskId} · ${formatDuration(outcome.durationMs)}${formatCost(outcome.costUsd)}`;
+export function formatExecutorOutcome(outcome: ExecutorTaskOutcome): OutcomeLine {
+  const meta = outcomeMeta(outcome.durationMs, outcome.costUsd);
+  const error = outcome.error ?? "unknown error";
   if (outcome.willRetry) {
     const attempts =
       outcome.attempt != null && outcome.maxAttempts != null
-        ? ` · retry ${outcome.attempt}/${outcome.maxAttempts}`
-        : " · retry";
-    return `↻ ${base} · ${outcome.error ?? "unknown error"}${attempts}`;
+        ? `retry ${outcome.attempt}/${outcome.maxAttempts}`
+        : "retry";
+    return {
+      glyph: glyphs.retry,
+      tone: "warn",
+      text: `${outcome.taskId} · ${error} · ${attempts}`,
+      meta,
+    };
   }
-  if (!outcome.ok) return `✖ ${base} · ${outcome.error ?? "unknown error"}`;
-  const turns =
+  if (!outcome.ok) {
+    return {
+      glyph: glyphs.error,
+      tone: "error",
+      text: `${outcome.taskId} · ${error}`,
+      meta,
+    };
+  }
+  const text =
     outcome.numTurns != null
-      ? ` · ${outcome.numTurns} ${plural(outcome.numTurns, "turn", "turns")}`
-      : "";
-  return `✔ ${base}${turns}`;
+      ? `${outcome.taskId} · ${countLabel(outcome.numTurns, "turn", "turns")}`
+      : outcome.taskId;
+  return { glyph: glyphs.ok, tone: "ok", text, meta };
 }
