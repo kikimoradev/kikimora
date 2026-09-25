@@ -28,6 +28,17 @@ const BACKSPACE = "\u007F";
 const CTRL_C = "\u0003";
 const CTRL_D = "\u0004";
 const ENTER = "\r";
+const TAB = "\t";
+const CTRL_A = "\u0001";
+const CTRL_W = "\u0017";
+
+function promptText(frame: string | undefined): string | undefined {
+  return /│ ❯ (.*?)│/.exec(frame ?? "")?.[1]?.trim();
+}
+
+function statusBar(frame: string | undefined): string {
+  return (frame ?? "").split("\n").at(-1) ?? "";
+}
 
 async function tick(): Promise<void> {
   await new Promise((resolve) => setTimeout(resolve, 20));
@@ -170,6 +181,7 @@ function buildHarness(initialControlState: "running" | "paused" = "running"): Ha
       context,
       waker: { notify },
       requestExit,
+      animate: false,
     },
   };
 }
@@ -232,7 +244,7 @@ describe("App", () => {
     store.dispose();
   });
 
-  it("shows the header stats line with task counts", async () => {
+  it("shows the header stats and the task counts in the task panel", async () => {
     const { store, props } = buildHarness();
     const { lastFrame, unmount } = await renderApp(props);
 
@@ -259,8 +271,9 @@ describe("App", () => {
     });
     const frame = lastFrame() ?? "";
     expect(frame).toContain("↑");
-    expect(frame).toContain("1 cycles");
-    expect(frame).toContain("tasks 1 pending / 0 running / 1 done / 0 failed");
+    expect(frame).toContain("· 1 cycle");
+    expect(frame).not.toContain("1 cycles");
+    expect(frame).toContain("0 running · 1 pending · 1 done · 0 failed");
 
     unmount();
     store.dispose();
@@ -289,7 +302,7 @@ describe("App", () => {
     const frame = lastFrame() ?? "";
     expect(frame).toContain("authentication failed");
     expect(frame).toContain("Not logged in");
-    expect(frame).not.toContain("⏸ paused");
+    expect(frame).not.toContain("‖ paused");
 
     unmount();
     store.dispose();
@@ -334,7 +347,7 @@ describe("App", () => {
       expect(lastFrame()).toContain("cycle #2");
     });
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("model sonnet · 4 tools · s-1");
+    expect(frame).toMatch(/── sonnet · 4 tools · s-1 ─+/);
     expect(frame).toContain("⏺ Checking backlog");
     expect(frame).toContain("⏺ Bash(git log)");
     expect(frame).toContain("⎿ 3 commits … +2 lines");
@@ -362,14 +375,11 @@ describe("App", () => {
 
     await eventually(() => {
       const frame = lastFrame() ?? "";
-      expect(frame).toContain("pending: 1");
-      expect(frame).toContain("in progress: 1");
-      expect(frame).toContain("done: 1");
-      expect(frame).toContain("failed: 1");
-      expect(frame).toContain("t-2 · Deploy changes");
-      expect(frame).toContain("t-4 · Fix tests — timeout");
-      expect(frame).toContain("t-5 · Old idea");
-      expect(frame).toContain("cancelled");
+      expect(frame).toContain("1 running · 1 pending · 1 done · 1 failed");
+      expect(frame).toMatch(/in progress +t-2 +Deploy changes/);
+      expect(frame).toMatch(/failed +t-4 +Fix tests/);
+      expect(frame).toMatch(/ {3,}⎿ timeout/);
+      expect(frame).toMatch(/cancelled +t-5 +Old idea/);
     });
 
     unmount();
@@ -437,10 +447,10 @@ describe("App", () => {
     store.monitor.sleepUntil(new Date(Date.now() + 90_000));
     store.flush();
     await vi.advanceTimersByTimeAsync(100);
-    expect(lastFrame()).toContain("next cycle in 01:30");
+    expect(lastFrame()).toMatch(/○ next cycle +in 01:30/);
 
     await vi.advanceTimersByTimeAsync(10_000);
-    expect(lastFrame()).toContain("next cycle in 01:2");
+    expect(lastFrame()).toMatch(/○ next cycle +in 01:2/);
 
     unmount();
     store.dispose();
@@ -455,7 +465,7 @@ describe("App", () => {
     store.flush();
     await vi.advanceTimersByTimeAsync(180_000);
 
-    expect(lastFrame()).toContain("⚠ no output");
+    expect(lastFrame()).toContain("⚠ cycle #1 · no output for 3 min");
 
     unmount();
     store.dispose();
@@ -479,9 +489,9 @@ describe("App", () => {
     await flushed(store);
 
     await eventually(() => {
-      expect(lastFrame()).toContain("↻ retrying t-1 in");
+      expect(lastFrame()).toMatch(/↻ retrying t-1 +in 00:[23]\d/);
     });
-    expect(lastFrame()).toContain("↻ t-1 · 0.3s");
+    expect(lastFrame()).toMatch(/╰─ ↻ t-1 · Session ended with an error.* 0\.3s ─╯/);
 
     unmount();
     store.dispose();
@@ -501,7 +511,7 @@ describe("App", () => {
 
     await type(stdin, PAGE_UP);
     await eventually(() => {
-      expect(lastFrame()).toContain("newer lines");
+      expect(lastFrame()).toContain("newer · esc to follow");
     });
     expect(lastFrame()).not.toContain("line 60");
 
@@ -509,7 +519,7 @@ describe("App", () => {
     await eventually(() => {
       expect(lastFrame()).toContain("line 60");
     });
-    expect(lastFrame()).not.toContain("newer lines");
+    expect(lastFrame()).not.toContain("newer · esc to follow");
 
     unmount();
     store.dispose();
@@ -534,7 +544,7 @@ describe("App", () => {
     expect(frame).toContain("⎿");
     expect(frame).not.toContain("TAIL_MARKER");
     expect(frame).not.toContain("SECOND_LINE_MARKER");
-    expect(frame).not.toContain("expanded output (ctrl+o)");
+    expect(statusBar(frame)).toContain("ctrl+o expand");
 
     await type(stdin, "\u000F");
     await eventually(() => {
@@ -542,7 +552,7 @@ describe("App", () => {
     });
     expect(lastFrame()).toContain("SECOND_LINE_MARKER");
     expect(lastFrame()).toContain("+1 line");
-    expect(lastFrame()).toContain("expanded output (ctrl+o)");
+    expect(statusBar(lastFrame())).toContain("ctrl+o collapse");
 
     await type(stdin, "\u000F");
     await eventually(() => {
@@ -587,7 +597,7 @@ describe("App", () => {
     await type(stdin, PAGE_UP);
 
     await eventually(() => {
-      expect(lastFrame()).toContain("newer lines");
+      expect(lastFrame()).toContain("newer · esc to follow");
     });
     expect(lastFrame()).not.toContain("exec 60");
 
@@ -621,25 +631,24 @@ describe("App", () => {
 
     await type(stdin, "/mo");
     await eventually(() => {
-      expect(lastFrame()).toContain("> /mo");
+      expect(promptText(lastFrame())).toBe("/mo");
     });
     expect(lastFrame()).toContain("/monitor");
 
     await type(stdin, BACKSPACE);
     await eventually(() => {
-      expect(lastFrame()).not.toContain("> /mo");
+      expect(promptText(lastFrame())).toBe("/m");
     });
-    expect(lastFrame()).toContain("> /m");
 
     await type(stdin, ARROW_LEFT);
     await type(stdin, "x");
     await eventually(() => {
-      expect(lastFrame()).toContain("> /xm");
+      expect(promptText(lastFrame())).toBe("/xm");
     });
 
     await type(stdin, ESCAPE);
     await eventually(() => {
-      expect(lastFrame()).not.toContain("> /xm");
+      expect(promptText(lastFrame())).toBe("type / for commands");
     });
 
     unmount();
@@ -667,7 +676,7 @@ describe("App", () => {
     await type(stdin, ARROW_DOWN);
     await type(stdin, "\t");
     await eventually(() => {
-      expect(lastFrame()).toContain("> /memory");
+      expect(promptText(lastFrame())).toMatch(/^\/memory +\[query\]$/);
     });
 
     unmount();
@@ -681,7 +690,7 @@ describe("App", () => {
     await type(stdin, "/da");
     await type(stdin, "\t");
     await eventually(() => {
-      expect(lastFrame()).toContain("> /dashboard");
+      expect(promptText(lastFrame())).toBe("/dashboard");
     });
 
     unmount();
@@ -695,7 +704,7 @@ describe("App", () => {
     await type(stdin, "/exe");
     await type(stdin, ENTER);
     await eventually(() => {
-      expect(lastFrame()).toContain("executor · /help");
+      expect(statusBar(lastFrame())).toMatch(/^ executor {2}/);
     });
 
     unmount();
@@ -711,21 +720,21 @@ describe("App", () => {
     await eventually(() => {
       expect(lastFrame()).toContain("usage: /task <description>");
     });
-    expect(lastFrame()).not.toContain("tasks · /help");
+    expect(statusBar(lastFrame())).not.toMatch(/^ tasks {2}/);
 
     unmount();
     store.dispose();
   });
 
-  it("switches views with slash commands and shows the view name in the hint line", async () => {
+  it("switches views with slash commands and shows the view name in the status bar", async () => {
     const { store, props } = buildHarness();
     const { lastFrame, stdin, unmount } = await renderApp(props);
 
-    expect(lastFrame()).toContain("dashboard · /help");
+    expect(statusBar(lastFrame())).toMatch(/^ dashboard {2}/);
 
     await submit(stdin, "/tasks");
     await eventually(() => {
-      expect(lastFrame()).toContain("tasks · /help");
+      expect(statusBar(lastFrame())).toMatch(/^ tasks {2}/);
     });
     expect(lastFrame()).toContain("Tasks");
     expect(lastFrame()).not.toContain("Executor");
@@ -738,11 +747,17 @@ describe("App", () => {
 
     await submit(stdin, "/help");
     await eventually(() => {
-      expect(lastFrame()).toContain("Commands");
+      expect(lastFrame()).toContain("╭─ Help ─");
     });
+    expect(lastFrame()).toContain("Views");
     expect(lastFrame()).toContain("/pause [monitor|executor]");
+
+    await type(stdin, PAGE_DOWN);
+    await type(stdin, PAGE_DOWN);
+    await eventually(() => {
+      expect(lastFrame()).toContain("expand or collapse tool output");
+    });
     expect(lastFrame()).toContain("Keys");
-    expect(lastFrame()).toContain("expand or collapse tool output");
 
     await submit(stdin, "/dashboard");
     await eventually(() => {
@@ -760,20 +775,20 @@ describe("App", () => {
     await submit(stdin, "/tasks");
     await submit(stdin, "/help");
     await eventually(() => {
-      expect(lastFrame()).not.toContain("> /help");
+      expect(promptText(lastFrame())).toBe("type / for commands");
     });
 
     await type(stdin, ARROW_UP);
     await eventually(() => {
-      expect(lastFrame()).toContain("> /help");
+      expect(promptText(lastFrame())).toBe("/help");
     });
     await type(stdin, ARROW_UP);
     await eventually(() => {
-      expect(lastFrame()).toContain("> /tasks");
+      expect(promptText(lastFrame())).toBe("/tasks");
     });
     await type(stdin, ARROW_DOWN);
     await eventually(() => {
-      expect(lastFrame()).toContain("> /help");
+      expect(promptText(lastFrame())).toBe("/help");
     });
 
     unmount();
@@ -789,16 +804,16 @@ describe("App", () => {
       expect(recent).toHaveBeenCalledWith(20);
     });
     await eventually(() => {
-      expect(lastFrame()).toContain("Memory · recent entries");
+      expect(lastFrame()).toContain("Memory  recent entries");
     });
-    expect(lastFrame()).toContain("t-1 · Cleaned the repository");
+    expect(lastFrame()).toMatch(/✔ t-1 +Cleaned the repository/);
 
     await submit(stdin, "/memory deploy");
     await eventually(() => {
       expect(search).toHaveBeenCalledWith("deploy", 20);
     });
     await eventually(() => {
-      expect(lastFrame()).toContain('Memory · search "deploy" · 1 results');
+      expect(lastFrame()).toContain('Memory  search "deploy" · 1 result');
     });
 
     unmount();
@@ -819,7 +834,7 @@ describe("App", () => {
     await eventually(() => {
       expect(lastFrame()).toContain("pausing monitor and executor");
     });
-    expect(lastFrame()).toContain("⏸ pausing…");
+    expect(lastFrame()).toContain("‖ pausing…");
 
     await submit(stdin, "/start monitor");
     await flushed(store);
@@ -839,8 +854,9 @@ describe("App", () => {
     const { lastFrame, stdin, unmount } = await renderApp(props);
 
     const frame = lastFrame() ?? "";
-    expect(frame).toContain("agents are paused — run /start to wake them");
-    expect(frame).toContain("⏸ paused");
+    expect(statusBar(frame)).toContain("● agents are paused — run /start to wake them");
+    expect(frame).toContain("‖ paused");
+    expect(frame).toContain("paused — run /start to begin");
 
     await submit(stdin, "/start");
     await flushed(store);
@@ -852,7 +868,7 @@ describe("App", () => {
     await eventually(() => {
       expect(lastFrame()).toContain("started monitor and executor");
     });
-    expect(lastFrame()).not.toContain("⏸ paused");
+    expect(lastFrame()).not.toContain("‖ paused");
 
     unmount();
     store.dispose();
@@ -890,7 +906,7 @@ describe("App", () => {
 
     await submit(stdin, "hello");
     await eventually(() => {
-      expect(lastFrame()).toContain("> hello");
+      expect(promptText(lastFrame())).toBe("hello");
     });
 
     unmount();
@@ -944,7 +960,7 @@ describe("App", () => {
     expect(frame).toContain("Executor");
     expect(frame).toContain("every 5 min");
     expect(frame).toContain("max attempts");
-    expect(frame).toContain("change with /model /effort /interval /hours /days");
+    expect(frame).toMatch(/model +haiku +\/model monitor/);
 
     unmount();
     store.dispose();
@@ -1008,13 +1024,13 @@ describe("App", () => {
       rendered,
       props,
       "/prompt monitor",
-      "monitor prompt (.kikimora/prompts/monitor.prompt.md)",
+      "monitor prompt  .kikimora/prompts/monitor.prompt.md",
     );
 
     const frame = lastFrame() ?? "";
     expect(frame).toContain("watch the pipelines");
-    expect(frame).toContain("Ctrl+D: save");
-    expect(frame).not.toContain("> ");
+    expect(frame).toContain("ctrl+d save · esc close without saving");
+    expect(promptText(frame)).toBeUndefined();
 
     await type(stdin, " and CI");
     await type(stdin, CTRL_D);
@@ -1027,7 +1043,7 @@ describe("App", () => {
         "monitor prompt saved — applies from the next session",
       );
     });
-    expect(lastFrame()).toContain("> ");
+    expect(promptText(lastFrame())).toBe("type / for commands");
 
     unmount();
     store.dispose();
@@ -1035,14 +1051,15 @@ describe("App", () => {
 
   it("/prompt closed with Esc writes nothing", async () => {
     const { store, props, prompts } = buildHarness();
-    const { lastFrame, stdin, unmount } = await renderApp(props);
+    const rendered = await renderApp(props);
+    const { lastFrame, stdin, unmount } = rendered;
 
-    await submit(stdin, "/prompt executor");
+    await openEditor(rendered, props, "/prompt executor", "executor prompt");
     await type(stdin, "scratch edits");
     await type(stdin, ESCAPE);
 
     await eventually(() => {
-      expect(lastFrame()).toContain("> ");
+      expect(promptText(lastFrame())).toBe("type / for commands");
     });
     expect(prompts.write).not.toHaveBeenCalled();
 
@@ -1060,7 +1077,7 @@ describe("App", () => {
       rendered,
       props,
       "/prompt monitor",
-      "monitor prompt (.kikimora/prompts/monitor.prompt.md)",
+      "monitor prompt  .kikimora/prompts/monitor.prompt.md",
     );
     await type(stdin, CTRL_D);
 
@@ -1086,8 +1103,8 @@ describe("App", () => {
 
     const frame = lastFrame() ?? "";
     expect(frame).toContain("the acme-shop workspace");
-    expect(frame).toContain("Ctrl+D: save");
-    expect(frame).not.toContain("> ");
+    expect(frame).toContain("ctrl+d save · esc close without saving");
+    expect(promptText(frame)).toBeUndefined();
 
     await type(stdin, " and its CI");
     await type(stdin, CTRL_D);
@@ -1098,7 +1115,7 @@ describe("App", () => {
     await eventually(() => {
       expect(lastFrame()).toContain("context saved — applies from the next session");
     });
-    expect(lastFrame()).toContain("> ");
+    expect(promptText(lastFrame())).toBe("type / for commands");
 
     unmount();
     store.dispose();
@@ -1106,16 +1123,231 @@ describe("App", () => {
 
   it("/context closed with Esc writes nothing", async () => {
     const { store, props, context } = buildHarness();
-    const { lastFrame, stdin, unmount } = await renderApp(props);
+    const rendered = await renderApp(props);
+    const { lastFrame, stdin, unmount } = rendered;
 
-    await submit(stdin, "/context");
+    await openEditor(rendered, props, "/context", "context file");
     await type(stdin, "scratch edits");
     await type(stdin, ESCAPE);
 
     await eventually(() => {
-      expect(lastFrame()).toContain("> ");
+      expect(promptText(lastFrame())).toBe("type / for commands");
     });
     expect(context.write).not.toHaveBeenCalled();
+
+    unmount();
+    store.dispose();
+  });
+
+  it("shows notices in the status bar without changing the layout height", async () => {
+    const { store, props } = buildHarness();
+    const { lastFrame, stdin, unmount } = await renderApp(props);
+
+    const before = (lastFrame() ?? "").split("\n").length;
+    await submit(stdin, "/nope");
+    await eventually(() => {
+      expect(statusBar(lastFrame())).toContain("✖ unknown command /nope — try /help");
+    });
+    expect((lastFrame() ?? "").split("\n")).toHaveLength(before);
+
+    unmount();
+    store.dispose();
+  });
+
+  it("marks successful commands with a check in the status bar", async () => {
+    const { store, props } = buildHarness("paused");
+    const { lastFrame, stdin, unmount } = await renderApp(props);
+
+    await submit(stdin, "/start");
+    await eventually(() => {
+      expect(statusBar(lastFrame())).toContain("✔ started monitor and executor");
+    });
+
+    unmount();
+    store.dispose();
+  });
+
+  it("shows a placeholder and the missing arguments as a ghost", async () => {
+    const { store, props } = buildHarness();
+    const { lastFrame, stdin, unmount } = await renderApp(props);
+
+    expect(promptText(lastFrame())).toBe("type / for commands");
+
+    await type(stdin, "/task ");
+    await eventually(() => {
+      expect(promptText(lastFrame())).toBe("/task  <description>");
+    });
+
+    unmount();
+    store.dispose();
+  });
+
+  it("completes argument values with tab and runs the completed line", async () => {
+    const { store, props, settings } = buildHarness();
+    const { lastFrame, stdin, unmount } = await renderApp(props);
+
+    await type(stdin, "/model ex");
+    await eventually(() => {
+      expect(lastFrame()).toMatch(/❯ executor/);
+    });
+    await type(stdin, TAB);
+    await eventually(() => {
+      expect(promptText(lastFrame())).toMatch(/^\/model executor +<model>$/);
+    });
+
+    await type(stdin, "so");
+    await type(stdin, ENTER);
+    await eventually(() => {
+      expect(settings.setModel).toHaveBeenCalledWith("executor", "sonnet");
+    });
+
+    unmount();
+    store.dispose();
+  });
+
+  it("does not pick an argument value on enter before one is typed", async () => {
+    const { store, props, settings } = buildHarness();
+    const { lastFrame, stdin, unmount } = await renderApp(props);
+
+    await submit(stdin, "/model ");
+    await eventually(() => {
+      expect(statusBar(lastFrame())).toContain("usage: /model");
+    });
+    expect(settings.setModel).not.toHaveBeenCalled();
+
+    unmount();
+    store.dispose();
+  });
+
+  it("edits the command line with readline keys", async () => {
+    const { store, props } = buildHarness();
+    const { lastFrame, stdin, unmount } = await renderApp(props);
+
+    await type(stdin, "/memory deploy errors");
+    await type(stdin, CTRL_W);
+    await eventually(() => {
+      expect(promptText(lastFrame())).toBe("/memory deploy");
+    });
+    await type(stdin, CTRL_A);
+    await type(stdin, "x");
+    await eventually(() => {
+      expect(promptText(lastFrame())).toBe("x/memory deploy");
+    });
+
+    unmount();
+    store.dispose();
+  });
+
+  it("scrolls the task list with page-down and resets when the view changes", async () => {
+    const { store, props } = buildHarness();
+    const { lastFrame, stdin, unmount } = await renderApp(props);
+
+    store.setTasks(
+      Array.from({ length: 40 }, (_, index) =>
+        buildTask({
+          id: `t-${String(index).padStart(2, "0")}`,
+          title: `Task ${String(index)}`,
+          updatedAt: new Date(Date.UTC(2026, 0, 1, 0, 40 - index)).toISOString(),
+        }),
+      ),
+    );
+    await flushed(store);
+    await submit(stdin, "/tasks");
+    await eventually(() => {
+      expect(lastFrame()).toMatch(/1–\d+ of 40 · pgup\/pgdn/);
+    });
+    expect(lastFrame()).toContain("Task 0");
+
+    await type(stdin, PAGE_DOWN);
+    await eventually(() => {
+      expect(lastFrame()).not.toContain("Task 0 ");
+    });
+    expect(lastFrame()).toMatch(/\d+–\d+ of 40/);
+
+    await submit(stdin, "/tasks");
+    await eventually(() => {
+      expect(lastFrame()).toMatch(/1–\d+ of 40/);
+    });
+
+    unmount();
+    store.dispose();
+  });
+
+  it("points the dashboard task table to /tasks when it overflows", async () => {
+    const { store, props } = buildHarness();
+    const { lastFrame, unmount } = await renderApp(props);
+
+    store.setTasks(
+      Array.from({ length: 20 }, (_, index) => buildTask({ id: `t-${String(index)}` })),
+    );
+    await flushed(store);
+
+    await eventually(() => {
+      expect(lastFrame()).toMatch(/\+\d+ more · \/tasks/);
+    });
+
+    unmount();
+    store.dispose();
+  });
+
+  it("shows update and drain banners under the header", async () => {
+    const { store, props } = buildHarness();
+    const { lastFrame, unmount } = await renderApp(props);
+
+    store.setUpdateStatus({ state: "available", from: "1.2.3", to: "1.3.0" });
+    await flushed(store);
+    await eventually(() => {
+      expect(lastFrame()).toContain(
+        '↑ update available v1.2.3 → v1.3.0 — run "kikimora update"',
+      );
+    });
+
+    store.setUpdateStatus({ state: "installed", from: "1.2.3", to: "1.3.0" });
+    await flushed(store);
+    await eventually(() => {
+      expect(lastFrame()).toContain("↑ updated to v1.3.0 — restart to apply");
+    });
+
+    unmount();
+    store.dispose();
+  });
+
+  it("keeps a save error visible inside the editor", async () => {
+    const { store, props, context } = buildHarness();
+    context.write.mockRejectedValue(new Error("read-only file system"));
+    const rendered = await renderApp(props);
+    const { lastFrame, stdin, unmount } = rendered;
+
+    await openEditor(rendered, props, "/context", "context file");
+    await type(stdin, CTRL_D);
+
+    await eventually(() => {
+      expect(lastFrame()).toContain("read-only file system");
+    });
+    expect(lastFrame()).toContain("context file");
+
+    unmount();
+    store.dispose();
+  });
+
+  it("shows the recent outcomes of an agent with their duration", async () => {
+    const { store, props } = buildHarness();
+    const { lastFrame, stdin, unmount } = await renderApp(props);
+
+    store.executor.taskFinished({
+      taskId: "t-1",
+      title: "Title",
+      ok: true,
+      durationMs: 725_000,
+      costUsd: 1.5,
+      numTurns: 3,
+    });
+    await flushed(store);
+    await submit(stdin, "/executor");
+
+    await eventually(() => {
+      expect(lastFrame()).toMatch(/✔ t-1 · 3 turns +12m 05s · \$1\.50/);
+    });
 
     unmount();
     store.dispose();

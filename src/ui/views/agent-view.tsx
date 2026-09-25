@@ -1,11 +1,12 @@
 import { Box, Text } from "ink";
 import type { JSX } from "react";
+import { AgentPanel, OutcomeText } from "../agent-panel.js";
 import type { AgentPanelModel } from "../agent-visuals.js";
-import { AgentPanel } from "../agent-panel.js";
-import { theme } from "../theme.js";
+import { Panel } from "../panel.js";
 
 export interface AgentViewProps {
   title: string;
+  subtitle: string;
   model: AgentPanelModel;
   width: number;
   height: number;
@@ -15,51 +16,46 @@ export interface AgentViewProps {
 
 export function AgentView({
   title,
+  subtitle,
   model,
   width,
   height,
   scrollOffset,
   expanded,
 }: AgentViewProps): JSX.Element {
-  const outcomes = model.recentOutcomeLabels;
+  const outcomes = model.recentOutcomes;
   const outcomesHeight =
     outcomes.length === 0
-      ? 4
-      : Math.min(Math.max(4, Math.floor(height / 3)), outcomes.length + 2);
+      ? 3
+      : Math.min(Math.max(3, Math.floor(height / 3)), outcomes.length + 2);
   const panelHeight = Math.max(6, height - outcomesHeight);
   const visibleOutcomes = outcomes.slice(0, Math.max(1, outcomesHeight - 2));
   return (
     <Box flexDirection="column" height={height} overflow="hidden">
       <AgentPanel
         title={title}
-        borderColor={theme.muted}
-        phaseLabel={model.phaseLabel}
-        phaseColor={model.phaseColor}
-        tail={model.tail}
-        outcomeLabel={undefined}
-        outcomeColor={model.outcomeColor}
+        subtitle={subtitle}
+        model={model}
         width={width}
         height={panelHeight}
-        focused={false}
+        active
         scrollOffset={scrollOffset}
         expanded={expanded}
+        showOutcome={false}
       />
-      <Box
-        borderStyle="round"
-        borderColor={theme.muted}
-        flexDirection="column"
-        paddingX={1}
-        height={outcomesHeight}
-        overflow="hidden"
-      >
-        <Text bold>Recent outcomes</Text>
+      <Panel title="Recent outcomes" height={outcomesHeight} active={false}>
         {visibleOutcomes.length === 0 ? <Text dimColor>nothing finished yet</Text> : null}
-        {visibleOutcomes.map((label, index) => (
-          <Text key={index} dimColor={index > 0} wrap="truncate-end">
-            {label}
-          </Text>
+        {visibleOutcomes.map((outcome, index) => (
+          <Box key={index} height={1} gap={2}>
+            <Box flexGrow={1} flexShrink={1} flexBasis={0} overflow="hidden">
+              <OutcomeText outcome={outcome} />
+            </Box>
+            <Box flexShrink={0}>
+              <Text dimColor>{outcome.meta}</Text>
+            </Box>
+          </Box>
         ))}
-      </Box>
+      </Panel>
     </Box>
   );
 }

@@ -9,81 +9,54 @@ import type {
 } from "../status.js";
 import {
   detectStall,
-  formatControlLabel,
   formatExecutorOutcome,
   formatExecutorPhase,
   formatMonitorOutcome,
   formatMonitorPhase,
+  withControl,
+  withStall,
+  type OutcomeLine,
+  type StatusLine,
 } from "./format.js";
-import { theme } from "./theme.js";
 
 export interface AgentPanelModel {
-  phaseLabel: string;
-  phaseColor: string;
+  status: StatusLine;
   tail: readonly TailLine[];
-  outcomeLabel: string | undefined;
-  outcomeColor: string;
-  recentOutcomeLabels: readonly string[];
+  outcome: OutcomeLine | undefined;
+  recentOutcomes: readonly OutcomeLine[];
+  emptyHint: string;
 }
 
-function stallFor(
-  phase: { kind: string; startedAt?: number },
-  lastEventAt: number | undefined,
-  now: number,
-): string | undefined {
-  if (phase.startedAt === undefined) return undefined;
-  return detectStall(phase.startedAt, lastEventAt, now);
+interface PanelSource<Outcome> {
+  control: AgentControlState;
+  tail: readonly TailLine[];
+  lastEventAt?: number | undefined;
+  lastOutcome?: Outcome | undefined;
+  recentOutcomes: readonly Outcome[];
 }
 
-function buildModel(
-  panel: {
-    control: AgentControlState;
-    tail: readonly TailLine[];
-    lastEventAt?: number | undefined;
-  },
+function buildModel<Outcome>(
+  panel: PanelSource<Outcome>,
   phase: { kind: string; startedAt?: number },
-  phaseText: string,
+  base: StatusLine,
   now: number,
-  outcomeLabel: string | undefined,
-  outcomeColor: string,
-  recentOutcomeLabels: readonly string[],
+  formatOutcome: (outcome: Outcome) => OutcomeLine,
+  idleHint: string,
 ): AgentPanelModel {
+  const running = phase.kind === "session" || phase.kind === "summary";
   const stall =
-    phase.kind === "session" || phase.kind === "summary"
-      ? stallFor(phase, panel.lastEventAt, now)
+    running && phase.startedAt !== undefined
+      ? detectStall(phase.startedAt, panel.lastEventAt, now)
       : undefined;
-  const stalledLabel = stall === undefined ? phaseText : `${phaseText} · ${stall}`;
-  const controlLabel = formatControlLabel(panel.control, phase.kind, stalledLabel);
+  const status = withControl(panel.control, phase.kind, withStall(base, stall));
   return {
-    phaseLabel: controlLabel ?? stalledLabel,
-    phaseColor:
-      controlLabel !== undefined || stall !== undefined
-        ? theme.warn
-        : phaseColor(phase.kind),
+    status,
     tail: panel.tail,
-    outcomeLabel,
-    outcomeColor,
-    recentOutcomeLabels,
+    outcome:
+      panel.lastOutcome === undefined ? undefined : formatOutcome(panel.lastOutcome),
+    recentOutcomes: panel.recentOutcomes.map(formatOutcome),
+    emptyHint: panel.control === "running" ? idleHint : "paused — run /start to begin",
   };
-}
-
-export function phaseColor(kind: string): string {
-  switch (kind) {
-    case "session":
-    case "summary":
-      return theme.info;
-    case "backoff":
-    case "limitWait":
-      return theme.warn;
-    case "authBlocked":
-      return theme.error;
-    default:
-      return theme.muted;
-  }
-}
-
-export function outcomeColor(ok: boolean | undefined): string {
-  return ok === false ? theme.error : theme.ok;
 }
 
 export function monitorPanelModel(
@@ -95,9 +68,8 @@ export function monitorPanelModel(
     panel.phase,
     formatMonitorPhase(panel.phase, now),
     now,
-    panel.lastOutcome && formatMonitorOutcome(panel.lastOutcome),
-    outcomeColor(panel.lastOutcome?.ok),
-    panel.recentOutcomes.map(formatMonitorOutcome),
+    formatMonitorOutcome,
+    "no activity yet — the first cycle starts shortly",
   );
 }
 
@@ -110,8 +82,7 @@ export function executorPanelModel(
     panel.phase,
     formatExecutorPhase(panel.phase, now),
     now,
-    panel.lastOutcome && formatExecutorOutcome(panel.lastOutcome),
-    panel.lastOutcome?.willRetry ? theme.warn : outcomeColor(panel.lastOutcome?.ok),
-    panel.recentOutcomes.map(formatExecutorOutcome),
+    formatExecutorOutcome,
+    "no activity yet — tasks from the monitor land here",
   );
 }

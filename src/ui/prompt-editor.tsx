@@ -1,27 +1,45 @@
-import { Box, Text, useInput } from "ink";
+import { Box, Text, useInput, type Key } from "ink";
 import type { JSX } from "react";
 import { useState } from "react";
+import { countLabel } from "./format.js";
+import { KeyHints } from "./key-hints.js";
+import { readlineEdit } from "./line-editing.js";
+import { Panel, PanelTitle } from "./panel.js";
 import { theme } from "./theme.js";
 
 export interface PromptEditorProps {
   title: string;
+  subtitle?: string | undefined;
   step?: string | undefined;
-  hint?: string | undefined;
+  description?: string | undefined;
+  submitLabel?: string | undefined;
+  cancelLabel?: string | undefined;
   placeholder?: string | undefined;
   initialValue?: string | undefined;
+  width?: number | undefined;
   maxVisibleLines?: number | undefined;
+  fill?: boolean | undefined;
+  error?: string | undefined;
   onSubmit: (value: string) => void;
   onCancel: () => void;
 }
 
-interface EditorState {
+export interface EditorState {
   lines: readonly string[];
   row: number;
   col: number;
 }
 
+export interface VisualRow {
+  line: number;
+  start: number;
+  text: string;
+}
+
 const DEFAULT_MAX_VISIBLE_LINES = 12;
-const DEFAULT_HINT = "Enter: new line · Ctrl+D: submit · Esc: cancel";
+const DEFAULT_WIDTH = 80;
+const EDITOR_CHROME_WIDTH = 4;
+const MIN_TEXT_WIDTH = 8;
 const PASTE_MARKER = /^\[20[01]~$/;
 
 function initialState(value: string): EditorState {
@@ -32,6 +50,10 @@ function initialState(value: string): EditorState {
 
 function currentLine(state: EditorState): string {
   return state.lines[state.row] ?? "";
+}
+
+function editorValue(state: EditorState): string {
+  return state.lines.join("\n");
 }
 
 function insertText(state: EditorState, text: string): EditorState {
@@ -49,13 +71,7 @@ function insertText(state: EditorState, text: string): EditorState {
   return { lines, row, col };
 }
 
-function deleteBefore(state: EditorState): EditorState {
-  if (state.col > 0) {
-    const line = currentLine(state);
-    const updated = line.slice(0, state.col - 1) + line.slice(state.col);
-    const lines = state.lines.with(state.row, updated);
-    return { lines, row: state.row, col: state.col - 1 };
-  }
+function joinWithPrevious(state: EditorState): EditorState {
   if (state.row === 0) return state;
   const previous = state.lines[state.row - 1] ?? "";
   const lines = [
@@ -64,6 +80,16 @@ function deleteBefore(state: EditorState): EditorState {
     ...state.lines.slice(state.row + 1),
   ];
   return { lines, row: state.row - 1, col: previous.length };
+}
+
+function joinWithNext(state: EditorState): EditorState {
+  if (state.row === state.lines.length - 1) return state;
+  const lines = [
+    ...state.lines.slice(0, state.row),
+    currentLine(state) + (state.lines[state.row + 1] ?? ""),
+    ...state.lines.slice(state.row + 2),
+  ];
+  return { ...state, lines };
 }
 
 function moveLeft(state: EditorState): EditorState {
@@ -79,49 +105,111 @@ function moveRight(state: EditorState): EditorState {
   return { ...state, row: state.row + 1, col: 0 };
 }
 
-function moveVertically(state: EditorState, delta: number): EditorState {
-  const row = Math.min(Math.max(0, state.row + delta), state.lines.length - 1);
-  if (row === state.row) return state;
-  return { ...state, row, col: Math.min(state.col, state.lines[row]?.length ?? 0) };
+export function visualRows(lines: readonly string[], width: number): VisualRow[] {
+  const safeWidth = Math.max(1, width);
+  return lines.flatMap((text, line) =>
+    Array.from({ length: Math.floor(text.length / safeWidth) + 1 }, (_, index) => ({
+      line,
+      start: index * safeWidth,
+      text: text.slice(index * safeWidth, (index + 1) * safeWidth),
+    })),
+  );
+}
+
+export function cursorRowIndex(
+  rows: readonly VisualRow[],
+  state: EditorState,
+  width: number,
+): number {
+  const index = rows.findIndex(
+    (row) =>
+      row.line === state.row && state.col >= row.start && state.col < row.start + width,
+  );
+  return Math.max(0, index);
+}
+
+function moveVertically(state: EditorState, delta: number, width: number): EditorState {
+  const rows = visualRows(state.lines, width);
+  const index = cursorRowIndex(rows, state, width);
+  const target = rows[Math.min(Math.max(0, index + delta), rows.length - 1)];
+  const current = rows[index];
+  if (target === undefined || current === undefined || target === current) return state;
+  const lineLength = state.lines[target.line]?.length ?? 0;
+  const col = Math.min(target.start + (state.col - current.start), lineLength);
+  return { ...state, row: target.line, col };
+}
+
+function editLine(state: EditorState, input: string, key: Key): EditorState | undefined {
+  const edit = readlineEdit(input, key);
+  if (edit === undefined) return undefined;
+  const next = edit({ value: currentLine(state), cursor: state.col });
+  return {
+    lines: state.lines.with(state.row, next.value),
+    row: state.row,
+    col: next.cursor,
+  };
 }
 
 function normalizePaste(input: string): string {
   return input.replaceAll("\r\n", "\n").replaceAll("\r", "\n");
 }
 
-interface EditorLineProps {
-  line: string;
-  cursorCol: number | null;
+function EditorRow({
+  text,
+  cursor,
+}: {
+  text: string;
+  cursor: number | null;
+}): JSX.Element {
+  if (cursor === null) return <Text>{text === "" ? " " : text}</Text>;
+  const at = text.slice(cursor, cursor + 1);
+  return (
+    <Text>
+      {text.slice(0, cursor)}
+      <Text inverse>{at === "" ? " " : at}</Text>
+      {text.slice(cursor + 1)}
+    </Text>
+  );
 }
 
-function EditorLine({ line, cursorCol }: EditorLineProps): JSX.Element {
-  if (cursorCol === null) {
-    return <Text wrap="wrap">{line === "" ? " " : line}</Text>;
-  }
-  const before = line.slice(0, cursorCol);
-  const at = line.slice(cursorCol, cursorCol + 1);
-  const after = line.slice(cursorCol + 1);
+function editorAside(
+  hiddenAbove: number,
+  step: string | undefined,
+  modified: boolean,
+): JSX.Element | undefined {
+  const plain = [hiddenAbove > 0 ? `↑ ${hiddenAbove} more` : undefined, step]
+    .filter((part) => part !== undefined)
+    .join(" · ");
+  if (plain === "" && !modified) return undefined;
   return (
-    <Text wrap="wrap">
-      {before}
-      <Text inverse>{at === "" ? " " : at}</Text>
-      {after}
+    <Text>
+      <Text dimColor>{plain}</Text>
+      {modified ? (
+        <Text color={theme.warn}>{plain === "" ? "modified" : " · modified"}</Text>
+      ) : null}
     </Text>
   );
 }
 
 export function PromptEditor({
   title,
+  subtitle,
   step,
-  hint = DEFAULT_HINT,
+  description,
+  submitLabel = "submit",
+  cancelLabel = "cancel",
   placeholder,
   initialValue,
+  width = DEFAULT_WIDTH,
   maxVisibleLines = DEFAULT_MAX_VISIBLE_LINES,
+  fill = false,
+  error,
   onSubmit,
   onCancel,
 }: PromptEditorProps): JSX.Element {
   const [state, setState] = useState<EditorState>(() => initialState(initialValue ?? ""));
   const [warning, setWarning] = useState<string | null>(null);
+  const textWidth = Math.max(MIN_TEXT_WIDTH, width - EDITOR_CHROME_WIDTH);
 
   useInput((input, key) => {
     if (key.ctrl && input === "c") {
@@ -129,7 +217,7 @@ export function PromptEditor({
       return;
     }
     if (key.ctrl && input === "d") {
-      const value = state.lines.join("\n").trimEnd();
+      const value = editorValue(state).trimEnd();
       if (value === "") {
         setWarning("enter at least one line, or press Esc to cancel");
         return;
@@ -146,89 +234,100 @@ export function PromptEditor({
       setState((current) => insertText(current, "\n"));
       return;
     }
-    if (key.backspace || key.delete) {
-      setState(deleteBefore);
-      return;
-    }
-    if (key.leftArrow) {
-      setState(moveLeft);
-      return;
-    }
-    if (key.rightArrow) {
-      setState(moveRight);
-      return;
-    }
-    if (key.upArrow) {
-      setState((current) => moveVertically(current, -1));
-      return;
-    }
-    if (key.downArrow) {
-      setState((current) => moveVertically(current, 1));
-      return;
-    }
-    if (key.home) {
-      setState((current) => ({ ...current, col: 0 }));
-      return;
-    }
-    if (key.end) {
-      setState((current) => ({ ...current, col: currentLine(current).length }));
+    if (key.upArrow || key.downArrow) {
+      setState((current) => moveVertically(current, key.upArrow ? -1 : 1, textWidth));
       return;
     }
     if (key.tab) {
       setState((current) => insertText(current, "  "));
       return;
     }
-    if (input.length > 0 && !key.ctrl && !key.meta) {
+    setState((current) => {
+      const atStart = current.col === 0;
+      const atEnd = current.col === currentLine(current).length;
+      if ((key.backspace || (key.ctrl && input === "w")) && atStart) {
+        return joinWithPrevious(current);
+      }
+      if (key.delete && atEnd) return joinWithNext(current);
+      if (key.leftArrow && !key.meta && atStart) return moveLeft(current);
+      if (key.rightArrow && !key.meta && atEnd) return moveRight(current);
+      const edited = editLine(current, input, key);
+      if (edited !== undefined) return edited;
+      if (input.length === 0 || key.ctrl || key.meta) return current;
       const text = normalizePaste(input);
-      if (PASTE_MARKER.test(text)) return;
-      setState((current) => insertText(current, text));
-    }
+      return PASTE_MARKER.test(text) ? current : insertText(current, text);
+    });
   });
 
   const empty = state.lines.length === 1 && state.lines[0] === "";
+  const rows = visualRows(state.lines, textWidth);
+  const cursorIndex = cursorRowIndex(rows, state, textWidth);
   const viewportStart = Math.min(
-    Math.max(0, state.row - maxVisibleLines + 1),
-    Math.max(0, state.lines.length - maxVisibleLines),
+    Math.max(0, cursorIndex - maxVisibleLines + 1),
+    Math.max(0, rows.length - maxVisibleLines),
   );
-  const visible = state.lines.slice(viewportStart, viewportStart + maxVisibleLines);
-  const hiddenAbove = viewportStart;
-  const hiddenBelow = state.lines.length - viewportStart - visible.length;
+  const visible = rows.slice(viewportStart, viewportStart + maxVisibleLines);
+  const hiddenBelow = rows.length - viewportStart - visible.length;
+  const value = editorValue(state);
+  const modified = value !== (initialValue ?? "");
 
   return (
-    <Box flexDirection="column">
-      <Box borderStyle="round" paddingX={1} flexDirection="column">
-        <Box justifyContent="space-between" gap={2}>
-          <Text bold wrap="truncate-end">
-            {title}
-          </Text>
-          {step === undefined ? null : <Text dimColor>{`step ${step}`}</Text>}
-        </Box>
-        {hiddenAbove > 0 ? (
-          <Text dimColor>{`… ${hiddenAbove} more lines above`}</Text>
-        ) : null}
+    <Box flexDirection="column" flexShrink={0} width={width}>
+      <Panel
+        title={<PanelTitle subtitle={subtitle}>{title}</PanelTitle>}
+        aside={editorAside(viewportStart, step, step === undefined && modified)}
+        footer={
+          description === undefined ? undefined : (
+            <Text dimColor wrap="truncate-end">
+              {description}
+            </Text>
+          )
+        }
+        footerAside={
+          hiddenBelow > 0 ? <Text dimColor>{`↓ ${hiddenBelow} more`}</Text> : undefined
+        }
+        width={width}
+        height={fill ? maxVisibleLines + 2 : undefined}
+      >
         {empty && placeholder !== undefined ? (
           <Text wrap="truncate-end">
             <Text inverse> </Text>
             <Text dimColor>{placeholder}</Text>
           </Text>
         ) : (
-          visible.map((line, index) => (
-            <EditorLine
+          visible.map((row, index) => (
+            <EditorRow
               key={viewportStart + index}
-              line={line}
-              cursorCol={viewportStart + index === state.row ? state.col : null}
+              text={row.text}
+              cursor={
+                viewportStart + index === cursorIndex ? state.col - row.start : null
+              }
             />
           ))
         )}
-        {hiddenBelow > 0 ? (
-          <Text dimColor>{`… ${hiddenBelow} more lines below`}</Text>
-        ) : null}
+      </Panel>
+      <Box height={1} paddingX={1} gap={2}>
+        <Box flexGrow={1} flexShrink={1} overflow="hidden">
+          {warning !== null || error !== undefined ? (
+            <Text color={warning === null ? theme.error : theme.warn} wrap="truncate-end">
+              {warning ?? error}
+            </Text>
+          ) : (
+            <KeyHints
+              hints={[
+                ["enter", "new line"],
+                ["ctrl+d", submitLabel],
+                ["esc", cancelLabel],
+              ]}
+            />
+          )}
+        </Box>
+        <Box flexShrink={0}>
+          <Text dimColor>
+            {`${countLabel(state.lines.length, "line", "lines")} · ${countLabel(value.length, "char", "chars")}`}
+          </Text>
+        </Box>
       </Box>
-      {warning === null ? (
-        <Text dimColor>{hint}</Text>
-      ) : (
-        <Text color={theme.warn}>{warning}</Text>
-      )}
     </Box>
   );
 }

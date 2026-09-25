@@ -1,4 +1,4 @@
-import { Box, Text, useInput, useStdin } from "ink";
+import { Box, useInput, useStdin } from "ink";
 import type { JSX } from "react";
 import { useEffect, useMemo, useState, useSyncExternalStore } from "react";
 import { PROMPT_FILE_LABELS } from "../config.js";
@@ -12,33 +12,49 @@ import { executorPanelModel, monitorPanelModel } from "./agent-visuals.js";
 import { CommandInput } from "./command-input.js";
 import { CommandSuggestions, SUGGESTION_WINDOW } from "./command-suggestions.js";
 import {
+  argumentGhost,
+  commandMenu,
   dispatchCommand,
-  suggestions,
   type AgentControls,
   type CommandContext,
   type DrainControls,
   type MemoryReader,
-  type NoticeTone,
   type TaskControls,
   type View,
 } from "./commands.js";
-import { Header } from "./header.js";
+import { Header, headerBanners } from "./header.js";
+import type { KeyHint } from "./key-hints.js";
+import { computeLayout } from "./layout.js";
+import { lineEdits, readlineEdit, type LineEdit } from "./line-editing.js";
 import { PromptEditor } from "./prompt-editor.js";
-import { theme } from "./theme.js";
+import { maxListOffset, PANEL_BORDER_ROWS } from "./scroll.js";
+import { AnimationProvider } from "./spinner.js";
+import { StatusBar, type Notice } from "./status-bar.js";
+import { taskRows } from "./task-table.js";
 import { useNow } from "./use-now.js";
 import { useTerminalSize } from "./use-terminal-size.js";
 import { AgentView } from "./views/agent-view.js";
-import { ConfigView } from "./views/config-view.js";
-import { DashboardView, type PanelId } from "./views/dashboard-view.js";
-import { HelpView } from "./views/help-view.js";
+import { configRows, ConfigView } from "./views/config-view.js";
+import { agentSubtitle, DashboardView, type PanelId } from "./views/dashboard-view.js";
+import { helpRows, HelpView } from "./views/help-view.js";
 import { MemoryView } from "./views/memory-view.js";
 import { TasksView } from "./views/tasks-view.js";
 
-const HEADER_HEIGHT = 6;
-const INPUT_HEIGHT = 3;
 const SCROLL_PAGE_MARGIN = 6;
 const HISTORY_LIMIT = 50;
 const NOTICE_TIMEOUT_MS = 5_000;
+
+type ListId = "tasks" | "memory" | "config" | "help";
+type ScrollId = PanelId | ListId;
+
+const NO_SCROLL: Record<ScrollId, number> = {
+  monitor: 0,
+  executor: 0,
+  tasks: 0,
+  memory: 0,
+  config: 0,
+  help: 0,
+};
 
 interface InputState {
   value: string;
@@ -56,25 +72,12 @@ const EMPTY_INPUT: InputState = {
   draft: "",
 };
 
-interface Notice {
-  text: string;
-  tone: NoticeTone;
-}
-
 function withValue(state: InputState, value: string): InputState {
   return { ...state, value, cursor: value.length, historyIndex: null, draft: "" };
 }
 
-function insertAtCursor(state: InputState, text: string): InputState {
-  const value =
-    state.value.slice(0, state.cursor) + text + state.value.slice(state.cursor);
-  return { ...state, value, cursor: state.cursor + text.length };
-}
-
-function deleteBeforeCursor(state: InputState): InputState {
-  if (state.cursor === 0) return state;
-  const value = state.value.slice(0, state.cursor - 1) + state.value.slice(state.cursor);
-  return { ...state, value, cursor: state.cursor - 1 };
+function applyEdit(state: InputState, edit: LineEdit): InputState {
+  return { ...state, ...edit({ value: state.value, cursor: state.cursor }) };
 }
 
 function historyUp(state: InputState): InputState {
@@ -120,6 +123,47 @@ function submitToHistory(state: InputState, line: string): InputState {
   return { ...EMPTY_INPUT, history };
 }
 
+function scrollIdFor(view: View, focusedPanel: PanelId): ScrollId | null {
+  switch (view.kind) {
+    case "dashboard":
+      return focusedPanel;
+    case "monitor":
+    case "executor":
+    case "tasks":
+    case "memory":
+    case "config":
+    case "help":
+      return view.kind;
+    case "prompt":
+    case "context":
+      return null;
+  }
+}
+
+function keyHints(view: View, menuOpen: boolean, expanded: boolean): KeyHint[] {
+  if (menuOpen) {
+    return [
+      ["↑↓", "select"],
+      ["tab", "complete"],
+      ["enter", "run"],
+      ["esc", "clear"],
+    ];
+  }
+  const expand: KeyHint = ["ctrl+o", expanded ? "collapse" : "expand"];
+  switch (view.kind) {
+    case "dashboard":
+      return [["tab", "focus"], ["pgup/pgdn", "scroll"], expand, ["/", "commands"]];
+    case "monitor":
+    case "executor":
+      return [["pgup/pgdn", "scroll"], expand, ["/dashboard", "back"]];
+    default:
+      return [
+        ["pgup/pgdn", "scroll"],
+        ["/dashboard", "back"],
+      ];
+  }
+}
+
 export interface AppProps {
   store: WorkerStatusStore;
   config: WorkerConfig;
@@ -134,6 +178,7 @@ export interface AppProps {
   waker: Pick<Waker, "notify">;
   requestExit: () => void;
   noticeTimeoutMs?: number | undefined;
+  animate?: boolean | undefined;
 }
 
 export function App({
@@ -150,6 +195,7 @@ export function App({
   waker,
   requestExit,
   noticeTimeoutMs = NOTICE_TIMEOUT_MS,
+  animate = true,
 }: AppProps): JSX.Element {
   const status = useSyncExternalStore(store.subscribe, store.getSnapshot);
   const { columns, rows } = useTerminalSize();
@@ -166,17 +212,13 @@ export function App({
   );
   const [focusedPanel, setFocusedPanel] = useState<PanelId>("monitor");
   const [expanded, setExpanded] = useState(false);
-  const [scrollOffsets, setScrollOffsets] = useState<Record<PanelId, number>>({
-    monitor: 0,
-    executor: 0,
-  });
+  const [scrollOffsets, setScrollOffsets] = useState<Record<ScrollId, number>>(NO_SCROLL);
   const [selectedSuggestion, setSelectedSuggestion] = useState(0);
   const [menuValue, setMenuValue] = useState(input.value);
 
-  const suggestionList = useMemo(() => suggestions(input.value), [input.value]);
-  const menuOpen =
-    interactive && suggestionList.length > 0 && input.historyIndex === null;
-  const matchLength = menuOpen ? input.value.length - 1 : 0;
+  const menu = useMemo(() => commandMenu(input.value), [input.value]);
+  const menuOpen = interactive && menu.items.length > 0 && input.historyIndex === null;
+  const ghost = interactive ? argumentGhost(input.value) : undefined;
 
   if (menuValue !== input.value) {
     setMenuValue(input.value);
@@ -195,7 +237,16 @@ export function App({
 
   const ctx = useMemo<CommandContext>(
     () => ({
-      setView,
+      setView: (next) => {
+        setView(next);
+        setScrollOffsets((current) => ({
+          ...current,
+          tasks: 0,
+          memory: 0,
+          config: 0,
+          help: 0,
+        }));
+      },
       monitorControl: controls.monitor,
       executorControl: controls.executor,
       drain,
@@ -219,7 +270,7 @@ export function App({
     void written
       .then(() => {
         setView({ kind: "dashboard" });
-        setNotice({ text: savedText, tone: "info" });
+        setNotice({ text: savedText, tone: "ok" });
       })
       .catch((err: unknown) => {
         setNotice({
@@ -229,32 +280,44 @@ export function App({
       });
   };
 
-  const noticeHeight = notice === null ? 0 : 1;
-  const hintHeight = interactive && !editing ? 1 : 0;
-  const inputHeight = interactive && !editing ? INPUT_HEIGHT : 0;
-  const menuHeight = menuOpen ? Math.min(suggestionList.length, SUGGESTION_WINDOW) : 0;
-  const shutdownHeight = status.shutdownSignal === undefined ? 0 : 1;
-  const headerHeight =
-    HEADER_HEIGHT +
-    (status.drain === undefined ? 0 : 1) +
-    (status.update === undefined ? 0 : 1);
-  const contentHeight = Math.max(
-    6,
-    rows -
-      headerHeight -
-      inputHeight -
-      menuHeight -
-      hintHeight -
-      noticeHeight -
-      shutdownHeight,
-  );
+  const banners = headerBanners(status, now);
+  const layout = computeLayout({
+    rows,
+    columns,
+    interactive,
+    editing,
+    menuRows: menuOpen ? Math.min(menu.items.length, SUGGESTION_WINDOW) : 0,
+    bannerRows: banners.length,
+  });
+  const { contentHeight } = layout;
+  const scrollId = scrollIdFor(view, focusedPanel);
 
-  const scrollTarget: PanelId | null =
-    view.kind === "dashboard"
-      ? focusedPanel
-      : view.kind === "monitor" || view.kind === "executor"
-        ? view.kind
-        : null;
+  const listLength = (id: ListId): number => {
+    switch (id) {
+      case "tasks":
+        return taskRows(status.tasks).length;
+      case "memory":
+        return view.kind === "memory" ? view.entries.length : 0;
+      case "config":
+        return configRows(config, columns).length;
+      case "help":
+        return helpRows(columns).length;
+    }
+  };
+
+  const scroll = (direction: 1 | -1): void => {
+    if (scrollId === null) return;
+    const step = Math.max(1, contentHeight - SCROLL_PAGE_MARGIN);
+    const panel = scrollId === "monitor" || scrollId === "executor";
+    const maxOffset = panel
+      ? Math.max(0, status[scrollId].tail.length * 4 - 1)
+      : maxListOffset(listLength(scrollId), contentHeight - PANEL_BORDER_ROWS);
+    const delta = panel ? direction * step : -direction * step;
+    setScrollOffsets((current) => ({
+      ...current,
+      [scrollId]: Math.min(Math.max(0, current[scrollId] + delta), maxOffset),
+    }));
+  };
 
   useInput(
     (rawInput, key) => {
@@ -269,22 +332,19 @@ export function App({
       if (key.return) {
         const typed = input.value.trim();
         if (!typed.startsWith("/")) return;
-        const chosen = menuOpen ? suggestionList[selectedSuggestion] : undefined;
-        const typedIsExact = suggestionList.some((item) => `/${item.name}` === typed);
-        const line = chosen === undefined || typedIsExact ? typed : `/${chosen.name}`;
+        const chosen = menuOpen ? menu.items[selectedSuggestion] : undefined;
+        const typedIsExact = menu.items.some((item) => item.apply === typed);
+        const completes = menu.argument ? menu.matchLength > 0 : !typedIsExact;
+        const line = chosen !== undefined && completes ? chosen.apply.trim() : typed;
         setInput((current) => submitToHistory(current, line));
         setNotice(null);
         void dispatchCommand(line, ctx);
         return;
       }
-      if (key.backspace || key.delete) {
-        setInput(deleteBeforeCursor);
-        return;
-      }
       if (key.upArrow) {
         if (menuOpen) {
           setSelectedSuggestion(
-            (current) => (current - 1 + suggestionList.length) % suggestionList.length,
+            (current) => (current - 1 + menu.items.length) % menu.items.length,
           );
           return;
         }
@@ -293,28 +353,17 @@ export function App({
       }
       if (key.downArrow) {
         if (menuOpen) {
-          setSelectedSuggestion((current) => (current + 1) % suggestionList.length);
+          setSelectedSuggestion((current) => (current + 1) % menu.items.length);
           return;
         }
         setInput(historyDown);
         return;
       }
-      if (key.leftArrow) {
-        setInput((current) => ({ ...current, cursor: Math.max(0, current.cursor - 1) }));
-        return;
-      }
-      if (key.rightArrow) {
-        setInput((current) => ({
-          ...current,
-          cursor: Math.min(current.value.length, current.cursor + 1),
-        }));
-        return;
-      }
       if (key.tab) {
         if (menuOpen) {
-          const chosen = suggestionList[selectedSuggestion];
+          const chosen = menu.items[selectedSuggestion];
           if (chosen !== undefined)
-            setInput((current) => withValue(current, `/${chosen.name}`));
+            setInput((current) => withValue(current, chosen.apply));
           return;
         }
         if (view.kind === "dashboard" && input.value === "") {
@@ -323,33 +372,31 @@ export function App({
         return;
       }
       if (key.pageUp || key.pageDown) {
-        if (scrollTarget === null) return;
-        const step = Math.max(1, contentHeight - SCROLL_PAGE_MARGIN);
-        const direction = key.pageUp ? 1 : -1;
-        const maxOffset = Math.max(0, status[scrollTarget].tail.length * 4 - 1);
-        setScrollOffsets((current) => ({
-          ...current,
-          [scrollTarget]: Math.min(
-            Math.max(0, current[scrollTarget] + direction * step),
-            maxOffset,
-          ),
-        }));
+        scroll(key.pageUp ? 1 : -1);
         return;
       }
       if (key.escape) {
         if (input.value !== "") {
-          setInput((current) => ({ ...current, ...withValue(current, "") }));
+          setInput((current) => withValue(current, ""));
           return;
         }
-        setScrollOffsets({ monitor: 0, executor: 0 });
+        setScrollOffsets(NO_SCROLL);
+        return;
+      }
+      const edit = readlineEdit(rawInput, key);
+      if (edit !== undefined) {
+        setInput((current) => applyEdit(current, edit));
         return;
       }
       if (rawInput.length > 0 && !key.ctrl && !key.meta) {
-        setInput((current) => insertAtCursor(current, rawInput));
+        setInput((current) => applyEdit(current, lineEdits.insert(rawInput)));
       }
     },
     { isActive: interactive && !editing },
   );
+
+  const monitorModel = monitorPanelModel(status.monitor, now);
+  const executorModel = executorPanelModel(status.executor, now);
 
   const content = ((): JSX.Element => {
     switch (view.kind) {
@@ -357,10 +404,12 @@ export function App({
         return (
           <DashboardView
             status={status}
+            config={config}
             width={columns}
             height={contentHeight}
             now={now}
             interactive={interactive}
+            narrow={layout.narrow}
             focusedPanel={focusedPanel}
             scrollOffsets={scrollOffsets}
             expanded={expanded}
@@ -370,7 +419,8 @@ export function App({
         return (
           <AgentView
             title="Monitor"
-            model={monitorPanelModel(status.monitor, now)}
+            subtitle={agentSubtitle(config, "monitor")}
+            model={monitorModel}
             width={columns}
             height={contentHeight}
             scrollOffset={scrollOffsets.monitor}
@@ -381,7 +431,8 @@ export function App({
         return (
           <AgentView
             title="Executor"
-            model={executorPanelModel(status.executor, now)}
+            subtitle={agentSubtitle(config, "executor")}
+            model={executorModel}
             width={columns}
             height={contentHeight}
             scrollOffset={scrollOffsets.executor}
@@ -389,7 +440,14 @@ export function App({
           />
         );
       case "tasks":
-        return <TasksView tasks={status.tasks} height={contentHeight} now={now} />;
+        return (
+          <TasksView
+            tasks={status.tasks}
+            height={contentHeight}
+            now={now}
+            offset={scrollOffsets.tasks}
+          />
+        );
       case "memory":
         return (
           <MemoryView
@@ -397,17 +455,30 @@ export function App({
             query={view.query}
             height={contentHeight}
             now={now}
+            offset={scrollOffsets.memory}
           />
         );
       case "config":
-        return <ConfigView config={config} height={contentHeight} />;
+        return (
+          <ConfigView
+            config={config}
+            width={columns}
+            height={contentHeight}
+            offset={scrollOffsets.config}
+          />
+        );
       case "prompt":
         return (
           <PromptEditor
-            title={`${view.agent} prompt (.kikimora/prompts/${view.agent}.prompt.md)`}
-            hint="Enter: new line · Ctrl+D: save · Esc: close without saving"
+            title={`${view.agent} prompt`}
+            subtitle={`.kikimora/prompts/${view.agent}.prompt.md`}
+            submitLabel="save"
+            cancelLabel="close without saving"
             initialValue={view.content}
-            maxVisibleLines={Math.max(4, contentHeight - 4)}
+            width={columns}
+            maxVisibleLines={Math.max(4, contentHeight - 3)}
+            fill
+            error={notice?.tone === "error" ? notice.text : undefined}
             onSubmit={(value) => {
               saveFile(
                 prompts.write(view.agent, value),
@@ -422,10 +493,15 @@ export function App({
       case "context":
         return (
           <PromptEditor
-            title={PROMPT_FILE_LABELS.contextPath}
-            hint="Enter: new line · Ctrl+D: save · Esc: close without saving"
+            title="context"
+            subtitle={PROMPT_FILE_LABELS.contextPath}
+            submitLabel="save"
+            cancelLabel="close without saving"
             initialValue={view.content}
-            maxVisibleLines={Math.max(4, contentHeight - 4)}
+            width={columns}
+            maxVisibleLines={Math.max(4, contentHeight - 3)}
+            fill
+            error={notice?.tone === "error" ? notice.text : undefined}
             onSubmit={(value) => {
               saveFile(
                 context.write(value),
@@ -438,40 +514,46 @@ export function App({
           />
         );
       case "help":
-        return <HelpView width={columns} height={contentHeight} />;
+        return (
+          <HelpView width={columns} height={contentHeight} offset={scrollOffsets.help} />
+        );
     }
   })();
 
   return (
-    <Box flexDirection="column" height={rows}>
-      <Header config={config} version={version} status={status} now={now} />
-      {content}
-      {notice === null ? null : (
-        <Text
-          color={notice.tone === "error" ? theme.error : theme.muted}
-          wrap="truncate-end"
-        >
-          {notice.text}
-        </Text>
-      )}
-      {menuOpen ? (
-        <CommandSuggestions
-          suggestions={suggestionList}
-          selected={selectedSuggestion}
-          matchLength={matchLength}
+    <AnimationProvider value={animate}>
+      <Box flexDirection="column" height={rows}>
+        <Header
+          config={config}
+          version={version}
+          status={status}
+          banners={banners}
+          now={now}
         />
-      ) : null}
-      {interactive && !editing ? (
-        <CommandInput value={input.value} cursor={input.cursor} />
-      ) : null}
-      {interactive && !editing ? (
-        <Text dimColor wrap="truncate-end">
-          {`${view.kind} · /help commands & keys · ctrl+c quit${expanded ? " · expanded output (ctrl+o)" : ""}`}
-        </Text>
-      ) : null}
-      {status.shutdownSignal === undefined ? null : (
-        <Text color={theme.warn}>Received {status.shutdownSignal} — shutting down…</Text>
-      )}
-    </Box>
+        {content}
+        {menuOpen ? (
+          <CommandSuggestions
+            items={menu.items}
+            selected={selectedSuggestion}
+            matchLength={menu.matchLength}
+          />
+        ) : null}
+        {layout.showPrompt ? (
+          <CommandInput value={input.value} cursor={input.cursor} ghost={ghost} />
+        ) : null}
+        {layout.showStatusBar ? (
+          <StatusBar
+            viewName={view.kind}
+            agents={[
+              ["monitor", monitorModel.status],
+              ["executor", executorModel.status],
+            ]}
+            notice={notice}
+            hints={interactive ? keyHints(view, menuOpen, expanded) : []}
+            width={columns}
+          />
+        ) : null}
+      </Box>
+    </AnimationProvider>
   );
 }

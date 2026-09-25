@@ -27,8 +27,9 @@ describe("Wizard", () => {
     const { lastFrame, onComplete, type, unmount } = await wizard();
 
     expect(lastFrame()).toContain("Kikimora setup");
-    expect(lastFrame()).toContain("What should the monitor watch?");
-    expect(lastFrame()).toContain("step 1/2");
+    expect(lastFrame()).toMatch(/╭─ What should the monitor watch\? ─+ 1\/2 ─╮/);
+    expect(lastFrame()).toContain("ctrl+d next");
+    expect(lastFrame()).not.toContain("✔ monitor");
 
     await type("watch GitHub issues");
     await type(CTRL_D);
@@ -38,7 +39,9 @@ describe("Wizard", () => {
         "Who is the executor and how should it complete tasks?",
       );
     });
-    expect(lastFrame()).toContain("step 2/2");
+    expect(lastFrame()).toContain("2/2");
+    expect(lastFrame()).toContain("ctrl+d finish");
+    expect(lastFrame()).toMatch(/✔ monitor +watch GitHub issues +1 line/);
     expect(onComplete).not.toHaveBeenCalled();
 
     await type("a diligent engineer");

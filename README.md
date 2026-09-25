@@ -104,11 +104,14 @@ From a clone: `pnpm install && pnpm start`.
 
 ## The TUI
 
-The screen has three parts:
+The screen has four parts:
 
-- a header with the live status of both agents: state, model, cost, task counters;
-- the current view;
-- a command input with history, tab completion and PgUp/PgDn scrolling.
+- a one-line header: version, project directory, uptime, cost and cycle count;
+- the current view, in framed panels whose borders carry the title, the model and the last outcome;
+- a command input with history, tab completion of commands and their values (`/model ex` + Tab), and readline keys (Ctrl+A/E, Ctrl+W, Ctrl+U/K, Alt+←/→);
+- a status bar with the view, a dot per agent and the keys for the current context; command results appear there for a few seconds.
+
+PgUp/PgDn scrolls the focused agent panel or any list view (`/tasks`, `/memory`, `/config`, `/help`); Esc returns to the live tail. Below 100 columns the dashboard shows one agent at a time and Tab switches between them.
 
 | Command                       | Effect                                                                  |
 | ----------------------------- | ----------------------------------------------------------------------- |

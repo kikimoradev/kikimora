@@ -217,7 +217,7 @@ describe("WorkerStatusStore", () => {
     const panel = store.getSnapshot().monitor;
     expect(panel.sessionId).toBe("sess-7");
     expect(panel.tail).toEqual([
-      { kind: "meta", text: "model haiku · 2 tools · sess-7" },
+      { kind: "session", text: "haiku · 2 tools · sess-7" },
       { kind: "message", text: "Checking repo" },
       { kind: "tool", tool: "Bash", text: "git status" },
     ]);
