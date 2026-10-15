@@ -259,7 +259,7 @@ describe("startControlServer", () => {
     const admission = new AdmissionGate("external", undefined, () => "ticket-1");
     const waiting = admission.acquire("executor", {
       signal: abort.signal,
-      interrupted: new Promise<void>(() => undefined),
+      interrupted: () => new Promise<void>(() => undefined),
       onWait: () => undefined,
     });
     await startServer({ admission });

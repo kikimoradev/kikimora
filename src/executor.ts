@@ -76,7 +76,7 @@ export async function runExecutorLoop(
 
     const lease = await gates.admission.acquire("executor", {
       signal,
-      interrupted: controller.pauseRequested(signal),
+      interrupted: (until) => controller.pauseRequested(AbortSignal.any([signal, until])),
       taskId: next.id,
       onWait: (wait) => {
         reporter.admissionWait(wait, next);

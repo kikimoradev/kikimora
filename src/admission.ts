@@ -47,7 +47,7 @@ export interface AdmissionLease {
 
 export interface AdmissionRequest {
   signal: AbortSignal;
-  interrupted: Promise<void>;
+  interrupted(until: AbortSignal): Promise<void>;
   taskId?: string | undefined;
   onWait(wait: AdmissionWait): void;
 }
@@ -123,17 +123,17 @@ export class AdmissionGate {
 
   private waitForGrant(role: AdmissionRole, request: AdmissionRequest): Promise<void> {
     return new Promise((resolvePromise) => {
-      let settled = false;
+      const done = new AbortController();
       const finish = (): void => {
-        if (settled) return;
-        settled = true;
+        if (done.signal.aborted) return;
+        done.abort();
         request.signal.removeEventListener("abort", finish);
         if (this.wakers.get(role) === finish) this.wakers.delete(role);
         resolvePromise();
       };
       this.wakers.set(role, finish);
       request.signal.addEventListener("abort", finish, { once: true });
-      void request.interrupted.then(finish);
+      void request.interrupted(done.signal).then(finish);
     });
   }
 

@@ -46,7 +46,7 @@ function request(
   const waits: AdmissionWait[] = [];
   return {
     signal: new AbortController().signal,
-    interrupted: new Promise<void>(() => undefined),
+    interrupted: () => new Promise<void>(() => undefined),
     onWait: (wait) => {
       waits.push(wait);
     },
@@ -139,7 +139,10 @@ describe("AdmissionGate in external mode", () => {
     const { gate, changes } = externalGate();
     const pause = interruption();
 
-    const acquiring = gate.acquire("monitor", request({ interrupted: pause.promise }));
+    const acquiring = gate.acquire(
+      "monitor",
+      request({ interrupted: () => pause.promise }),
+    );
     pause.interrupt();
 
     expect(await acquiring).toBeNull();
@@ -151,6 +154,26 @@ describe("AdmissionGate in external mode", () => {
       granted: false,
       reason: "stale",
     });
+  });
+
+  it("lets go of the interruption once the wait ends", async () => {
+    const { gate } = externalGate();
+    let until: AbortSignal | undefined;
+
+    const acquiring = gate.acquire(
+      "monitor",
+      request({
+        interrupted: (signal) => {
+          until = signal;
+          return new Promise<void>(() => undefined);
+        },
+      }),
+    );
+    expect(until?.aborted).toBe(false);
+    gate.grant("monitor", "ticket-1");
+    await acquiring;
+
+    expect(until?.aborted).toBe(true);
   });
 
   it("cancels the wait on abort", async () => {
@@ -168,7 +191,10 @@ describe("AdmissionGate in external mode", () => {
     const { gate } = externalGate();
     const pause = interruption();
 
-    const acquiring = gate.acquire("monitor", request({ interrupted: pause.promise }));
+    const acquiring = gate.acquire(
+      "monitor",
+      request({ interrupted: () => pause.promise }),
+    );
     gate.grant("monitor", "ticket-1");
     pause.interrupt();
 

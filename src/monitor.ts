@@ -62,7 +62,7 @@ export async function runMonitorLoop(
 
     const lease = await gates.admission.acquire("monitor", {
       signal,
-      interrupted: controller.pauseRequested(signal),
+      interrupted: (until) => controller.pauseRequested(AbortSignal.any([signal, until])),
       onWait: (wait) => {
         reporter.admissionWait(wait);
       },

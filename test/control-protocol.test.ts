@@ -286,7 +286,7 @@ describe("buildControlStatus", () => {
     const gate = new AdmissionGate("external", undefined, () => "ticket-1");
     void gate.acquire("executor", {
       signal: new AbortController().signal,
-      interrupted: new Promise<void>(() => undefined),
+      interrupted: () => new Promise<void>(() => undefined),
       taskId: "t-9",
       onWait: () => undefined,
     });
