@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.11.0] - 2026-10-15
+
 ### Added
 
 - `KIKIMORA_ADMISSION=external` lets a supervisor such as Kikimora Cloud decide when sessions start: each monitor cycle and each task waits in the new `admissionWait` phase until the control request `admission.grant` admits it, holds the slot through the session and the memory summary, and gives it back afterwards, so many workers can share one machine without reserving it; `status` reports the admission state and new `admission.*` log events follow it. Without the variable nothing changes.
@@ -248,7 +250,8 @@ Initial release.
 - Non-interactive `kikimora init` for provisioning, plus a first-run wizard in the terminal.
 - Reference `Dockerfile` and `docker-compose.yml`.
 
-[Unreleased]: https://github.com/kikimoradev/kikimora/compare/v0.10.0...HEAD
+[Unreleased]: https://github.com/kikimoradev/kikimora/compare/v0.11.0...HEAD
+[0.11.0]: https://github.com/kikimoradev/kikimora/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/kikimoradev/kikimora/compare/v0.9.2...v0.10.0
 [0.9.2]: https://github.com/kikimoradev/kikimora/compare/v0.9.1...v0.9.2
 [0.9.1]: https://github.com/kikimoradev/kikimora/compare/v0.9.0...v0.9.1
