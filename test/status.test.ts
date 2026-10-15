@@ -282,6 +282,27 @@ describe("WorkerStatusStore", () => {
     store.dispose();
   });
 
+  it("admissionWait sets the phase with the ticket, its start and the task", () => {
+    const store = createStore();
+    const task = buildTask();
+    store.monitor.admissionWait({ ticket: "m-1", since: 1_000, seq: 1 });
+    store.executor.admissionWait({ ticket: "e-1", since: 2_000, seq: 2 }, task);
+    store.flush();
+    const snapshot = store.getSnapshot();
+    expect(snapshot.monitor.phase).toEqual({
+      kind: "admissionWait",
+      ticket: "m-1",
+      since: 1_000,
+    });
+    expect(snapshot.executor.phase).toEqual({
+      kind: "admissionWait",
+      ticket: "e-1",
+      since: 2_000,
+      task,
+    });
+    store.dispose();
+  });
+
   it("authBlocked sets the phase with the reason and leaves an error notice in the tail", () => {
     const store = createStore();
     store.monitor.authBlocked({ reason: "Not logged in · Please run /login" });

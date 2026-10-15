@@ -1,6 +1,7 @@
 import { chmod, mkdir, unlink } from "node:fs/promises";
 import { connect, createServer, type Server, type Socket } from "node:net";
 import { dirname } from "node:path";
+import type { AdmissionGate } from "./admission.js";
 import type { ContextFileAccess } from "./context-file.js";
 import type { AgentController } from "./control.js";
 import {
@@ -49,6 +50,7 @@ export interface ControlServerDeps {
   };
   drain: Pick<DrainController, "request" | "snapshot">;
   checkMonitor(): MonitorCheckOutcome;
+  admission: Pick<AdmissionGate, "grant">;
   tasks: TaskControls;
   memory: MemoryReader;
   sessions: SessionReader;
@@ -193,6 +195,8 @@ async function handleRequest(
       return { ok: true, data: undefined };
     case "monitor.check":
       return checkMonitor(deps);
+    case "admission.grant":
+      return { ok: true, data: deps.admission.grant(request.agent, request.ticket) };
     case "drain":
       return {
         ok: true,

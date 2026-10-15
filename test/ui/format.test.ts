@@ -154,6 +154,20 @@ describe("plural and countLabel", () => {
 describe("formatMonitorPhase", () => {
   const now = Date.parse("2026-07-02T10:00:00");
 
+  it("an admission wait is idle and shows how long it has been queued", () => {
+    expect(
+      formatMonitorPhase(
+        { kind: "admissionWait", ticket: "t", since: now - 90_000 },
+        now,
+      ),
+    ).toMatchObject({
+      text: "waiting for a session slot",
+      aside: "queued for 1m 30s",
+      tone: "muted",
+      busy: false,
+    });
+  });
+
   it("starting is busy", () => {
     expect(formatMonitorPhase({ kind: "starting" }, now)).toMatchObject({
       text: "starting…",
@@ -205,6 +219,23 @@ describe("formatMonitorPhase", () => {
 
 describe("formatExecutorPhase", () => {
   const now = Date.parse("2026-07-02T10:00:00");
+
+  it("an admission wait names the task it waits for", () => {
+    const line = formatExecutorPhase(
+      {
+        kind: "admissionWait",
+        ticket: "t",
+        since: now - 5_000,
+        task: task(),
+      },
+      now,
+    );
+    expect(line).toMatchObject({
+      text: "t-1 · waiting for a session slot",
+      aside: "queued for 5.0s",
+      busy: false,
+    });
+  });
 
   it("waiting is idle", () => {
     expect(formatExecutorPhase({ kind: "waiting" }, now)).toMatchObject({

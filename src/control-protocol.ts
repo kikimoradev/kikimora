@@ -1,4 +1,11 @@
 import { z } from "zod";
+import {
+  ADMISSION_ROLES,
+  type AdmissionGrantOutcome,
+  type AdmissionMode,
+  type AdmissionSlot,
+  type AdmissionStatus,
+} from "./admission.js";
 import type { Settings } from "./config.js";
 import type { AgentControlState } from "./control.js";
 import { DRAIN_TIMEOUT_MAX_MS, type DrainReason, type DrainSnapshot } from "./drain.js";
@@ -65,6 +72,13 @@ export const controlRequestSchema = z.discriminatedUnion("cmd", [
   z.object({ cmd: z.literal("pause"), agent: targetSchema }).strict(),
   z.object({ cmd: z.literal("resume"), agent: targetSchema }).strict(),
   z.object({ cmd: z.literal("monitor.check") }).strict(),
+  z
+    .object({
+      cmd: z.literal("admission.grant"),
+      agent: z.enum(ADMISSION_ROLES),
+      ticket: nonBlank,
+    })
+    .strict(),
   z
     .object({
       cmd: z.literal("drain"),
@@ -144,6 +158,7 @@ export interface ControlResponseData {
   pause: undefined;
   resume: undefined;
   "monitor.check": MonitorCheckAck;
+  "admission.grant": AdmissionGrantOutcome;
   drain: DrainAck;
   "settings.get": Settings;
   "settings.patch": Settings;
@@ -214,6 +229,7 @@ export interface ControlPhase {
   taskId?: string | undefined;
   title?: string | undefined;
   reason?: string | undefined;
+  ticket?: string | undefined;
 }
 
 export interface ControlAgentStatus<Outcome> {
@@ -240,6 +256,20 @@ export interface ControlDrainStatus {
   reason: DrainReason;
 }
 
+export interface ControlAdmissionSlot {
+  state: AdmissionSlot["state"];
+  seq: number;
+  ticket?: string | undefined;
+  since?: string | undefined;
+  taskId?: string | undefined;
+}
+
+export interface ControlAdmissionStatus {
+  mode: AdmissionMode;
+  monitor: ControlAdmissionSlot;
+  executor: ControlAdmissionSlot;
+}
+
 export interface ControlStatus extends WorkerIdentity {
   headless: boolean;
   agents: {
@@ -249,6 +279,7 @@ export interface ControlStatus extends WorkerIdentity {
   stats: WorkerStats;
   taskCounts: Record<TaskStatus, number>;
   drain?: ControlDrainStatus | undefined;
+  admission: ControlAdmissionStatus;
 }
 
 function iso(epochMs: number): string {
@@ -284,6 +315,8 @@ function serializeMonitorPhase(phase: MonitorPhase): ControlPhase {
       return { kind: phase.kind, until: iso(phase.resumeAt) };
     case "authBlocked":
       return { kind: phase.kind, since: iso(phase.since), reason: phase.reason };
+    case "admissionWait":
+      return { kind: phase.kind, since: iso(phase.since), ticket: phase.ticket };
     case "session":
       return { kind: phase.kind, since: iso(phase.startedAt), cycle: phase.cycle };
     case "sleeping":
@@ -299,6 +332,14 @@ function serializeExecutorPhase(phase: ExecutorPhase): ControlPhase {
       return { kind: phase.kind, until: iso(phase.resumeAt) };
     case "authBlocked":
       return { kind: phase.kind, since: iso(phase.since), reason: phase.reason };
+    case "admissionWait":
+      return {
+        kind: phase.kind,
+        since: iso(phase.since),
+        ticket: phase.ticket,
+        taskId: phase.task.id,
+        title: phase.task.title,
+      };
     case "session":
     case "summary":
       return {
@@ -317,12 +358,32 @@ function serializeExecutorPhase(phase: ExecutorPhase): ControlPhase {
   }
 }
 
+function serializeAdmissionSlot(slot: AdmissionSlot): ControlAdmissionSlot {
+  if (slot.state === "idle") return { state: slot.state, seq: slot.seq };
+  return {
+    state: slot.state,
+    seq: slot.seq,
+    ticket: slot.ticket,
+    since: iso(slot.since),
+    taskId: slot.taskId,
+  };
+}
+
+function serializeAdmission(admission: AdmissionStatus): ControlAdmissionStatus {
+  return {
+    mode: admission.mode,
+    monitor: serializeAdmissionSlot(admission.monitor),
+    executor: serializeAdmissionSlot(admission.executor),
+  };
+}
+
 const RECENT_OUTCOMES_IN_STATUS = 5;
 
 export interface ControlStatusContext {
   snapshot: WorkerStatus;
   identity: WorkerIdentity;
   headless: boolean;
+  admission: AdmissionStatus;
 }
 
 export function buildControlStatus(context: ControlStatusContext): ControlStatus {
@@ -359,5 +420,6 @@ export function buildControlStatus(context: ControlStatusContext): ControlStatus
     stats: snapshot.stats,
     taskCounts,
     drain: snapshot.drain === undefined ? undefined : serializeDrain(snapshot.drain),
+    admission: serializeAdmission(context.admission),
   };
 }

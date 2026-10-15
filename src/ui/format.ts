@@ -103,6 +103,16 @@ function authBlocked(reason: string): StatusLine {
   };
 }
 
+function admissionWait(text: string, since: number, now: number): StatusLine {
+  return {
+    glyph: glyphs.idle,
+    tone: "muted",
+    text,
+    aside: `queued for ${formatElapsed(now - since)}`,
+    busy: false,
+  };
+}
+
 export function formatMonitorPhase(phase: MonitorPhase, now: number): StatusLine {
   switch (phase.kind) {
     case "starting":
@@ -119,6 +129,8 @@ export function formatMonitorPhase(phase: MonitorPhase, now: number): StatusLine
       return limitWait(phase.resumeAt, now);
     case "authBlocked":
       return authBlocked(phase.reason);
+    case "admissionWait":
+      return admissionWait("waiting for a session slot", phase.since, now);
     case "session":
       return {
         glyph: glyphs.active,
@@ -151,6 +163,12 @@ export function formatExecutorPhase(phase: ExecutorPhase, now: number): StatusLi
       return limitWait(phase.resumeAt, now);
     case "authBlocked":
       return authBlocked(phase.reason);
+    case "admissionWait":
+      return admissionWait(
+        `${phase.task.id} · waiting for a session slot`,
+        phase.since,
+        now,
+      );
     case "session":
       return {
         glyph: glyphs.active,

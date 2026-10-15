@@ -29,6 +29,12 @@ export async function runMonitorLoop(
   const contextFile = createContextFileAccess(config.contextFilePath);
   const aborted = (): boolean => signal.aborted;
 
+  const readyAfterAdmission = (): boolean =>
+    controller.state === "running" &&
+    gates.auth.blocked === null &&
+    gates.limit.msRemaining(Date.now()) === 0 &&
+    (controller.runRequested || msUntilActive(monitor.schedule, new Date()) === 0);
+
   let cycle = 0;
   while (!aborted()) {
     const authBlock = gates.auth.blocked;
@@ -54,56 +60,84 @@ export async function runMonitorLoop(
       continue;
     }
 
-    const start = Date.now();
-    const sessionInputs = Promise.all([
-      readFile(monitor.promptPath, "utf8"),
-      readFile(monitor.systemPromptPath, "utf8"),
-      contextFile.read(),
-      writeMcpConfig(config.dataDir, {
-        role: "monitor",
-        servers: config.mcpServers,
-        selected: monitor.mcpServers,
-        browser: config.browser,
-        memoryDbPath: null,
-        playwrightOutputDir: config.playwrightOutputDir,
-      }),
-    ]);
-    await sessionInputs.catch(() => undefined);
-    if (aborted()) break;
-    if (controller.state !== "running") continue;
+    const lease = await gates.admission.acquire("monitor", {
+      signal,
+      interrupted: (until) => controller.pauseRequested(AbortSignal.any([signal, until])),
+      onWait: (wait) => {
+        reporter.admissionWait(wait);
+      },
+    });
+    if (lease === null) continue;
 
-    controller.takeRunRequest();
-    cycle += 1;
-    reporter.cycleStarted(cycle);
-
+    let start: number;
     try {
-      const [prompt, systemPrompt, context, mcpConfigPath] = await sessionInputs;
-
-      const result = await runSession(
-        {
-          command: config.command,
-          model: monitor.model,
-          effort: monitor.effort,
-          systemPrompt,
-          prompt: composePrompt(prompt, context),
-          sessionTimeoutMs: monitor.sessionTimeoutMs,
-          streamPartial: config.streamPartial,
-          mcpConfigPath,
-          jsonSchema: TASK_REPORT_JSON_SCHEMA,
-          cwd: config.cwd,
-          events: reporter.session,
-          meta: { agent: "monitor", cycle },
-          index: sessions,
-        },
-        signal,
-      );
-
       if (aborted()) break;
+      if (!readyAfterAdmission()) continue;
 
-      if (!result.ok) {
-        const auth = detectAuthFailure(result);
-        if (auth) {
-          gates.auth.engage(auth);
+      start = Date.now();
+      const sessionInputs = Promise.all([
+        readFile(monitor.promptPath, "utf8"),
+        readFile(monitor.systemPromptPath, "utf8"),
+        contextFile.read(),
+        writeMcpConfig(config.dataDir, {
+          role: "monitor",
+          servers: config.mcpServers,
+          selected: monitor.mcpServers,
+          browser: config.browser,
+          memoryDbPath: null,
+          playwrightOutputDir: config.playwrightOutputDir,
+        }),
+      ]);
+      await sessionInputs.catch(() => undefined);
+      if (aborted()) break;
+      if (controller.state !== "running") continue;
+
+      controller.takeRunRequest();
+      cycle += 1;
+      reporter.cycleStarted(cycle);
+
+      try {
+        const [prompt, systemPrompt, context, mcpConfigPath] = await sessionInputs;
+
+        const result = await runSession(
+          {
+            command: config.command,
+            model: monitor.model,
+            effort: monitor.effort,
+            systemPrompt,
+            prompt: composePrompt(prompt, context),
+            sessionTimeoutMs: monitor.sessionTimeoutMs,
+            streamPartial: config.streamPartial,
+            mcpConfigPath,
+            jsonSchema: TASK_REPORT_JSON_SCHEMA,
+            cwd: config.cwd,
+            events: reporter.session,
+            meta: { agent: "monitor", cycle },
+            index: sessions,
+          },
+          signal,
+        );
+
+        if (aborted()) break;
+
+        if (!result.ok) {
+          const auth = detectAuthFailure(result);
+          if (auth) {
+            gates.auth.engage(auth);
+            reporter.cycleFinished({
+              cycle,
+              ok: false,
+              durationMs: result.durationMs,
+              costUsd: result.costUsd,
+              addedTasks: 0,
+              skippedDuplicates: 0,
+              error: `authentication failed — ${auth.reason}`,
+              sessionId: result.sessionId,
+            });
+            continue;
+          }
+          const limit = detectUsageLimit(result);
+          if (limit) gates.limit.engage(limit, Date.now());
           reporter.cycleFinished({
             cycle,
             ok: false,
@@ -111,61 +145,50 @@ export async function runMonitorLoop(
             costUsd: result.costUsd,
             addedTasks: 0,
             skippedDuplicates: 0,
-            error: `authentication failed — ${auth.reason}`,
+            error: limit ? "usage limit reached" : (result.error ?? "unknown error"),
             sessionId: result.sessionId,
           });
-          continue;
+          if (limit) continue;
+        } else {
+          const report =
+            result.resultText === undefined ? null : parseTaskReport(result.resultText);
+          if (report === null) {
+            reporter.cycleFinished({
+              cycle,
+              ok: false,
+              durationMs: result.durationMs,
+              costUsd: result.costUsd,
+              addedTasks: 0,
+              skippedDuplicates: 0,
+              error: "invalid task report — cycle skipped",
+              sessionId: result.sessionId,
+            });
+          } else {
+            const added = await store.addTasks(report);
+            reporter.cycleFinished({
+              cycle,
+              ok: true,
+              durationMs: result.durationMs,
+              costUsd: result.costUsd,
+              addedTasks: added.length,
+              skippedDuplicates: report.length - added.length,
+              sessionId: result.sessionId,
+            });
+            if (added.length > 0) waker.notify();
+          }
         }
-        const limit = detectUsageLimit(result);
-        if (limit) gates.limit.engage(limit, Date.now());
+      } catch (err) {
         reporter.cycleFinished({
           cycle,
           ok: false,
-          durationMs: result.durationMs,
-          costUsd: result.costUsd,
+          durationMs: Date.now() - start,
           addedTasks: 0,
           skippedDuplicates: 0,
-          error: limit ? "usage limit reached" : (result.error ?? "unknown error"),
-          sessionId: result.sessionId,
+          error: err instanceof Error ? err.message : String(err),
         });
-        if (limit) continue;
-      } else {
-        const report =
-          result.resultText === undefined ? null : parseTaskReport(result.resultText);
-        if (report === null) {
-          reporter.cycleFinished({
-            cycle,
-            ok: false,
-            durationMs: result.durationMs,
-            costUsd: result.costUsd,
-            addedTasks: 0,
-            skippedDuplicates: 0,
-            error: "invalid task report — cycle skipped",
-            sessionId: result.sessionId,
-          });
-        } else {
-          const added = await store.addTasks(report);
-          reporter.cycleFinished({
-            cycle,
-            ok: true,
-            durationMs: result.durationMs,
-            costUsd: result.costUsd,
-            addedTasks: added.length,
-            skippedDuplicates: report.length - added.length,
-            sessionId: result.sessionId,
-          });
-          if (added.length > 0) waker.notify();
-        }
       }
-    } catch (err) {
-      reporter.cycleFinished({
-        cycle,
-        ok: false,
-        durationMs: Date.now() - start,
-        addedTasks: 0,
-        skippedDuplicates: 0,
-        error: err instanceof Error ? err.message : String(err),
-      });
+    } finally {
+      lease.release();
     }
 
     if (aborted()) break;

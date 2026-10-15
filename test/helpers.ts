@@ -4,6 +4,7 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { vi } from "vitest";
+import { AdmissionGate, type AdmissionChange } from "../src/admission.js";
 import { AuthGate } from "../src/auth-gate.js";
 import { AgentController, type AgentControlState } from "../src/control.js";
 import type { LoopGates } from "../src/gates.js";
@@ -266,6 +267,7 @@ export interface MonitorReporterSpy {
   offHours: ReturnType<typeof vi.fn>;
   usageLimit: ReturnType<typeof vi.fn>;
   authBlocked: ReturnType<typeof vi.fn>;
+  admissionWait: ReturnType<typeof vi.fn>;
   cycleStarted: ReturnType<typeof vi.fn>;
   cycleFinished: ReturnType<typeof vi.fn>;
   sleepUntil: ReturnType<typeof vi.fn>;
@@ -277,6 +279,7 @@ export function createMonitorReporterSpy(): MonitorReporterSpy {
     offHours: vi.fn(),
     usageLimit: vi.fn(),
     authBlocked: vi.fn(),
+    admissionWait: vi.fn(),
     cycleStarted: vi.fn(),
     cycleFinished: vi.fn(),
     sleepUntil: vi.fn(),
@@ -292,6 +295,7 @@ export interface ExecutorReporterSpy {
   retryScheduled: ReturnType<typeof vi.fn>;
   usageLimit: ReturnType<typeof vi.fn>;
   authBlocked: ReturnType<typeof vi.fn>;
+  admissionWait: ReturnType<typeof vi.fn>;
   waiting: ReturnType<typeof vi.fn>;
   summaryStarted: ReturnType<typeof vi.fn>;
   summaryFinished: ReturnType<typeof vi.fn>;
@@ -305,6 +309,7 @@ export function createExecutorReporterSpy(): ExecutorReporterSpy {
     retryScheduled: vi.fn(),
     usageLimit: vi.fn(),
     authBlocked: vi.fn(),
+    admissionWait: vi.fn(),
     waiting: vi.fn(),
     summaryStarted: vi.fn(),
     summaryFinished: vi.fn(),
@@ -328,7 +333,31 @@ export function noopController(): AgentController {
 }
 
 export function buildGates(overrides: Partial<LoopGates> = {}): LoopGates {
-  return { limit: new UsageLimitGate(), auth: new AuthGate(), ...overrides };
+  return {
+    limit: new UsageLimitGate(),
+    auth: new AuthGate(),
+    admission: new AdmissionGate("local"),
+    ...overrides,
+  };
+}
+
+export interface ExternalAdmission {
+  gate: AdmissionGate;
+  changes: AdmissionChange[];
+}
+
+export function externalAdmission(): ExternalAdmission {
+  const changes: AdmissionChange[] = [];
+  const gate = new AdmissionGate("external", (change) => {
+    changes.push(change);
+  });
+  return { gate, changes };
+}
+
+export function heldTicket(gate: AdmissionGate, role: "monitor" | "executor"): string {
+  const slot = gate.status()[role];
+  if (slot.state === "idle") throw new Error(`the ${role} holds no ticket`);
+  return slot.ticket;
 }
 
 export interface AuthGateHarness {

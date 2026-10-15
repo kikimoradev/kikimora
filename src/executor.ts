@@ -49,6 +49,10 @@ export async function runExecutorLoop(
   const { executor } = config;
   const contextFile = createContextFileAccess(config.contextFilePath);
   const aborted = (): boolean => signal.aborted;
+  const readyAfterAdmission = (): boolean =>
+    controller.state === "running" &&
+    gates.auth.blocked === null &&
+    gates.limit.msRemaining(Date.now()) === 0;
 
   while (!aborted()) {
     const authBlock = gates.auth.blocked;
@@ -63,147 +67,171 @@ export async function runExecutorLoop(
       continue;
     }
 
-    const task = await store.takeNext();
-    if (!task) {
+    const next = store.peekNext();
+    if (!next) {
       reporter.waiting();
       await Promise.race([waker.wait(signal), controller.pauseRequested(signal)]);
       continue;
     }
 
-    const start = Date.now();
-    const sessionInputs = Promise.all([
-      readFile(executor.promptPath, "utf8"),
-      readFile(executor.systemPromptPath, "utf8"),
-      contextFile.read(),
-      writeMcpConfig(config.dataDir, {
-        role: "executor",
-        servers: config.mcpServers,
-        selected: executor.mcpServers,
-        browser: config.browser,
-        memoryDbPath: config.memoryDbPath,
-        playwrightOutputDir: config.playwrightOutputDir,
-      }),
-    ]);
-    await sessionInputs.catch(() => undefined);
-    if (aborted()) break;
-    if (controller.state !== "running") {
-      await store.release(task.id);
-      continue;
-    }
+    const lease = await gates.admission.acquire("executor", {
+      signal,
+      interrupted: (until) => controller.pauseRequested(AbortSignal.any([signal, until])),
+      taskId: next.id,
+      onWait: (wait) => {
+        reporter.admissionWait(wait, next);
+      },
+    });
+    if (lease === null) continue;
 
-    reporter.taskStarted(task);
-
+    let backoff: { task: Task; resumeAt: Date } | undefined;
     try {
-      const [prompt, systemPrompt, context, mcpConfigPath] = await sessionInputs;
-
-      const result = await runSession(
-        {
-          command: config.command,
-          model: executor.model,
-          effort: executor.effort,
-          systemPrompt,
-          prompt: composeTaskPrompt(composePrompt(prompt, context), task),
-          sessionTimeoutMs: executor.sessionTimeoutMs,
-          streamPartial: config.streamPartial,
-          mcpConfigPath,
-          cwd: config.cwd,
-          events: reporter.session,
-          meta: { agent: "executor", taskId: task.id },
-          index: sessions,
-        },
-        signal,
-      );
-
       if (aborted()) break;
+      if (!readyAfterAdmission()) continue;
+      const task = await store.takeNext();
+      if (!task) continue;
 
-      if (result.ok) {
-        await store.complete(task.id);
-        reporter.taskFinished({
-          taskId: task.id,
-          title: task.title,
-          ok: true,
-          durationMs: result.durationMs,
-          costUsd: result.costUsd,
-          numTurns: result.numTurns,
-          sessionId: result.sessionId,
-        });
-        await summarizer
-          .summarize(task, result, { willRetry: false }, signal)
-          .catch(() => undefined);
-      } else {
-        const error = result.error ?? "unknown error";
-        const auth = detectAuthFailure(result);
-        if (auth) {
-          gates.auth.engage(auth);
-          await store.release(task.id, "authentication failed");
+      const start = Date.now();
+      const sessionInputs = Promise.all([
+        readFile(executor.promptPath, "utf8"),
+        readFile(executor.systemPromptPath, "utf8"),
+        contextFile.read(),
+        writeMcpConfig(config.dataDir, {
+          role: "executor",
+          servers: config.mcpServers,
+          selected: executor.mcpServers,
+          browser: config.browser,
+          memoryDbPath: config.memoryDbPath,
+          playwrightOutputDir: config.playwrightOutputDir,
+        }),
+      ]);
+      await sessionInputs.catch(() => undefined);
+      if (aborted()) break;
+      if (controller.state !== "running") {
+        await store.release(task.id);
+        continue;
+      }
+
+      reporter.taskStarted(task);
+
+      try {
+        const [prompt, systemPrompt, context, mcpConfigPath] = await sessionInputs;
+
+        const result = await runSession(
+          {
+            command: config.command,
+            model: executor.model,
+            effort: executor.effort,
+            systemPrompt,
+            prompt: composeTaskPrompt(composePrompt(prompt, context), task),
+            sessionTimeoutMs: executor.sessionTimeoutMs,
+            streamPartial: config.streamPartial,
+            mcpConfigPath,
+            cwd: config.cwd,
+            events: reporter.session,
+            meta: { agent: "executor", taskId: task.id },
+            index: sessions,
+          },
+          signal,
+        );
+
+        if (aborted()) break;
+
+        if (result.ok) {
+          await store.complete(task.id);
           reporter.taskFinished({
             taskId: task.id,
             title: task.title,
-            ok: false,
+            ok: true,
             durationMs: result.durationMs,
             costUsd: result.costUsd,
             numTurns: result.numTurns,
-            error: "authentication failed — task requeued",
-            willRetry: true,
             sessionId: result.sessionId,
           });
-          continue;
-        }
-        const limit = detectUsageLimit(result);
-        if (limit) {
-          gates.limit.engage(limit, Date.now());
-          await store.release(task.id, "usage limit reached");
-          reporter.taskFinished({
-            taskId: task.id,
-            title: task.title,
-            ok: false,
-            durationMs: result.durationMs,
-            costUsd: result.costUsd,
-            numTurns: result.numTurns,
-            error: "usage limit reached — task requeued",
-            willRetry: true,
-            sessionId: result.sessionId,
-          });
-          continue;
-        }
-        const willRetry =
-          isTransientFailure(result) && task.attempts < executor.maxTaskAttempts;
-        if (willRetry) {
-          await store.requeue(task.id, error);
+          await summarizer
+            .summarize(task, result, { willRetry: false }, signal)
+            .catch(() => undefined);
         } else {
-          await store.fail(task.id, error);
+          const error = result.error ?? "unknown error";
+          const auth = detectAuthFailure(result);
+          if (auth) {
+            gates.auth.engage(auth);
+            await store.release(task.id, "authentication failed");
+            reporter.taskFinished({
+              taskId: task.id,
+              title: task.title,
+              ok: false,
+              durationMs: result.durationMs,
+              costUsd: result.costUsd,
+              numTurns: result.numTurns,
+              error: "authentication failed — task requeued",
+              willRetry: true,
+              sessionId: result.sessionId,
+            });
+            continue;
+          }
+          const limit = detectUsageLimit(result);
+          if (limit) {
+            gates.limit.engage(limit, Date.now());
+            await store.release(task.id, "usage limit reached");
+            reporter.taskFinished({
+              taskId: task.id,
+              title: task.title,
+              ok: false,
+              durationMs: result.durationMs,
+              costUsd: result.costUsd,
+              numTurns: result.numTurns,
+              error: "usage limit reached — task requeued",
+              willRetry: true,
+              sessionId: result.sessionId,
+            });
+            continue;
+          }
+          const willRetry =
+            isTransientFailure(result) && task.attempts < executor.maxTaskAttempts;
+          if (willRetry) {
+            await store.requeue(task.id, error);
+          } else {
+            await store.fail(task.id, error);
+          }
+          reporter.taskFinished({
+            taskId: task.id,
+            title: task.title,
+            ok: false,
+            durationMs: result.durationMs,
+            costUsd: result.costUsd,
+            numTurns: result.numTurns,
+            error,
+            willRetry,
+            attempt: task.attempts,
+            maxAttempts: executor.maxTaskAttempts,
+            sessionId: result.sessionId,
+          });
+          await summarizer
+            .summarize(task, result, { willRetry }, signal)
+            .catch(() => undefined);
+          if (willRetry && executor.retryDelayMs > 0) {
+            backoff = { task, resumeAt: new Date(Date.now() + executor.retryDelayMs) };
+          }
         }
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        await store.fail(task.id, message);
         reporter.taskFinished({
           taskId: task.id,
           title: task.title,
           ok: false,
-          durationMs: result.durationMs,
-          costUsd: result.costUsd,
-          numTurns: result.numTurns,
-          error,
-          willRetry,
-          attempt: task.attempts,
-          maxAttempts: executor.maxTaskAttempts,
-          sessionId: result.sessionId,
+          durationMs: Date.now() - start,
+          error: message,
         });
-        await summarizer
-          .summarize(task, result, { willRetry }, signal)
-          .catch(() => undefined);
-        if (willRetry && executor.retryDelayMs > 0) {
-          reporter.retryScheduled(task, new Date(Date.now() + executor.retryDelayMs));
-          await controller.sleep(executor.retryDelayMs, signal);
-        }
       }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      await store.fail(task.id, message);
-      reporter.taskFinished({
-        taskId: task.id,
-        title: task.title,
-        ok: false,
-        durationMs: Date.now() - start,
-        error: message,
-      });
+    } finally {
+      lease.release();
+    }
+
+    if (backoff !== undefined) {
+      reporter.retryScheduled(backoff.task, backoff.resumeAt);
+      await controller.sleep(backoff.resumeAt.getTime() - Date.now(), signal);
     }
   }
 }

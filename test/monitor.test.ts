@@ -9,6 +9,8 @@ import {
   buildConfig,
   buildGates,
   createMonitorReporterSpy,
+  externalAdmission,
+  heldTicket,
   noopController,
   type MonitorReporterSpy,
 } from "./helpers.js";
@@ -887,5 +889,150 @@ describe("runMonitorLoop", () => {
     abort.abort();
     await vi.advanceTimersByTimeAsync(INTERVAL);
     await promise;
+  });
+
+  describe("with external admission", () => {
+    function start(
+      admission: ReturnType<typeof externalAdmission>,
+      controller = noopController(),
+      gates = buildGates({ admission: admission.gate }),
+    ) {
+      const abort = new AbortController();
+      const promise = runMonitorLoop(
+        buildConfig(),
+        fakeStore().store,
+        new Waker(),
+        spy.reporter,
+        controller,
+        gates,
+        abort.signal,
+      );
+      const stop = async (): Promise<void> => {
+        abort.abort();
+        await vi.advanceTimersByTimeAsync(INTERVAL);
+        await promise;
+      };
+      return { stop, controller, gates };
+    }
+
+    it("starts a cycle only after its ticket is granted and releases it afterwards", async () => {
+      mocks.runSession.mockResolvedValue(ok(report()));
+      const admission = externalAdmission();
+      const loop = start(admission);
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(mocks.runSession).not.toHaveBeenCalled();
+      expect(spy.cycleStarted).not.toHaveBeenCalled();
+      const ticket = heldTicket(admission.gate, "monitor");
+      expect(spy.admissionWait).toHaveBeenCalledWith(
+        expect.objectContaining({ ticket, seq: 1 }),
+      );
+
+      admission.gate.grant("monitor", ticket);
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(mocks.runSession).toHaveBeenCalledTimes(1);
+      expect(spy.cycleFinished).toHaveBeenCalledWith(
+        expect.objectContaining({ ok: true }),
+      );
+      expect(admission.changes.map((change) => change.kind)).toEqual([
+        "granted",
+        "released",
+      ]);
+      expect(spy.sleepUntil).toHaveBeenCalled();
+
+      await loop.stop();
+    });
+
+    it("a pause while waiting cancels the wait and starts no session", async () => {
+      const admission = externalAdmission();
+      const loop = start(admission);
+      await vi.advanceTimersByTimeAsync(1);
+
+      loop.controller.pause();
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(loop.controller.state).toBe("paused");
+      expect(admission.changes.map((change) => change.kind)).toEqual(["cancelled"]);
+      expect(admission.gate.status().monitor.state).toBe("idle");
+      expect(mocks.runSession).not.toHaveBeenCalled();
+
+      await loop.stop();
+    });
+
+    it("a grant that lands with a pause gives the slot back without a session", async () => {
+      const admission = externalAdmission();
+      const loop = start(admission);
+      await vi.advanceTimersByTimeAsync(1);
+
+      admission.gate.grant("monitor", heldTicket(admission.gate, "monitor"));
+      loop.controller.pause();
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(admission.changes.map((change) => change.kind)).toEqual([
+        "granted",
+        "released",
+      ]);
+      expect(mocks.runSession).not.toHaveBeenCalled();
+      expect(spy.cycleStarted).not.toHaveBeenCalled();
+      expect(loop.controller.state).toBe("paused");
+
+      await loop.stop();
+    });
+
+    it("a usage limit reached while waiting gives the slot back and waits for the limit", async () => {
+      const admission = externalAdmission();
+      const loop = start(admission);
+      await vi.advanceTimersByTimeAsync(1);
+
+      loop.gates.limit.engage({ resetAt: null }, Date.now());
+      admission.gate.grant("monitor", heldTicket(admission.gate, "monitor"));
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(admission.changes.map((change) => change.kind)).toEqual([
+        "granted",
+        "released",
+      ]);
+      expect(mocks.runSession).not.toHaveBeenCalled();
+      expect(spy.usageLimit).toHaveBeenCalledTimes(1);
+
+      await loop.stop();
+    });
+
+    it("an abort while waiting ends the loop", async () => {
+      const admission = externalAdmission();
+      const loop = start(admission);
+      await vi.advanceTimersByTimeAsync(1);
+
+      await loop.stop();
+
+      expect(admission.changes.map((change) => change.kind)).toEqual(["cancelled"]);
+      expect(mocks.runSession).not.toHaveBeenCalled();
+    });
+
+    it("an abort right after the grant starts no session", async () => {
+      const admission = externalAdmission();
+      const abort = new AbortController();
+      const promise = runMonitorLoop(
+        buildConfig(),
+        fakeStore().store,
+        new Waker(),
+        spy.reporter,
+        noopController(),
+        buildGates({ admission: admission.gate }),
+        abort.signal,
+      );
+      await vi.advanceTimersByTimeAsync(1);
+
+      admission.gate.grant("monitor", heldTicket(admission.gate, "monitor"));
+      abort.abort();
+      await promise;
+
+      expect(admission.changes.map((change) => change.kind)).toEqual([
+        "granted",
+        "released",
+      ]);
+      expect(mocks.runSession).not.toHaveBeenCalled();
+    });
   });
 });

@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `KIKIMORA_ADMISSION=external` lets a supervisor such as Kikimora Cloud decide when sessions start: each monitor cycle and each task waits in the new `admissionWait` phase until the control request `admission.grant` admits it, holds the slot through the session and the memory summary, and gives it back afterwards, so many workers can share one machine without reserving it; `status` reports the admission state and new `admission.*` log events follow it. Without the variable nothing changes.
+
 ## [0.10.0] - 2026-10-01
 
 ### Added

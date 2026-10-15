@@ -3,6 +3,7 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AdmissionGate } from "../src/admission.js";
 import { sendControlRequest, WorkerNotRunningError } from "../src/control-client.js";
 import {
   buildControlStatus,
@@ -132,6 +133,11 @@ function buildStatus(overrides: Partial<ControlStatus> = {}): ControlStatus {
     },
     stats: { cycles: 0, tasksSucceeded: 0, tasksFailed: 0, totalCostUsd: 0 },
     taskCounts: { pending: 0, in_progress: 0, done: 0, failed: 0, cancelled: 0 },
+    admission: {
+      mode: "local",
+      monitor: { state: "idle", seq: 0 },
+      executor: { state: "idle", seq: 0 },
+    },
     ...overrides,
   };
 }
@@ -177,6 +183,7 @@ describe("startControlServer", () => {
     controls?: ReturnType<typeof controls>;
     drain?: DrainController;
     checkMonitor?: () => MonitorCheckOutcome;
+    admission?: AdmissionGate;
     fakes?: FakeDeps;
   }
 
@@ -191,6 +198,7 @@ describe("startControlServer", () => {
       checkMonitor:
         overrides.checkMonitor ??
         vi.fn((): MonitorCheckOutcome => ({ kind: "requested" })),
+      admission: overrides.admission ?? new AdmissionGate("local"),
       ...(overrides.fakes ?? fakeDeps()),
       signal: abort.signal,
     };
@@ -245,6 +253,47 @@ describe("startControlServer", () => {
     expect(ctrl.executor.pause).toHaveBeenCalledTimes(1);
     expect(ctrl.executor.resume).toHaveBeenCalledTimes(1);
     expect(ctrl.monitor.resume).not.toHaveBeenCalled();
+  });
+
+  it("hands an admission grant to the gate and answers its outcome", async () => {
+    const admission = new AdmissionGate("external", undefined, () => "ticket-1");
+    const waiting = admission.acquire("executor", {
+      signal: abort.signal,
+      interrupted: () => new Promise<void>(() => undefined),
+      onWait: () => undefined,
+    });
+    await startServer({ admission });
+
+    expect(
+      await sendControlRequest(socketPath, {
+        cmd: "admission.grant",
+        agent: "executor",
+        ticket: "ticket-0",
+      }),
+    ).toEqual({ ok: true, data: { granted: false, reason: "stale" } });
+    expect(
+      await sendControlRequest(socketPath, {
+        cmd: "admission.grant",
+        agent: "executor",
+        ticket: "ticket-1",
+      }),
+    ).toEqual({ ok: true, data: { granted: true } });
+    expect(await waiting).not.toBeNull();
+  });
+
+  it("rejects an admission grant for an unknown agent", async () => {
+    await startServer();
+
+    const response = await sendControlRequest(socketPath, {
+      cmd: "admission.grant",
+      agent: "summarizer",
+      ticket: "ticket-1",
+    } as never);
+
+    expect(response).toMatchObject({ ok: false });
+    expect((response as { error: string }).error).toMatch(
+      /^Invalid admission.grant request: agent: /,
+    );
   });
 
   it("answers a monitor check with the outcome of the shared check", async () => {
@@ -394,6 +443,7 @@ describe("startControlServer", () => {
           snapshot: store.getSnapshot(),
           identity: buildIdentity(),
           headless: true,
+          admission: new AdmissionGate("local").status(),
         });
       },
     });
