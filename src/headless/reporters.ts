@@ -1,3 +1,4 @@
+import type { AdmissionChange, AdmissionWait } from "../admission.js";
 import type { SummaryReporter } from "../memory/summarizer.js";
 import { describeToolUse, type SessionEventSink } from "../session-events.js";
 import type { ExecutorReporter, MonitorReporter } from "../status.js";
@@ -96,6 +97,14 @@ function sessionSink(
   };
 }
 
+function admissionWaitFields(wait: AdmissionWait): Record<string, unknown> {
+  return {
+    ticket: wait.ticket,
+    since: new Date(wait.since).toISOString(),
+    seq: wait.seq,
+  };
+}
+
 export function createHeadlessReporters(
   emit: HeadlessLogEmitter,
   options: HeadlessReporterOptions = {},
@@ -125,6 +134,14 @@ export function createHeadlessReporters(
         agent: "monitor",
         event: "monitor.authBlocked",
         fields: { reason: failure.reason },
+      });
+    },
+    admissionWait: (wait) => {
+      emit({
+        level: "info",
+        agent: "monitor",
+        event: "monitor.admissionWait",
+        fields: admissionWaitFields(wait),
       });
     },
     cycleStarted: (cycle) => {
@@ -216,6 +233,14 @@ export function createHeadlessReporters(
         fields: { reason: failure.reason },
       });
     },
+    admissionWait: (wait, task) => {
+      emit({
+        level: "info",
+        agent: "executor",
+        event: "executor.admissionWait",
+        fields: { ...admissionWaitFields(wait), taskId: task.id },
+      });
+    },
     waiting: () => {
       emit({
         level: "info",
@@ -257,4 +282,16 @@ export function createHeadlessReporters(
   };
 
   return { monitor, executor, summarizer };
+}
+
+export function emitAdmissionChange(
+  emit: HeadlessLogEmitter,
+  change: AdmissionChange,
+): void {
+  emit({
+    level: "info",
+    agent: change.role,
+    event: `admission.${change.kind}`,
+    fields: { ticket: change.ticket, seq: change.seq },
+  });
 }

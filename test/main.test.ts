@@ -107,7 +107,46 @@ describe("runKikimora", () => {
       logFormat: "json",
       verbose: true,
       paused: false,
+      admission: "local",
     });
+  });
+
+  it("reads the admission mode from KIKIMORA_ADMISSION", async () => {
+    const restoreEnv = snapshotEnv();
+    mocks.isConfigured.mockReturnValue(true);
+
+    try {
+      process.env.KIKIMORA_ADMISSION = "external";
+      await runKikimora({ interactive: true });
+      process.env.KIKIMORA_ADMISSION = "";
+      await runKikimora({ interactive: true });
+    } finally {
+      restoreEnv();
+    }
+
+    expect(
+      mocks.startWorker.mock.calls.map(
+        (call) => (call[0] as { admission: string }).admission,
+      ),
+    ).toEqual(["external", "local"]);
+  });
+
+  it("rejects an unknown admission mode with exit code 1", async () => {
+    const restoreEnv = snapshotEnv();
+    mocks.isConfigured.mockReturnValue(true);
+
+    try {
+      process.env.KIKIMORA_ADMISSION = "queue";
+      await runKikimora({ interactive: true });
+    } finally {
+      restoreEnv();
+    }
+
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('Invalid KIKIMORA_ADMISSION "queue"'),
+    );
+    expect(process.exitCode).toBe(1);
+    expect(mocks.startWorker).not.toHaveBeenCalled();
   });
 
   it("passes --paused through to the worker", async () => {

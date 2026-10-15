@@ -6,14 +6,15 @@ Kikimora runs unattended on servers. Without a TTY (systemd, Docker, CI, a pipe)
 
 Headless mode turns on when stdin or stdout is not a TTY. `--headless` forces it in a terminal.
 
-| Flag / env                    | Default  | Effect                                                                                            |
-| ----------------------------- | -------- | ------------------------------------------------------------------------------------------------- |
-| `--headless`                  | auto     | skip the dashboard even in a terminal; agents start                                               |
-| `--log-format <pretty\|json>` | `pretty` | line format on stdout                                                                             |
-| `KIKIMORA_LOG_FORMAT`         | unset    | fallback for `--log-format` when the flag is absent                                               |
-| `--verbose`                   | off      | also log session text, tool calls and failed tool results                                         |
-| `--paused`                    | off      | start both agents paused; `kikimora resume` starts them (the TUI starts agents paused regardless) |
-| `KIKIMORA_START_PAUSED`       | unset    | fallback for `--paused` (`1` or `true`)                                                           |
+| Flag / env                    | Default  | Effect                                                                                                                       |
+| ----------------------------- | -------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| `--headless`                  | auto     | skip the dashboard even in a terminal; agents start                                                                          |
+| `--log-format <pretty\|json>` | `pretty` | line format on stdout                                                                                                        |
+| `KIKIMORA_LOG_FORMAT`         | unset    | fallback for `--log-format` when the flag is absent                                                                          |
+| `--verbose`                   | off      | also log session text, tool calls and failed tool results                                                                    |
+| `--paused`                    | off      | start both agents paused; `kikimora resume` starts them (the TUI starts agents paused regardless)                            |
+| `KIKIMORA_START_PAUSED`       | unset    | fallback for `--paused` (`1` or `true`)                                                                                      |
+| `KIKIMORA_ADMISSION`          | `local`  | `external` makes every session wait for a slot granted by a supervisor ([external admission](control.md#external-admission)) |
 
 - `pretty` is for `journalctl -f` and reading by eye.
 - `json` is NDJSON, one JSON object per line, for log aggregators such as Loki, Datadog or CloudWatch.
@@ -44,23 +45,25 @@ Each JSON line carries an envelope plus the event's own fields:
 }
 ```
 
-| Event                                                         | Fields                                                                                                                                  |
-| ------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `worker.started`                                              | `version`, `claudeVersion` (when readable), `nodeVersion`, `authKind`, `pid`, `projectDir`, `paused` (when started paused)              |
-| `worker.draining`                                             | `reason` (`drain`, or `SIGTERM` under a shutdown grace), `timeoutMs` (when the drain has a deadline)                                    |
-| `worker.stopped`                                              | `signal` (when stopped by SIGINT/SIGTERM), `drained` (exited through a drain), `forced` (a deadline or a signal cut the drain short)    |
-| `control.changed`                                             | `state`: an agent moved between `running`, `pausing` and `paused`                                                                       |
-| `update.available` / `update.installed`                       | `from`, `to`; `update.available` adds `installError` when a background install failed                                                   |
-| `cycle.started` / `cycle.finished`                            | `cycle`; finished adds `ok`, `durationMs`, `costUsd`, `addedTasks`, `skippedDuplicates`, `error`, `sessionId`                           |
-| `monitor.sleeping` / `monitor.offHours` / `monitor.limitWait` | `nextCycleAt` / `resumeAt`                                                                                                              |
-| `task.started` / `task.finished`                              | `taskId`, `title`; finished adds `ok`, `durationMs`, `costUsd`, `numTurns`, `willRetry`, `attempt`, `maxAttempts`, `error`, `sessionId` |
-| `task.retryScheduled`                                         | `taskId`, `resumeAt`                                                                                                                    |
-| `executor.waiting` / `executor.limitWait`                     | none / `resumeAt`                                                                                                                       |
-| `monitor.authBlocked` / `executor.authBlocked`                | `reason`: credentials were rejected; both agents stay paused until `kikimora resume`                                                    |
-| `summary.started` / `summary.finished`                        | `taskId`; finished adds `ok`, `durationMs`, `costUsd`, `error`, `sessionId`                                                             |
-| `session.init`                                                | `model`, `sessionId`, plus `taskId` (executor, summarizer) or `cycle` (monitor)                                                         |
-| `session.stderr` / `session.procError` / `session.killed`     | `line` / `message` / `reason`                                                                                                           |
-| `session.text` / `session.tool` / `session.toolError`         | only with `--verbose`                                                                                                                   |
+| Event                                                              | Fields                                                                                                                                  |
+| ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
+| `worker.started`                                                   | `version`, `claudeVersion` (when readable), `nodeVersion`, `authKind`, `pid`, `projectDir`, `paused` (when started paused)              |
+| `worker.draining`                                                  | `reason` (`drain`, or `SIGTERM` under a shutdown grace), `timeoutMs` (when the drain has a deadline)                                    |
+| `worker.stopped`                                                   | `signal` (when stopped by SIGINT/SIGTERM), `drained` (exited through a drain), `forced` (a deadline or a signal cut the drain short)    |
+| `control.changed`                                                  | `state`: an agent moved between `running`, `pausing` and `paused`                                                                       |
+| `update.available` / `update.installed`                            | `from`, `to`; `update.available` adds `installError` when a background install failed                                                   |
+| `cycle.started` / `cycle.finished`                                 | `cycle`; finished adds `ok`, `durationMs`, `costUsd`, `addedTasks`, `skippedDuplicates`, `error`, `sessionId`                           |
+| `monitor.sleeping` / `monitor.offHours` / `monitor.limitWait`      | `nextCycleAt` / `resumeAt`                                                                                                              |
+| `task.started` / `task.finished`                                   | `taskId`, `title`; finished adds `ok`, `durationMs`, `costUsd`, `numTurns`, `willRetry`, `attempt`, `maxAttempts`, `error`, `sessionId` |
+| `task.retryScheduled`                                              | `taskId`, `resumeAt`                                                                                                                    |
+| `executor.waiting` / `executor.limitWait`                          | none / `resumeAt`                                                                                                                       |
+| `monitor.authBlocked` / `executor.authBlocked`                     | `reason`: credentials were rejected; both agents stay paused until `kikimora resume`                                                    |
+| `monitor.admissionWait` / `executor.admissionWait`                 | `ticket`, `since`, `seq`; the executor adds the `taskId` it waits to start                                                              |
+| `admission.granted` / `admission.released` / `admission.cancelled` | `ticket`, `seq`: a slot was granted, given back after the session, or a wait ended without a grant                                      |
+| `summary.started` / `summary.finished`                             | `taskId`; finished adds `ok`, `durationMs`, `costUsd`, `error`, `sessionId`                                                             |
+| `session.init`                                                     | `model`, `sessionId`, plus `taskId` (executor, summarizer) or `cycle` (monitor)                                                         |
+| `session.stderr` / `session.procError` / `session.killed`          | `line` / `message` / `reason`                                                                                                           |
+| `session.text` / `session.tool` / `session.toolError`              | only with `--verbose`                                                                                                                   |
 
 Unset optional fields are omitted; they are not written as `null`. A `*.finished` event carries `sessionId` when Claude Code reported a result, which links the outcome to the session transcript below. A session killed by a timeout or a shutdown has no `sessionId` on its `*.finished` event.
 

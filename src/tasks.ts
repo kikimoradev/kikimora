@@ -138,6 +138,11 @@ export class TaskStore {
     });
   }
 
+  peekNext(): Task | undefined {
+    const task = this.tasks.find((candidate) => candidate.status === "pending");
+    return task === undefined ? undefined : { ...task };
+  }
+
   takeNext(): Promise<Task | undefined> {
     return this.run(async () => {
       const task = this.tasks.find((candidate) => candidate.status === "pending");

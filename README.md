@@ -160,6 +160,7 @@ Without a TTY (systemd, Docker, CI, a pipe), kikimora skips the dashboard and st
 A second `kikimora` in the same project exits with an error while one is running.
 
 - The control socket, its subcommands and the wire protocol: [docs/control.md](https://github.com/kikimoradev/kikimora/blob/main/docs/control.md).
+- Sessions that start only when a supervisor grants a slot, for many workers on one machine: [external admission](https://github.com/kikimoradev/kikimora/blob/main/docs/control.md#external-admission).
 - The NDJSON event schema, a systemd runbook, authentication without a browser, the reference `Dockerfile` and `docker-compose.yml`, and the prebuilt images `ghcr.io/kikimoradev/kikimora` (plus a `-browser` variant with Chromium for Playwright MCP): [docs/deployment.md](https://github.com/kikimoradev/kikimora/blob/main/docs/deployment.md).
 
 ## Configuration

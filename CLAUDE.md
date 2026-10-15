@@ -78,7 +78,15 @@ The **`AuthGate` (`auth-gate.ts`)** handles rejected credentials.
 - It must run **before** `detectUsageLimit` and `isTransientFailure`, because their `/API Error/` pattern would otherwise retry a 401.
 - The gate has no timeout. `engage` pauses both `AgentController`s (callback wired in `start.ts`). The loops report the `authBlocked` phase once and park in `controller.gate()`. A `resume` clears the gate through the controllers' `onChange`.
 
-Both gates travel together as `LoopGates` (`gates.ts`). Preflight also runs `claude --version` and `claude auth status --json` once; both results reach `start.ts` as `PreflightResult.claude`. Preflight refuses to start without a login; with an older CLI that has no `auth status`, it logs a warning and continues.
+The **`AdmissionGate` (`admission.ts`)** lets a supervisor decide when sessions start (`KIKIMORA_ADMISSION=external`, parsed in `main.ts`).
+
+- In `local` mode, the default, `acquire` returns a no-op lease at once and nothing is reported.
+- In `external` mode each monitor cycle and each task first waits with a fresh ticket in the `admissionWait` phase. The control request `admission.grant` moves the slot from `waiting` to `holding` synchronously, so a grant cannot interleave with a pause.
+- The wait races `controller.pauseRequested` and the abort signal; a cancelled wait goes back to `controller.gate()`, so a drain still settles.
+- After a grant each loop checks again (state, both other gates, working hours unless a check was requested) and gives an unused slot back. The executor peeks at the queue (`TaskStore.peekNext`) and claims the task only after the grant, holds the slot through the summarizer, and gives it back before a retry backoff. Every exit releases the lease in a `finally`.
+- `status` reports `admission` per agent with a `seq` that grows with every change; `admission.granted|released|cancelled` log events carry the same `seq`.
+
+All three gates travel together as `LoopGates` (`gates.ts`). Preflight also runs `claude --version` and `claude auth status --json` once; both results reach `start.ts` as `PreflightResult.claude`. Preflight refuses to start without a login; with an older CLI that has no `auth status`, it logs a warning and continues.
 
 ### Pause and resume
 
@@ -138,7 +146,7 @@ In an interactive terminal `start.ts` constructs both controllers as `paused`, s
   - Transport: a unix domain socket (a named pipe on win32) at `controlSocketPath(projectDir)` in `paths.ts`. The path is tmpdir + uid + the first 16 hex characters of the sha256 of the resolved project path. It sits outside `.kikimora/` to stay under the 104-byte `sun_path` limit. `KIKIMORA_CONTROL_SOCKET` overrides it and is validated in the same function, so the worker and the CLI agree.
   - `start.ts` starts the server in both TUI and headless mode. Startup probes the socket first: a live listener means another instance, and the worker exits 1 with "already running (pid …)"; a stale file is unlinked.
   - Protocol: one newline-delimited JSON request per connection, validated by the zod discriminated union `controlRequestSchema`, answered with `{ok:true,data}` or `{ok:false,error}`, typed per command (`ControlResponseData`).
-  - Commands: `status`, `version`, `pause`, `resume`, `drain`, plus mirrors of the TUI: `settings.get|patch`, `tasks.list|add|retry|cancel`, `memory.search|recent`, `prompt.get|set`, `context.get|set`, `sessions.list|get`. The server receives the same store instances as the dashboard through the neutral interfaces in `worker-controls.ts`. Do not import `src/ui/` there.
+  - Commands: `status`, `version`, `pause`, `resume`, `drain`, `monitor.check`, `admission.grant`, plus mirrors of the TUI: `settings.get|patch`, `tasks.list|add|retry|cancel`, `memory.search|recent`, `prompt.get|set`, `context.get|set`, `sessions.list|get`. The server receives the same store instances as the dashboard through the neutral interfaces in `worker-controls.ts`. Do not import `src/ui/` there.
   - `version` answers the static `WorkerIdentity` (`worker-identity.ts`): kikimora, Claude Code and Node versions, pid, `startedAt`, `projectDir`, and `authKind`. `authKind` resolves `ANTHROPIC_API_KEY`, then `CLAUDE_CODE_OAUTH_TOKEN`, then the preflight `claude auth status` report, matching Claude Code's own precedence. `start.ts` builds the identity once; it is spread into the `status` document and logged in the headless `worker.started` event.
   - Protocol fields may only be added. Do not rename them or set them to `null`; omit optional ones.
   - The CLI side goes through `requestControl` in `control-commands.ts` and exits 1 when no worker answers or the request is rejected. An `Unrecognized control request.` from an older worker is reported as a version skew with a restart hint.

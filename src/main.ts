@@ -1,4 +1,5 @@
 import { defineCommand } from "citty";
+import { ADMISSION_ENV, parseAdmissionMode } from "./admission.js";
 import { isConfigured, runConfigure } from "./configure.js";
 import { parseHeadlessLogFormat } from "./headless/format.js";
 import { logger } from "./logger.js";
@@ -51,10 +52,20 @@ export async function runKikimora(options: RunKikimoraOptions = {}): Promise<voi
     if (!saved) return;
   }
 
+  const rawAdmission = process.env[ADMISSION_ENV];
+  const admission = parseAdmissionMode(rawAdmission);
+  if (admission === null) {
+    logger.error(
+      `Invalid ${ADMISSION_ENV} "${rawAdmission ?? ""}" — use local or external.`,
+    );
+    process.exitCode = 1;
+    return;
+  }
+
   const paused =
     options.paused === true || parseStartPaused(process.env.KIKIMORA_START_PAUSED);
 
-  await startWorker({ headless, logFormat, verbose: options.verbose, paused });
+  await startWorker({ headless, logFormat, verbose: options.verbose, paused, admission });
 }
 
 export const mainCommand = defineCommand({

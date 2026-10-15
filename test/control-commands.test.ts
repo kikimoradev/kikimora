@@ -63,6 +63,11 @@ function buildStatus(overrides: Partial<ControlStatus> = {}): ControlStatus {
     },
     stats: { cycles: 12, tasksSucceeded: 5, tasksFailed: 1, totalCostUsd: 1.2345 },
     taskCounts: { pending: 2, in_progress: 1, done: 5, failed: 1, cancelled: 0 },
+    admission: {
+      mode: "local",
+      monitor: { state: "idle", seq: 0 },
+      executor: { state: "idle", seq: 0 },
+    },
     ...overrides,
   };
 }

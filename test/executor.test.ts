@@ -2,6 +2,7 @@ import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AgentController } from "../src/control.js";
 import { DrainController } from "../src/drain.js";
+import type { TaskSummarizer } from "../src/memory/summarizer.js";
 import type { TaskStore } from "../src/tasks.js";
 import type { SessionResult, Task } from "../src/types.js";
 import { Waker } from "../src/waker.js";
@@ -12,6 +13,8 @@ import {
   buildGates,
   createExecutorReporterSpy,
   createTaskSummarizerSpy,
+  externalAdmission,
+  heldTicket,
   noopController,
   type ExecutorReporterSpy,
   type TaskSummarizerSpy,
@@ -48,6 +51,18 @@ function task(id: string): Task {
   };
 }
 
+function scriptedTakes(script: (Task | undefined)[], rest: Task | undefined) {
+  const queue = [...script];
+  const takeNext = vi.fn(() => Promise.resolve(queue.length > 0 ? queue.shift() : rest));
+  const peekNext = (): Task | undefined => {
+    if (queue.length === 0) return rest;
+    const [head] = queue;
+    if (head === undefined) queue.shift();
+    return head;
+  };
+  return { takeNext, peekNext };
+}
+
 function ok(): SessionResult {
   return { ok: true, durationMs: 0 };
 }
@@ -64,6 +79,7 @@ function transientFailure(): SessionResult {
 
 interface FakeStore {
   store: TaskStore;
+  enqueue: (task: Task) => void;
   takeNext: ReturnType<typeof vi.fn>;
   complete: ReturnType<typeof vi.fn>;
   fail: ReturnType<typeof vi.fn>;
@@ -86,7 +102,11 @@ function fakeStore(queue: Task[]): FakeStore {
       fail,
       requeue,
       pendingCount: () => pending.length,
+      peekNext: () => pending[0],
     } as unknown as TaskStore,
+    enqueue: (queued) => {
+      pending.push(queued);
+    },
     takeNext,
     complete,
     fail,
@@ -431,7 +451,7 @@ describe("runExecutorLoop", () => {
   });
 
   it("with an empty queue reports waiting and wakes up on notify", async () => {
-    const { store, takeNext, complete } = fakeStore([]);
+    const { store, enqueue, takeNext, complete } = fakeStore([]);
     const waker = new Waker();
     const controller = new AbortController();
     mocks.runSession.mockResolvedValue(ok());
@@ -446,11 +466,11 @@ describe("runExecutorLoop", () => {
       buildGates(),
       controller.signal,
     );
-    await vi.waitFor(() => expect(takeNext).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(spy.waiting).toHaveBeenCalledTimes(1));
+    expect(takeNext).not.toHaveBeenCalled();
     expect(mocks.runSession).not.toHaveBeenCalled();
-    expect(spy.waiting).toHaveBeenCalledTimes(1);
 
-    takeNext.mockResolvedValueOnce(task("new"));
+    enqueue(task("new"));
     waker.notify();
     await vi.waitFor(() => expect(complete).toHaveBeenCalledWith("new"));
 
@@ -472,7 +492,8 @@ describe("runExecutorLoop", () => {
       buildGates(),
       controller.signal,
     );
-    await vi.waitFor(() => expect(takeNext).toHaveBeenCalledTimes(1));
+    await vi.waitFor(() => expect(spy.waiting).toHaveBeenCalledTimes(1));
+    expect(takeNext).not.toHaveBeenCalled();
 
     controller.abort();
     await promise;
@@ -512,15 +533,17 @@ describe("runExecutorLoop", () => {
   });
 
   it("a transient error goes back to the queue and is retried until success", async () => {
-    const takeNext = vi
-      .fn()
-      .mockResolvedValueOnce({ ...task("flaky"), attempts: 1 })
-      .mockResolvedValueOnce({ ...task("flaky"), attempts: 2 })
-      .mockResolvedValue(undefined);
+    const { takeNext, peekNext } = scriptedTakes(
+      [
+        { ...task("flaky"), attempts: 1 },
+        { ...task("flaky"), attempts: 2 },
+      ],
+      undefined,
+    );
     const complete = vi.fn().mockResolvedValue(undefined);
     const fail = vi.fn().mockResolvedValue(undefined);
     const requeue = vi.fn().mockResolvedValue(undefined);
-    const store = { takeNext, complete, fail, requeue } as unknown as TaskStore;
+    const store = { takeNext, peekNext, complete, fail, requeue } as unknown as TaskStore;
     const controller = new AbortController();
     mocks.runSession.mockResolvedValueOnce(transientFailure()).mockResolvedValue(ok());
 
@@ -623,13 +646,14 @@ describe("runExecutorLoop", () => {
 
   it("reports backoff before retrying and waits the given time", async () => {
     vi.useFakeTimers();
-    const takeNext = vi
-      .fn()
-      .mockResolvedValueOnce({ ...task("flaky"), attempts: 1 })
-      .mockResolvedValue(undefined);
+    const { takeNext, peekNext } = scriptedTakes(
+      [{ ...task("flaky"), attempts: 1 }],
+      undefined,
+    );
     const requeue = vi.fn().mockResolvedValue(undefined);
     const store = {
       takeNext,
+      peekNext,
       requeue,
       complete: vi.fn(),
       fail: vi.fn(),
@@ -657,8 +681,11 @@ describe("runExecutorLoop", () => {
     );
     expect(takeNext).toHaveBeenCalledTimes(1);
 
+    expect(spy.waiting).not.toHaveBeenCalled();
+
     await vi.advanceTimersByTimeAsync(5_000);
-    expect(takeNext).toHaveBeenCalledTimes(2);
+    expect(takeNext).toHaveBeenCalledTimes(1);
+    expect(spy.waiting).toHaveBeenCalledTimes(1);
 
     controller.abort();
     await promise;
@@ -666,16 +693,25 @@ describe("runExecutorLoop", () => {
 
   it("an auth failure releases the task, skips the summarizer and parks both agents until resume", async () => {
     vi.useFakeTimers();
-    const takeNext = vi
-      .fn()
-      .mockResolvedValueOnce({ ...task("locked"), attempts: 1 })
-      .mockResolvedValueOnce({ ...task("locked"), attempts: 1 })
-      .mockResolvedValue(undefined);
+    const { takeNext, peekNext } = scriptedTakes(
+      [
+        { ...task("locked"), attempts: 1 },
+        { ...task("locked"), attempts: 1 },
+      ],
+      undefined,
+    );
     const release = vi.fn().mockResolvedValue(undefined);
     const complete = vi.fn().mockResolvedValue(undefined);
     const fail = vi.fn().mockResolvedValue(undefined);
     const requeue = vi.fn().mockResolvedValue(undefined);
-    const store = { takeNext, release, complete, fail, requeue } as unknown as TaskStore;
+    const store = {
+      takeNext,
+      peekNext,
+      release,
+      complete,
+      fail,
+      requeue,
+    } as unknown as TaskStore;
     const controller = new AbortController();
     const {
       gates,
@@ -728,7 +764,7 @@ describe("runExecutorLoop", () => {
     executorControl.resume();
     await vi.advanceTimersByTimeAsync(1);
     expect(gates.auth.blocked).toBeNull();
-    expect(takeNext).toHaveBeenCalledTimes(3);
+    expect(takeNext).toHaveBeenCalledTimes(2);
     expect(complete).toHaveBeenCalledWith("locked");
 
     controller.abort();
@@ -738,17 +774,20 @@ describe("runExecutorLoop", () => {
 
   it("a usage-limit failure releases the task and parks the loop until the reset", async () => {
     vi.useFakeTimers();
-    const takeNext = vi
-      .fn()
-      .mockResolvedValueOnce({ ...task("limited"), attempts: 1 })
-      .mockResolvedValueOnce({ ...task("limited"), attempts: 1 })
-      .mockResolvedValue(undefined);
+    const { takeNext, peekNext } = scriptedTakes(
+      [
+        { ...task("limited"), attempts: 1 },
+        { ...task("limited"), attempts: 1 },
+      ],
+      undefined,
+    );
     const release = vi.fn().mockResolvedValue(undefined);
     const complete = vi.fn().mockResolvedValue(undefined);
     const fail = vi.fn().mockResolvedValue(undefined);
     const requeue = vi.fn().mockResolvedValue(undefined);
     const store = {
       takeNext,
+      peekNext,
       release,
       complete,
       fail,
@@ -804,14 +843,14 @@ describe("runExecutorLoop", () => {
   });
 
   it("pause while idle parks the loop and resume picks up new tasks", async () => {
-    const takeNext = vi
-      .fn()
-      .mockResolvedValueOnce(undefined)
-      .mockResolvedValueOnce(task("after-resume"))
-      .mockResolvedValue(undefined);
+    const { takeNext, peekNext } = scriptedTakes(
+      [undefined, task("after-resume")],
+      undefined,
+    );
     const complete = vi.fn().mockResolvedValue(undefined);
     const store = {
       takeNext,
+      peekNext,
       complete,
       fail: vi.fn(),
       requeue: vi.fn(),
@@ -834,10 +873,11 @@ describe("runExecutorLoop", () => {
 
     control.pause();
     await vi.waitFor(() => expect(control.state).toBe("paused"));
-    expect(takeNext).toHaveBeenCalledTimes(1);
+    expect(takeNext).not.toHaveBeenCalled();
 
     control.resume();
     await vi.waitFor(() => expect(complete).toHaveBeenCalledWith("after-resume"));
+    expect(takeNext).toHaveBeenCalledTimes(1);
 
     abort.abort();
     await promise;
@@ -851,13 +891,11 @@ describe("runExecutorLoop", () => {
           finishSession = resolvePromise;
         }),
     );
-    const takeNext = vi
-      .fn()
-      .mockResolvedValueOnce(task("current"))
-      .mockResolvedValue(task("next"));
+    const { takeNext, peekNext } = scriptedTakes([task("current")], task("next"));
     const complete = vi.fn().mockResolvedValue(undefined);
     const store = {
       takeNext,
+      peekNext,
       complete,
       fail: vi.fn(),
       requeue: vi.fn(),
@@ -888,6 +926,191 @@ describe("runExecutorLoop", () => {
     abort.abort();
     await promise;
   });
+
+  describe("with external admission", () => {
+    it("claims the task only after its ticket is granted and keeps the slot through the summary", async () => {
+      const { store, takeNext, complete } = fakeStore([task("a")]);
+      const admission = externalAdmission();
+      const abort = new AbortController();
+      const statesDuringSummary: string[] = [];
+      const summarizer: TaskSummarizer = {
+        summarize: () => {
+          statesDuringSummary.push(admission.gate.status().executor.state);
+          return Promise.resolve();
+        },
+      };
+      mocks.runSession.mockResolvedValue(ok());
+
+      const promise = runExecutorLoop(
+        buildConfig(),
+        store,
+        new Waker(),
+        spy.reporter,
+        summarizer,
+        noopController(),
+        buildGates({ admission: admission.gate }),
+        abort.signal,
+      );
+      await vi.waitFor(() => expect(spy.admissionWait).toHaveBeenCalledTimes(1));
+      expect(spy.admissionWait).toHaveBeenCalledWith(
+        expect.objectContaining({ ticket: heldTicket(admission.gate, "executor") }),
+        expect.objectContaining({ id: "a" }),
+      );
+      expect(admission.gate.status().executor).toMatchObject({ taskId: "a" });
+      expect(takeNext).not.toHaveBeenCalled();
+
+      admission.gate.grant("executor", heldTicket(admission.gate, "executor"));
+      await vi.waitFor(() => expect(spy.waiting).toHaveBeenCalled());
+
+      expect(complete).toHaveBeenCalledWith("a");
+      expect(statesDuringSummary).toEqual(["holding"]);
+      expect(admission.changes.map((change) => change.kind)).toEqual([
+        "granted",
+        "released",
+      ]);
+
+      abort.abort();
+      await promise;
+    });
+
+    it("gives the slot back before the retry backoff", async () => {
+      vi.useFakeTimers();
+      const { takeNext, peekNext } = scriptedTakes(
+        [{ ...task("flaky"), attempts: 1 }],
+        undefined,
+      );
+      const store = {
+        takeNext,
+        peekNext,
+        requeue: vi.fn().mockResolvedValue(undefined),
+        complete: vi.fn(),
+        fail: vi.fn(),
+      } as unknown as TaskStore;
+      const admission = externalAdmission();
+      const abort = new AbortController();
+      mocks.runSession.mockResolvedValue(transientFailure());
+      const config = buildConfig();
+      config.executor = { ...config.executor, retryDelayMs: 5_000 };
+
+      const promise = runExecutorLoop(
+        config,
+        store,
+        new Waker(),
+        spy.reporter,
+        summarizerSpy.summarizer,
+        noopController(),
+        buildGates({ admission: admission.gate }),
+        abort.signal,
+      );
+      await vi.advanceTimersByTimeAsync(1);
+      admission.gate.grant("executor", heldTicket(admission.gate, "executor"));
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(spy.retryScheduled).toHaveBeenCalledTimes(1);
+      expect(admission.gate.status().executor.state).toBe("idle");
+      expect(admission.changes.map((change) => change.kind)).toEqual([
+        "granted",
+        "released",
+      ]);
+
+      abort.abort();
+      await promise;
+    });
+
+    it("a pause while waiting leaves the task in the queue", async () => {
+      const { store, takeNext } = fakeStore([task("a")]);
+      const admission = externalAdmission();
+      const abort = new AbortController();
+      const control = noopController();
+
+      const promise = runExecutorLoop(
+        buildConfig(),
+        store,
+        new Waker(),
+        spy.reporter,
+        summarizerSpy.summarizer,
+        control,
+        buildGates({ admission: admission.gate }),
+        abort.signal,
+      );
+      await vi.waitFor(() => expect(spy.admissionWait).toHaveBeenCalledTimes(1));
+
+      control.pause();
+      await vi.waitFor(() => expect(control.state).toBe("paused"));
+
+      expect(takeNext).not.toHaveBeenCalled();
+      expect(admission.changes.map((change) => change.kind)).toEqual(["cancelled"]);
+      expect(mocks.runSession).not.toHaveBeenCalled();
+
+      abort.abort();
+      await promise;
+    });
+
+    it("gives the slot back when the queue emptied while it waited", async () => {
+      const { takeNext, peekNext } = scriptedTakes([undefined], undefined);
+      const store = {
+        takeNext,
+        peekNext: vi.fn().mockReturnValueOnce(task("gone")).mockImplementation(peekNext),
+      } as unknown as TaskStore;
+      const admission = externalAdmission();
+      const abort = new AbortController();
+
+      const promise = runExecutorLoop(
+        buildConfig(),
+        store,
+        new Waker(),
+        spy.reporter,
+        summarizerSpy.summarizer,
+        noopController(),
+        buildGates({ admission: admission.gate }),
+        abort.signal,
+      );
+      await vi.waitFor(() => expect(spy.admissionWait).toHaveBeenCalledTimes(1));
+      admission.gate.grant("executor", heldTicket(admission.gate, "executor"));
+      await vi.waitFor(() => expect(spy.waiting).toHaveBeenCalled());
+
+      expect(takeNext).toHaveBeenCalledTimes(1);
+      expect(admission.changes.map((change) => change.kind)).toEqual([
+        "granted",
+        "released",
+      ]);
+      expect(mocks.runSession).not.toHaveBeenCalled();
+
+      abort.abort();
+      await promise;
+    });
+
+    it("an auth failure noticed while waiting gives the slot back unused", async () => {
+      const { store, takeNext } = fakeStore([task("a")]);
+      const admission = externalAdmission();
+      const abort = new AbortController();
+      const gates = buildGates({ admission: admission.gate });
+
+      const promise = runExecutorLoop(
+        buildConfig(),
+        store,
+        new Waker(),
+        spy.reporter,
+        summarizerSpy.summarizer,
+        noopController(),
+        gates,
+        abort.signal,
+      );
+      await vi.waitFor(() => expect(spy.admissionWait).toHaveBeenCalledTimes(1));
+      gates.auth.engage({ reason: "token revoked" });
+      admission.gate.grant("executor", heldTicket(admission.gate, "executor"));
+      await vi.waitFor(() => expect(admission.changes).toHaveLength(2));
+
+      expect(takeNext).not.toHaveBeenCalled();
+      expect(admission.changes.map((change) => change.kind)).toEqual([
+        "granted",
+        "released",
+      ]);
+
+      abort.abort();
+      await promise;
+    });
+  });
 });
 
 describe("runExecutorLoop under a drain", () => {
@@ -912,13 +1135,11 @@ describe("runExecutorLoop under a drain", () => {
           finishSummary = resolvePromise;
         }),
     );
-    const takeNext = vi
-      .fn()
-      .mockResolvedValueOnce(task("current"))
-      .mockResolvedValue(task("next"));
+    const { takeNext, peekNext } = scriptedTakes([task("current")], task("next"));
     const complete = vi.fn().mockResolvedValue(undefined);
     const store = {
       takeNext,
+      peekNext,
       complete,
       fail: vi.fn(),
       requeue: vi.fn(),
@@ -987,13 +1208,13 @@ describe("runExecutorLoop while a session is being prepared", () => {
   }
 
   function claimingStore() {
-    const takeNext = vi
-      .fn()
-      .mockResolvedValueOnce({ ...task("claimed"), attempts: 1 })
-      .mockResolvedValue(undefined);
+    const { takeNext, peekNext } = scriptedTakes(
+      [{ ...task("claimed"), attempts: 1 }],
+      undefined,
+    );
     const release = vi.fn().mockResolvedValue(undefined);
     const fail = vi.fn().mockResolvedValue(undefined);
-    const store = { takeNext, release, fail } as unknown as TaskStore;
+    const store = { takeNext, peekNext, release, fail } as unknown as TaskStore;
     return { store, takeNext, release, fail };
   }
 

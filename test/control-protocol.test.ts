@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { AdmissionGate } from "../src/admission.js";
 import {
   buildControlStatus,
   buildDrainAck,
@@ -212,6 +213,7 @@ describe("parseControlRequest", () => {
         "pause",
         "resume",
         "monitor.check",
+        "admission.grant",
         "drain",
         "settings.get",
         "settings.patch",
@@ -242,7 +244,8 @@ describe("buildControlStatus", () => {
     projectDir: "/srv/project",
     authKind: "oauth",
   };
-  const context = { identity, headless: true };
+  const admission = new AdmissionGate("local").status();
+  const context = { identity, headless: true, admission };
 
   it("maps worker identity, stats and task counts", () => {
     const snapshot = buildSnapshot({
@@ -271,11 +274,74 @@ describe("buildControlStatus", () => {
     const status = buildControlStatus({
       identity: { version, nodeVersion, pid, startedAt, projectDir, authKind },
       headless: false,
+      admission,
       snapshot: buildSnapshot(),
     });
 
     expect(status).not.toHaveProperty("claudeVersion");
     expect(status.headless).toBe(false);
+  });
+
+  it("serializes the admission state of both agents", () => {
+    const gate = new AdmissionGate("external", undefined, () => "ticket-1");
+    void gate.acquire("executor", {
+      signal: new AbortController().signal,
+      interrupted: new Promise<void>(() => undefined),
+      taskId: "t-9",
+      onWait: () => undefined,
+    });
+
+    const status = buildControlStatus({
+      ...context,
+      admission: gate.status(),
+      snapshot: buildSnapshot(),
+    });
+
+    expect(status.admission).toEqual({
+      mode: "external",
+      monitor: { state: "idle", seq: 0 },
+      executor: {
+        state: "waiting",
+        seq: 1,
+        ticket: "ticket-1",
+        since: expect.stringMatching(/Z$/) as string,
+        taskId: "t-9",
+      },
+    });
+  });
+
+  it("serializes admission waits with their ticket", () => {
+    const since = Date.parse("2026-07-08T09:00:00.000Z");
+    const status = buildControlStatus({
+      ...context,
+      snapshot: buildSnapshot({
+        monitor: {
+          phase: { kind: "admissionWait", ticket: "m-1", since },
+          control: "running",
+          tail: [],
+          recentOutcomes: [],
+        },
+        executor: {
+          phase: { kind: "admissionWait", ticket: "e-1", since, task: buildTask() },
+          control: "running",
+          tail: [],
+          recentOutcomes: [],
+        },
+      }),
+    });
+
+    expect(status.agents.monitor.phase).toEqual({
+      kind: "admissionWait",
+      since: "2026-07-08T09:00:00.000Z",
+      ticket: "m-1",
+    });
+    expect(status.agents.executor.phase).toEqual({
+      kind: "admissionWait",
+      since: "2026-07-08T09:00:00.000Z",
+      ticket: "e-1",
+      taskId: buildTask().id,
+      title: buildTask().title,
+    });
   });
 
   it("serializes monitor phases with ISO timestamps", () => {

@@ -75,6 +75,7 @@ Each connection carries one request and one response:
 | `{"cmd":"pause","agent":"monitor"\|"executor"\|"all"}`                          | none                                                                                                                                    |
 | `{"cmd":"resume","agent":…}`                                                    | none; refused while the worker drains                                                                                                   |
 | `{"cmd":"monitor.check"}`                                                       | `{"state":"requested"}`, `{"state":"running","cycle":…}` or `{"state":"refused","reason":"paused"\|"draining"\|"limited","until"?:"…"}` |
+| `{"cmd":"admission.grant","agent":"monitor"\|"executor","ticket":"…"}`          | `{"granted":true}` or `{"granted":false,"reason":"local"\|"stale"}`; see [external admission](#external-admission)                      |
 | `{"cmd":"drain","timeoutMs"?:1-86400000}`                                       | `{"state":"draining","since":"…","until"?:"…"}`                                                                                         |
 | `{"cmd":"settings.get"}`                                                        | effective settings                                                                                                                      |
 | `{"cmd":"settings.patch","patch":{…}}`                                          | the resulting settings; `null` deletes a key                                                                                            |
@@ -109,9 +110,21 @@ A session is indexed when Claude Code reports its `init` event. A session killed
 
 `sessions.list` returns the newest first. `before` is a keyset cursor: pass the `startedAt` of the last row you received to fetch the next page. `sessions.get` returns **metadata only, never the transcript**: a reply is one line, and an executor session's JSON transcript can run to megabytes. Read the files with `kikimora sessions show <id> --log` locally, or from the volume on a server. [Session transcripts](deployment.md#session-transcripts) describes the two files per session.
 
+### External admission
+
+With `KIKIMORA_ADMISSION=external` a supervisor decides when sessions start, so several workers can share one machine without each reserving it. The default, `local`, starts sessions as before.
+
+- Before a monitor cycle, and before the executor claims a task, the agent draws a random ticket and waits in the `admissionWait` phase. The task stays `pending` meanwhile and can still be cancelled.
+- `admission.grant` with that ticket starts the session. The agent holds the slot through the session and, for the executor, the memory summary, and gives it back before a retry backoff.
+- A pause, a drain or a shutdown ends the wait without a session. A grant that lands together with a pause, a usage limit or rejected credentials is given back unused.
+- A grant for the ticket the agent already holds answers `granted: true` again, so a supervisor can retry a grant whose reply it lost. Any other ticket answers `stale`.
+- `status` carries `admission`: the `mode` and, per agent, `state` (`idle`, `waiting` or `holding`), `seq`, and while not idle the `ticket`, `since` and the executor's `taskId`. `seq` grows with every change of either agent, so a supervisor keeps the newest of two readings. The `admission.*` [log events](deployment.md#log-events) carry the same `seq`.
+
+Nothing grants a ticket in `local` mode, and nothing but a supervisor does in `external` mode: an agent left without one waits.
+
 ### The identity block
 
-`version` returns the identity block alone. The `status` document starts with the same fields, followed by `headless`, `agents`, `stats`, `taskCounts` and, while the worker drains, `drain`. The `drain` object holds `since`, `until` when the drain has a deadline, and `reason` (`drain`, or `SIGTERM` under a shutdown grace).
+`version` returns the identity block alone. The `status` document starts with the same fields, followed by `headless`, `agents`, `stats`, `taskCounts`, `admission` and, while the worker drains, `drain`. The `drain` object holds `since`, `until` when the drain has a deadline, and `reason` (`drain`, or `SIGTERM` under a shutdown grace).
 
 | Field           | Value                                                                                                       |
 | --------------- | ----------------------------------------------------------------------------------------------------------- |

@@ -1,4 +1,5 @@
 import { join, relative } from "node:path";
+import { AdmissionGate, type AdmissionMode } from "./admission.js";
 import { AuthGate } from "./auth-gate.js";
 import { loadWorkerConfig } from "./config.js";
 import { createContextFileAccess } from "./context-file.js";
@@ -11,7 +12,7 @@ import type { LoopGates } from "./gates.js";
 import { loadGlobalConfig } from "./global-config.js";
 import { compactFields } from "./headless/events.js";
 import type { HeadlessLogFormat } from "./headless/format.js";
-import { createHeadlessReporters } from "./headless/reporters.js";
+import { createHeadlessReporters, emitAdmissionChange } from "./headless/reporters.js";
 import { createHeadlessSink } from "./headless/sink.js";
 import { teeReporter } from "./headless/tee.js";
 import { logger } from "./logger.js";
@@ -40,6 +41,7 @@ export interface StartWorkerOptions {
   logFormat?: HeadlessLogFormat | undefined;
   verbose?: boolean | undefined;
   paused?: boolean | undefined;
+  admission?: AdmissionMode | undefined;
   stdout?: { write(chunk: string): unknown } | undefined;
 }
 
@@ -108,6 +110,9 @@ export async function startWorker(options: StartWorkerOptions = {}): Promise<voi
     auth: new AuthGate(() => {
       monitorControl.pause();
       executorControl.pause();
+    }),
+    admission: new AdmissionGate(options.admission ?? "local", (change) => {
+      if (headlessEmit !== null) emitAdmissionChange(headlessEmit, change);
     }),
   };
   const initialControlState =
@@ -204,6 +209,7 @@ export async function startWorker(options: StartWorkerOptions = {}): Promise<voi
       controls: { monitor: monitorControl, executor: executorControl },
       drain,
       checkMonitor,
+      admission: gates.admission,
       tasks: store,
       memory,
       sessions,
@@ -217,6 +223,7 @@ export async function startWorker(options: StartWorkerOptions = {}): Promise<voi
           snapshot: status.getSnapshot(),
           identity,
           headless: !interactive,
+          admission: gates.admission.status(),
         });
       },
       signal,

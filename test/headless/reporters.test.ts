@@ -1,6 +1,9 @@
 import { describe, expect, it } from "vitest";
 import type { HeadlessLogEvent } from "../../src/headless/events.js";
-import { createHeadlessReporters } from "../../src/headless/reporters.js";
+import {
+  createHeadlessReporters,
+  emitAdmissionChange,
+} from "../../src/headless/reporters.js";
 import type { Task } from "../../src/types.js";
 
 const RESUME_AT = new Date("2026-07-08T09:00:00.000Z");
@@ -25,6 +28,54 @@ function collect(options: { verbose?: boolean } = {}) {
 }
 
 describe("createHeadlessReporters", () => {
+  it("logs admission waits with the ticket, its start and the task", () => {
+    const { events, monitor, executor } = collect();
+    const since = RESUME_AT.getTime();
+
+    monitor.admissionWait({ ticket: "m-1", since, seq: 1 });
+    executor.admissionWait({ ticket: "e-1", since, seq: 2 }, buildTask());
+
+    expect(events).toEqual([
+      {
+        level: "info",
+        agent: "monitor",
+        event: "monitor.admissionWait",
+        fields: { ticket: "m-1", since: RESUME_AT.toISOString(), seq: 1 },
+      },
+      {
+        level: "info",
+        agent: "executor",
+        event: "executor.admissionWait",
+        fields: {
+          ticket: "e-1",
+          since: RESUME_AT.toISOString(),
+          seq: 2,
+          taskId: "task-1",
+        },
+      },
+    ]);
+  });
+
+  it("logs admission changes under the agent that holds the ticket", () => {
+    const events: HeadlessLogEvent[] = [];
+
+    emitAdmissionChange((event) => events.push(event), {
+      kind: "released",
+      role: "executor",
+      ticket: "e-1",
+      seq: 4,
+    });
+
+    expect(events).toEqual([
+      {
+        level: "info",
+        agent: "executor",
+        event: "admission.released",
+        fields: { ticket: "e-1", seq: 4 },
+      },
+    ]);
+  });
+
   it("logs an auth block as an error for both agents", () => {
     const { events, monitor, executor } = collect();
 
