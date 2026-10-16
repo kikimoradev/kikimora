@@ -27,3 +27,20 @@ jobs:
       - run: pnpm install --frozen-lockfile
       - run: pnpm check
       - run: pnpm build
+
+  sessions-windows:
+    name: sessions (windows-latest, ${{ matrix.node }})
+    strategy:
+      fail-fast: false
+      matrix:
+        node: ["22.16", "24"]
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: pnpm/action-setup@v6
+      - uses: actions/setup-node@v6
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm test:sessions

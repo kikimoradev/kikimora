@@ -157,6 +157,7 @@ describe("runSession (integration with fake claude)", () => {
   it("returns a spawn error when the command is missing", async () => {
     const spec = buildSessionSpec(collector.sink, {
       command: "claude-does-not-exist-xyz",
+      launcher: NO_LAUNCHER,
     });
     const result = await runSession(spec, new AbortController().signal);
 
@@ -395,6 +396,7 @@ describe("runSession (integration with fake claude)", () => {
     const finished = vi.fn();
     const spec = buildSessionSpec(collector.sink, {
       command: join(dir, "missing-binary"),
+      launcher: NO_LAUNCHER,
       index: { started, finished },
     });
 

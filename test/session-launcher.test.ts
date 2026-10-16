@@ -90,8 +90,12 @@ describe("sessionCommand", () => {
       undefined,
     );
 
-    expect(env?.PATH).toBe(process.env.PATH);
-    expect(env?.KIKIMORA_SESSION_ROLE).toBe("executor");
+    expect(env).toEqual({
+      ...process.env,
+      KIKIMORA_SESSION_ROLE: "executor",
+      KIKIMORA_ADMISSION_POOL: "executor",
+      KIKIMORA_ADMISSION_TICKET: "ticket-9",
+    });
   });
 
   it("unsets an inherited ticket when the session holds none", () => {
