@@ -6,7 +6,7 @@ export interface SignalPolicy {
 
 export function abortOnSignals(
   policy: SignalPolicy,
-  signals: NodeJS.Signals[] = ["SIGINT", "SIGTERM"],
+  signals: NodeJS.Signals[] = ["SIGINT", "SIGTERM", "SIGHUP"],
 ): AbortSignal {
   const controller = new AbortController();
   const listeners = new Map<NodeJS.Signals, () => void>();

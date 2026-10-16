@@ -29,6 +29,28 @@ interface ClaudeRecord {
   env: Record<string, string>;
 }
 
+interface TreeRecord {
+  attached: number[];
+  orphaned: number[];
+}
+
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+function killQuietly(pid: number): void {
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {
+    return;
+  }
+}
+
 function kikimoraVars(env: NodeJS.ProcessEnv): Record<string, string | undefined> {
   return Object.fromEntries(
     Object.entries(env).filter(([key]) => key.startsWith("KIKIMORA_")),
@@ -511,4 +533,72 @@ describe("runSession with a session launcher", () => {
     expect(result.error).toContain(missing);
     expect(collector.events).toEqual([]);
   }, 15_000);
+});
+
+describe("runSession stopping the session process tree", () => {
+  let dir: string;
+  let tree: TreeRecord | undefined;
+
+  beforeEach(async () => {
+    dir = await createTempDir();
+    tree = undefined;
+  });
+
+  afterEach(async () => {
+    for (const pid of [...(tree?.attached ?? []), ...(tree?.orphaned ?? [])]) {
+      killQuietly(pid);
+    }
+    await removeTempDir(dir);
+  });
+
+  async function runTree(trigger: "timeout" | "abort"): Promise<TreeRecord> {
+    const treeOut = join(dir, `tree-${trigger}.json`);
+    const collector = createSessionEventCollector();
+    const controller = new AbortController();
+    const spec = buildSessionSpec(collector.sink, {
+      childEnv: fakeClaudeEnv("hang_with_tree", { FAKE_CLAUDE_TREE_OUT: treeOut }),
+      sessionTimeoutMs: trigger === "timeout" ? 4_000 : undefined,
+    });
+    const running = runSession(spec, controller.signal);
+    if (trigger === "abort") {
+      await vi.waitFor(
+        () =>
+          expect(collector.events).toContainEqual(
+            expect.objectContaining({ type: "init" }),
+          ),
+        { timeout: 4_000 },
+      );
+      controller.abort();
+    }
+
+    const result = await running;
+
+    expect(result.failureReason).toBe(trigger);
+    tree = await readJson<TreeRecord>(treeOut);
+    return tree;
+  }
+
+  it("leaves no descendant of a timed-out session running", async () => {
+    const { attached } = await runTree("timeout");
+
+    expect(attached).toHaveLength(2);
+    expect(attached.filter(isAlive)).toEqual([]);
+  }, 30_000);
+
+  it("leaves no descendant of an aborted session running", async () => {
+    const { attached } = await runTree("abort");
+
+    expect(attached.filter(isAlive)).toEqual([]);
+  }, 30_000);
+
+  posixOnly(
+    "also stops descendants whose parent already exited",
+    async () => {
+      const { orphaned } = await runTree("timeout");
+
+      expect(orphaned).toHaveLength(1);
+      expect(orphaned.filter(isAlive)).toEqual([]);
+    },
+    30_000,
+  );
 });

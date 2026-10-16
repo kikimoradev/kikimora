@@ -1,5 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
+import { leadsOwnProcessGroup, terminateProcessTree } from "./process-tree.js";
 import type { SessionEventSink } from "./session-events.js";
 import {
   sessionCommand,
@@ -71,6 +72,7 @@ export async function runSession(
     cwd: spec.cwd,
     env: launch.env,
     stdio: ["pipe", "pipe", "pipe"],
+    detached: leadsOwnProcessGroup(),
   });
 
   const indexed: { sessionId: string | null } = { sessionId: null };
@@ -90,10 +92,15 @@ export async function runSession(
   };
   const renderer = new StreamRenderer(events, spec.streamPartial);
 
-  const killState: { reason: KillReason | null } = { reason: null };
+  const killState: { reason: KillReason | null; termination: Promise<void> | null } = {
+    reason: null,
+    termination: null,
+  };
   const kill = (reason: KillReason): void => {
-    killState.reason ??= reason;
-    killChild(child, reason, spec.events);
+    if (killState.termination !== null || hasExited(child)) return;
+    killState.reason = reason;
+    spec.events({ type: "killing", reason });
+    killState.termination = terminateProcessTree(child, KILL_GRACE_MS);
   };
 
   const timeout = spec.sessionTimeoutMs
@@ -143,6 +150,7 @@ export async function runSession(
         resolvePromise({ code: exitCode, exitSignal: closeSignal }),
       );
     });
+    if (killState.termination !== null) await killState.termination;
 
     const summary = renderer.getSummary();
     const ok = code === 0 && !summary.isError && killState.reason === null;
@@ -219,17 +227,6 @@ function describeFailure(
   }
 }
 
-function killChild(
-  child: ChildProcess,
-  reason: KillReason,
-  events: SessionEventSink,
-): void {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  events({ type: "killing", reason });
-  child.kill("SIGTERM");
-  setTimeout(() => {
-    if (child.exitCode === null && child.signalCode === null) {
-      child.kill("SIGKILL");
-    }
-  }, KILL_GRACE_MS).unref();
+function hasExited(child: ChildProcess): boolean {
+  return child.exitCode !== null || child.signalCode !== null;
 }
