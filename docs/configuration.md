@@ -108,7 +108,7 @@ Both use the local time of the worker process (see `TZ` in [the droplet runbook]
 
 ## Timeouts and retries
 
-- `sessionTimeoutMs` kills a session that runs longer: SIGTERM, then SIGKILL after 5 s. A timeout counts as a **transient** failure.
+- `sessionTimeoutMs` kills a session that runs longer, with the MCP servers and shells it started: SIGTERM, then SIGKILL after 5 s ([details](deployment.md#session-launcher)). A timeout counts as a **transient** failure.
 - A `fable` session on a hard task can run for many minutes. Leave `executor.sessionTimeoutMs` unset or generous when the executor runs on `fable`. Raise the summarizer's 5-minute default before switching it to `fable`.
 - The executor retries transient failures (timeouts, known error patterns in the result) up to `maxTaskAttempts`, waiting `retryDelayMs` between attempts. Other failures mark the task `failed` at once.
 - `/retry <task-id>` in the TUI, or `kikimora tasks retry <id>`, requeues a failed task with its attempt count reset.
@@ -135,5 +135,7 @@ your-project/
 ```
 
 Commit `settings.json` and `prompts/` if your team shares them. `data/` and `logs/` are runtime state, excluded by `.kikimora/.gitignore`, which the wizard and `kikimora init` write.
+
+To back up `memory.db` without stopping the worker, use [`kikimora memory export`](control.md#commands); copying the file while it is open can miss recent entries.
 
 Tasks live in `data/tasks.json`. Tasks left `in_progress` by a crash are reset to `pending` on the next start. Each session also writes a log under `logs/` that records what the agent did ([session transcripts](deployment.md#session-transcripts)).

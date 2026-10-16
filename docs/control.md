@@ -31,6 +31,7 @@ Commands exit `1` when no worker is running, when the worker rejects the request
 | `kikimora context set [file\|-]`                                                            | replace it from a file or stdin; empty input clears it                                                  |
 | `kikimora memory search <query> [--limit <n>] [--json]`                                     | full-text search over task summaries (1 to 100 entries, default 10)                                     |
 | `kikimora memory recent [--limit <n>] [--json]`                                             | the newest task summaries (same limits)                                                                 |
+| `kikimora memory export <path> [--json]`                                                    | copy `memory.db` to a new file while the worker runs; see below                                         |
 | `kikimora sessions list [--agent <a>] [--task <id>] [--before <ts>] [--limit <n>] [--json]` | the indexed sessions, newest first (1 to 100 entries, default 20)                                       |
 | `kikimora sessions show <id> [--log] [--json]`                                              | one session's metadata and the paths of its two transcript files; `--log` prints the readable one       |
 
@@ -39,6 +40,8 @@ Commands exit `1` when no worker is running, when the worker rejects the request
 - `kikimora version` describes the _running_ worker and fails without one. `kikimora --version` prints the installed CLI's version and needs no worker.
 
 `kikimora check` asks the monitor for a cycle now. A sleeping monitor starts one at once, also outside its working hours, and then goes back to its schedule: the next cycle comes one interval later, and outside the working hours it waits for the window again. When a cycle is already running, the command says which one and requests nothing. It is refused, with exit code `1`, while the monitor is paused, while the worker drains and while the usage limit holds; over the socket a refusal is a successful reply with `state` `refused`, a `reason` and, for a usage limit, `until`, so a client can tell the cases apart. The dashboard command `/check` does the same.
+
+`kikimora memory export` writes a copy of `.kikimora/data/memory.db`, task summaries and the session index, while the agents keep working. The worker takes a consistent snapshot with SQLite's `VACUUM INTO`, which includes writes that have not reached the main file yet, checks it with `PRAGMA quick_check` and moves it into place, so a half-written file never appears under the target name. The path is resolved on the worker's machine and must not exist; missing directories are created. Kikimora opens the copy as its `memory.db` on any machine.
 
 `kikimora drain` lets the running sessions finish and then stops the worker. [Stopping the worker](deployment.md#stopping-the-worker) describes what it waits for, its deadline and the `SIGTERM` equivalent.
 
@@ -85,6 +88,7 @@ Each connection carries one request and one response:
 | `{"cmd":"tasks.cancel","id":"…"}`                                               | `true` when a pending task was cancelled                                                                                                |
 | `{"cmd":"memory.search","query":"…","limit"?:1-100}`                            | task summaries, best match first                                                                                                        |
 | `{"cmd":"memory.recent","limit"?:1-100}`                                        | the newest task summaries                                                                                                               |
+| `{"cmd":"memory.export","path":"…"}`                                            | `{"path":"…","bytes":…,"entries":…}`; `path` is absolute on the worker's machine and must not exist                                     |
 | `{"cmd":"prompt.get","agent":"monitor"\|"executor"}`                            | `{"agent":…,"content":"…"}`                                                                                                             |
 | `{"cmd":"prompt.set","agent":…,"content":"…"}`                                  | none; blank `content` is refused                                                                                                        |
 | `{"cmd":"context.get"}`                                                         | `{"content":"…"}`; `""` when there is no file                                                                                           |
@@ -118,7 +122,8 @@ With `KIKIMORA_ADMISSION=external` a supervisor decides when sessions start, so 
 - `admission.grant` with that ticket starts the session. The agent holds the slot through the session and, for the executor, the memory summary, and gives it back before a retry backoff.
 - A pause, a drain or a shutdown ends the wait without a session. A grant that lands together with a pause, a usage limit or rejected credentials is given back unused.
 - A grant for the ticket the agent already holds answers `granted: true` again, so a supervisor can retry a grant whose reply it lost. Any other ticket answers `stale`.
-- `status` carries `admission`: the `mode` and, per agent, `state` (`idle`, `waiting` or `holding`), `seq`, and while not idle the `ticket`, `since` and the executor's `taskId`. `seq` grows with every change of either agent, so a supervisor keeps the newest of two readings. The `admission.*` [log events](deployment.md#log-events) carry the same `seq`.
+- `status` carries `admission`: the `mode` and, per agent, `state` (`idle`, `waiting` or `holding`), `seq`, while not idle the `ticket`, `since` and the executor's `taskId`, and while a session process runs in a held slot its `pid`. `seq` grows with every change of either agent, the `pid` coming and going included, so a supervisor keeps the newest of two readings. The `admission.*` and `session.spawned` [log events](deployment.md#log-events) carry the same `seq`.
+- A [session launcher](deployment.md#session-launcher) receives the ticket and the pool of the session it starts, so it can place the session before Claude Code runs.
 
 Nothing grants a ticket in `local` mode, and nothing but a supervisor does in `external` mode: an agent left without one waits.
 

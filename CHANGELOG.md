@@ -7,6 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `KIKIMORA_SESSION_LAUNCHER` starts every monitor, executor and summarizer session through a command of yours, given as a JSON array; the launcher learns the session's role, admission pool and ticket from `KIKIMORA_SESSION_ROLE`, `KIKIMORA_ADMISSION_POOL` and `KIKIMORA_ADMISSION_TICKET`, so a supervisor can place each session in a resource pool before Claude Code starts. Without the variable sessions start as before.
+- The new `session.spawned` log event reports each session's pid, role, pool and ticket, and `status` shows the pid on a held admission slot while the session process runs.
+- `kikimora memory export <path>` and the control request `memory.export` copy `memory.db`, the session index included, to a new file while the agents keep working, as a consistent SQLite snapshot that Kikimora opens on any machine.
+
+### Changed
+
+- A session that times out, is aborted or outlives a drain deadline is stopped together with the MCP servers, shells and other processes it started: on Linux and macOS through its own process group, on Windows with `taskkill /T`. Closing the terminal (`SIGHUP`) now stops the worker the way Ctrl+C does.
+
 ## [0.11.0] - 2026-10-15
 
 ### Added
