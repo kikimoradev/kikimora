@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.12.0] - 2026-10-16
+
 ### Added
 
 - `KIKIMORA_SESSION_LAUNCHER` starts every monitor, executor and summarizer session through a command of yours, given as a JSON array; the launcher learns the session's role, admission pool and ticket from `KIKIMORA_SESSION_ROLE`, `KIKIMORA_ADMISSION_POOL` and `KIKIMORA_ADMISSION_TICKET`, so a supervisor can place each session in a resource pool before Claude Code starts. Without the variable sessions start as before.
@@ -260,7 +262,8 @@ Initial release.
 - Non-interactive `kikimora init` for provisioning, plus a first-run wizard in the terminal.
 - Reference `Dockerfile` and `docker-compose.yml`.
 
-[Unreleased]: https://github.com/kikimoradev/kikimora/compare/v0.11.0...HEAD
+[Unreleased]: https://github.com/kikimoradev/kikimora/compare/v0.12.0...HEAD
+[0.12.0]: https://github.com/kikimoradev/kikimora/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/kikimoradev/kikimora/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/kikimoradev/kikimora/compare/v0.9.2...v0.10.0
 [0.9.2]: https://github.com/kikimoradev/kikimora/compare/v0.9.1...v0.9.2
