@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.13.0] - 2026-10-16
+
 ### Added
 
 - A [session launcher](docs/deployment.md#session-launcher) can refuse a session by exiting with 75 before Claude Code starts. The executor then returns the task to the queue without spending an attempt and tries again after 30 s, and the monitor repeats the cycle after 30 s, a requested check included; before, the task failed for good.
@@ -268,7 +270,8 @@ Initial release.
 - Non-interactive `kikimora init` for provisioning, plus a first-run wizard in the terminal.
 - Reference `Dockerfile` and `docker-compose.yml`.
 
-[Unreleased]: https://github.com/kikimoradev/kikimora/compare/v0.12.0...HEAD
+[Unreleased]: https://github.com/kikimoradev/kikimora/compare/v0.13.0...HEAD
+[0.13.0]: https://github.com/kikimoradev/kikimora/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/kikimoradev/kikimora/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/kikimoradev/kikimora/compare/v0.10.0...v0.11.0
 [0.10.0]: https://github.com/kikimoradev/kikimora/compare/v0.9.2...v0.10.0
