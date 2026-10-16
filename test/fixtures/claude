@@ -210,6 +210,10 @@ function run() {
       setInterval(() => {}, 1000);
       void spawnTree().then(emitInit);
       break;
+    case "exit_code_after_init":
+      emitInit();
+      process.stdout.write("", () => process.exit(Number(pick("FAKE_CLAUDE_EXIT_CODE"))));
+      break;
     case "killed_after_init":
       emitInit();
       process.stdout.write("", () => process.kill(process.pid, "SIGKILL"));

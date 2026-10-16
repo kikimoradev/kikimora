@@ -642,6 +642,26 @@ describe("runSession reading the launcher's verdict", () => {
     15_000,
   );
 
+  posixOnly(
+    "keeps exit code 137 without a launcher an ordinary exit",
+    async () => {
+      const spec = launchedSpec(
+        "exit_code_after_init",
+        { FAKE_CLAUDE_EXIT_CODE: "137" },
+        { launcher: NO_LAUNCHER },
+      );
+
+      const result = await runSession(spec, new AbortController().signal);
+
+      expect(result).toMatchObject({
+        ok: false,
+        failureReason: "exit",
+        error: "Process exited with code 137",
+      });
+    },
+    15_000,
+  );
+
   it("keeps a session the worker stopped itself a timeout, whatever the launcher reports", async () => {
     const spec = launchedSpec(
       "hang_after_init",
