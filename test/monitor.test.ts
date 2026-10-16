@@ -47,6 +47,15 @@ function ok(resultText?: string): SessionResult {
   return { ok: true, durationMs: 0, resultText };
 }
 
+function launcherRefusal(): SessionResult {
+  return {
+    ok: false,
+    durationMs: 30_000,
+    failureReason: "launcherRefused",
+    error: "Session launcher refused the session (exit code 75)",
+  };
+}
+
 function fakeStore(addTasks = vi.fn()): { store: TaskStore; addTasks: typeof addTasks } {
   addTasks.mockImplementation((tasks: Task[]) =>
     Promise.resolve(
@@ -343,6 +352,153 @@ describe("runMonitorLoop", () => {
 
     await vi.advanceTimersByTimeAsync(63_000);
     expect(mocks.runSession).toHaveBeenCalledTimes(2);
+
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(INTERVAL);
+    await promise;
+  });
+
+  it("a launcher refusal repeats the cycle after the backoff instead of the interval", async () => {
+    mocks.runSession
+      .mockResolvedValueOnce(launcherRefusal())
+      .mockResolvedValue(ok(report()));
+    const { store } = fakeStore();
+    const controller = new AbortController();
+
+    const promise = runMonitorLoop(
+      buildConfig(),
+      store,
+      new Waker(),
+      spy.reporter,
+      noopController(),
+      buildGates(),
+      controller.signal,
+    );
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(spy.cycleFinished).toHaveBeenCalledWith({
+      cycle: 1,
+      ok: false,
+      durationMs: 30_000,
+      addedTasks: 0,
+      skippedDuplicates: 0,
+      error: "session launcher refused the session, cycle requeued",
+      failureReason: "launcherRefused",
+    });
+    expect(spy.sleepUntil).toHaveBeenCalledWith(new Date(Date.now() + 30_000 - 1));
+
+    await vi.advanceTimersByTimeAsync(29_998);
+    expect(mocks.runSession).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(2);
+    expect(mocks.runSession).toHaveBeenCalledTimes(2);
+    expect(spy.cycleFinished).toHaveBeenLastCalledWith(
+      expect.objectContaining({ cycle: 2, ok: true }),
+    );
+
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(INTERVAL);
+    await promise;
+  });
+
+  it("a launcher refusal never waits longer than the regular interval", async () => {
+    mocks.runSession
+      .mockResolvedValueOnce(launcherRefusal())
+      .mockResolvedValue(ok(report()));
+    const { store } = fakeStore();
+    const controller = new AbortController();
+    const base = buildConfig();
+    const config = buildConfig({ monitor: { ...base.monitor, intervalMs: 10_000 } });
+
+    const promise = runMonitorLoop(
+      config,
+      store,
+      new Waker(),
+      spy.reporter,
+      noopController(),
+      buildGates(),
+      controller.signal,
+    );
+    await vi.advanceTimersByTimeAsync(10_001);
+
+    expect(mocks.runSession).toHaveBeenCalledTimes(2);
+
+    controller.abort();
+    await vi.advanceTimersByTimeAsync(INTERVAL);
+    await promise;
+  });
+
+  it("a requested run the launcher refused is repeated even outside active hours", async () => {
+    vi.setSystemTime(new Date("2026-07-01T06:00:00"));
+    mocks.runSession
+      .mockResolvedValueOnce(launcherRefusal())
+      .mockResolvedValue(ok(report()));
+    const { store } = fakeStore();
+    const abort = new AbortController();
+    const control = noopController();
+    const base = buildConfig();
+    const config = buildConfig({
+      monitor: {
+        ...base.monitor,
+        schedule: { startMinute: 480, endMinute: 1080, days: [1, 2, 3, 4, 5] },
+      },
+    });
+
+    const promise = runMonitorLoop(
+      config,
+      store,
+      new Waker(),
+      spy.reporter,
+      control,
+      buildGates(),
+      abort.signal,
+    );
+    control.requestRun();
+    await vi.advanceTimersByTimeAsync(1);
+    expect(mocks.runSession).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(30_000);
+    expect(mocks.runSession).toHaveBeenCalledTimes(2);
+    expect(control.runRequested).toBe(false);
+
+    await vi.advanceTimersByTimeAsync(INTERVAL + 1);
+    expect(mocks.runSession).toHaveBeenCalledTimes(2);
+
+    abort.abort();
+    await vi.advanceTimersByTimeAsync(INTERVAL);
+    await promise;
+  });
+
+  it("a failed cycle carries the session's failure reason", async () => {
+    mocks.runSession.mockResolvedValueOnce({
+      ok: false,
+      durationMs: 10,
+      failureReason: "poolMemoryLimit",
+      error: "Session killed by the pool memory limit",
+      sessionId: "sess-oom",
+    } satisfies SessionResult);
+    const { store } = fakeStore();
+    const controller = new AbortController();
+
+    const promise = runMonitorLoop(
+      buildConfig(),
+      store,
+      new Waker(),
+      spy.reporter,
+      noopController(),
+      buildGates(),
+      controller.signal,
+    );
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(spy.cycleFinished).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ok: false,
+        error: "Session killed by the pool memory limit",
+        failureReason: "poolMemoryLimit",
+        sessionId: "sess-oom",
+      }),
+    );
+    expect(spy.sleepUntil).toHaveBeenCalledWith(new Date(Date.now() + INTERVAL - 1));
 
     controller.abort();
     await vi.advanceTimersByTimeAsync(INTERVAL);

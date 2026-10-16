@@ -64,29 +64,28 @@ export class SessionSummarizer implements TaskSummarizer {
     const startedAt = Date.now();
     const finished = (
       ok: boolean,
-      error?: string,
-      costUsd?: number,
-      sessionId?: string,
+      details: Pick<
+        SummaryOutcome,
+        "error" | "costUsd" | "sessionId" | "failureReason"
+      > = {},
     ): void => {
       reporter.summaryFinished({
         taskId: task.id,
         ok,
         durationMs: Date.now() - startedAt,
-        costUsd,
-        error,
-        sessionId,
+        ...details,
       });
     };
 
     try {
       const sessionId = result.sessionId;
       if (sessionId === undefined) {
-        finished(false, "executor session has no id — no log");
+        finished(false, { error: "executor session has no id — no log" });
         return;
       }
       const logPath = await this.deps.resolveLogPath(sessionId);
       if (logPath === undefined) {
-        finished(false, "executor session log file not found");
+        finished(false, { error: "executor session log file not found" });
         return;
       }
 
@@ -132,24 +131,24 @@ export class SessionSummarizer implements TaskSummarizer {
         const auth = detectAuthFailure(sessionResult);
         if (auth) {
           this.deps.gates.auth.engage(auth);
-          finished(
-            false,
-            `authentication failed — ${auth.reason}`,
-            sessionResult.costUsd,
-            sessionResult.sessionId,
-          );
+          finished(false, {
+            error: `authentication failed — ${auth.reason}`,
+            costUsd: sessionResult.costUsd,
+            sessionId: sessionResult.sessionId,
+            failureReason: sessionResult.failureReason,
+          });
           return;
         }
         const limit = detectUsageLimit(sessionResult);
         if (limit) this.deps.gates.limit.engage(limit, Date.now());
-        finished(
-          false,
-          limit
+        finished(false, {
+          error: limit
             ? "usage limit reached"
             : (sessionResult.error ?? "unknown summarizer session error"),
-          sessionResult.costUsd,
-          sessionResult.sessionId,
-        );
+          costUsd: sessionResult.costUsd,
+          sessionId: sessionResult.sessionId,
+          failureReason: sessionResult.failureReason,
+        });
         return;
       }
 
@@ -158,12 +157,11 @@ export class SessionSummarizer implements TaskSummarizer {
           ? null
           : parseSummary(sessionResult.resultText);
       if (report === null) {
-        finished(
-          false,
-          "invalid summary report",
-          sessionResult.costUsd,
-          sessionResult.sessionId,
-        );
+        finished(false, {
+          error: "invalid summary report",
+          costUsd: sessionResult.costUsd,
+          sessionId: sessionResult.sessionId,
+        });
         return;
       }
 
@@ -178,9 +176,12 @@ export class SessionSummarizer implements TaskSummarizer {
         sessionId,
         createdAt: new Date().toISOString(),
       });
-      finished(true, undefined, sessionResult.costUsd, sessionResult.sessionId);
+      finished(true, {
+        costUsd: sessionResult.costUsd,
+        sessionId: sessionResult.sessionId,
+      });
     } catch (err) {
-      finished(false, err instanceof Error ? err.message : String(err));
+      finished(false, { error: err instanceof Error ? err.message : String(err) });
     }
   }
 }

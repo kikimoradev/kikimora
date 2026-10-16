@@ -233,6 +233,34 @@ describe("SessionSummarizer", () => {
     );
   });
 
+  it("reports why the summarizer session failed", async () => {
+    mocks.runSession.mockResolvedValue(
+      summarySessionResult({
+        ok: false,
+        error: "Session launcher refused the session (exit code 75)",
+        resultText: undefined,
+        sessionId: undefined,
+        failureReason: "launcherRefused",
+      }),
+    );
+
+    await buildSummarizer().summarize(
+      task(),
+      executorResult(),
+      { willRetry: false, lease: LOCAL_LEASE },
+      new AbortController().signal,
+    );
+
+    expect(spy.summaryFinished).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ok: false,
+        error: "Session launcher refused the session (exit code 75)",
+        failureReason: "launcherRefused",
+      }),
+    );
+    expect(gates.auth.blocked).toBeNull();
+  });
+
   it("a usage-limit failure engages the shared limit gate", async () => {
     mocks.runSession.mockResolvedValue(
       summarySessionResult({

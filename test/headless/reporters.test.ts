@@ -175,12 +175,13 @@ describe("createHeadlessReporters", () => {
       addedTasks: 0,
       skippedDuplicates: 0,
       error: "session failed",
+      failureReason: "exit",
     });
 
     expect(events[0]).toMatchObject({
       level: "error",
       event: "cycle.finished",
-      fields: { ok: false, error: "session failed" },
+      fields: { ok: false, error: "session failed", failureReason: "exit" },
     });
     expect(events[0]?.fields).not.toHaveProperty("costUsd");
   });
@@ -243,7 +244,8 @@ describe("createHeadlessReporters", () => {
       willRetry: true,
       attempt: 1,
       maxAttempts: 3,
-      error: "timeout",
+      error: "Session killed by the pool memory limit",
+      failureReason: "poolMemoryLimit",
     });
     executor.taskFinished({ ...base, ok: false, error: "fatal" });
 
@@ -260,8 +262,10 @@ describe("createHeadlessReporters", () => {
       willRetry: true,
       attempt: 1,
       maxAttempts: 3,
-      error: "timeout",
+      error: "Session killed by the pool memory limit",
+      failureReason: "poolMemoryLimit",
     });
+    expect(events[2]?.fields).not.toHaveProperty("failureReason");
   });
 
   it("keeps executor summary callbacks silent and routes them via the summarizer reporter", () => {

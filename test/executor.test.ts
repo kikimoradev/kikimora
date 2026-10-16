@@ -693,6 +693,144 @@ describe("runExecutorLoop", () => {
     await promise;
   });
 
+  it("a launcher refusal returns the task without using an attempt and retries it after the backoff", async () => {
+    vi.useFakeTimers();
+    const { takeNext, peekNext } = scriptedTakes(
+      [
+        { ...task("unplaced"), attempts: 1 },
+        { ...task("unplaced"), attempts: 1 },
+      ],
+      undefined,
+    );
+    const release = vi.fn().mockResolvedValue(undefined);
+    const complete = vi.fn().mockResolvedValue(undefined);
+    const fail = vi.fn().mockResolvedValue(undefined);
+    const requeue = vi.fn().mockResolvedValue(undefined);
+    const store = {
+      takeNext,
+      peekNext,
+      release,
+      complete,
+      fail,
+      requeue,
+    } as unknown as TaskStore;
+    const controller = new AbortController();
+    mocks.runSession
+      .mockResolvedValueOnce({
+        ok: false,
+        durationMs: 30_000,
+        failureReason: "launcherRefused",
+        error: "Session launcher refused the session (exit code 75)",
+      } satisfies SessionResult)
+      .mockResolvedValue(ok());
+
+    const promise = runExecutorLoop(
+      buildConfig(),
+      store,
+      new Waker(),
+      spy.reporter,
+      summarizerSpy.summarizer,
+      noopController(),
+      buildGates(),
+      controller.signal,
+    );
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(release).toHaveBeenCalledWith(
+      "unplaced",
+      "session launcher refused the session",
+    );
+    expect(fail).not.toHaveBeenCalled();
+    expect(requeue).not.toHaveBeenCalled();
+    expect(summarizerSpy.summarize).not.toHaveBeenCalled();
+    expect(spy.taskFinished).toHaveBeenCalledWith({
+      taskId: "unplaced",
+      title: "Task unplaced",
+      ok: false,
+      durationMs: 30_000,
+      error: "session launcher refused the session, task requeued",
+      failureReason: "launcherRefused",
+      willRetry: true,
+    });
+    const [, resumeAt] = spy.retryScheduled.mock.calls[0] as [Task, Date];
+    expect(resumeAt.getTime() - Date.now()).toBeGreaterThan(29_000);
+
+    await vi.advanceTimersByTimeAsync(29_000);
+    expect(takeNext).toHaveBeenCalledTimes(1);
+
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(takeNext).toHaveBeenCalledTimes(2);
+    expect(complete).toHaveBeenCalledWith("unplaced");
+
+    controller.abort();
+    await promise;
+  });
+
+  it("a session killed by the pool memory limit is retried as a transient failure and says why", async () => {
+    const { takeNext, peekNext } = scriptedTakes(
+      [
+        { ...task("hungry"), attempts: 1 },
+        { ...task("hungry"), attempts: 2 },
+      ],
+      undefined,
+    );
+    const complete = vi.fn().mockResolvedValue(undefined);
+    const fail = vi.fn().mockResolvedValue(undefined);
+    const requeue = vi.fn().mockResolvedValue(undefined);
+    const store = { takeNext, peekNext, complete, fail, requeue } as unknown as TaskStore;
+    const controller = new AbortController();
+    mocks.runSession
+      .mockResolvedValueOnce({
+        ok: false,
+        durationMs: 10,
+        sessionId: "sess-oom",
+        failureReason: "poolMemoryLimit",
+        error: "Session killed by the pool memory limit",
+      } satisfies SessionResult)
+      .mockResolvedValue(ok());
+
+    const promise = runExecutorLoop(
+      buildConfig(),
+      store,
+      new Waker(),
+      spy.reporter,
+      summarizerSpy.summarizer,
+      noopController(),
+      buildGates(),
+      controller.signal,
+    );
+    await vi.waitFor(() => expect(complete).toHaveBeenCalledWith("hungry"));
+
+    expect(requeue).toHaveBeenCalledWith(
+      "hungry",
+      "Session killed by the pool memory limit",
+    );
+    expect(fail).not.toHaveBeenCalled();
+    expect(spy.taskFinished).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        taskId: "hungry",
+        ok: false,
+        error: "Session killed by the pool memory limit",
+        failureReason: "poolMemoryLimit",
+        willRetry: true,
+        attempt: 1,
+        maxAttempts: 3,
+        sessionId: "sess-oom",
+      }),
+    );
+    expect(summarizerSpy.summarize).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ id: "hungry" }),
+      expect.objectContaining({ failureReason: "poolMemoryLimit" }),
+      expect.objectContaining({ willRetry: true }),
+      expect.anything(),
+    );
+
+    controller.abort();
+    await promise;
+  });
+
   it("an auth failure releases the task, skips the summarizer and parks both agents until resume", async () => {
     vi.useFakeTimers();
     const { takeNext, peekNext } = scriptedTakes(
@@ -1003,6 +1141,52 @@ describe("runExecutorLoop", () => {
 
       const promise = runExecutorLoop(
         config,
+        store,
+        new Waker(),
+        spy.reporter,
+        summarizerSpy.summarizer,
+        noopController(),
+        buildGates({ admission: admission.gate }),
+        abort.signal,
+      );
+      await vi.advanceTimersByTimeAsync(1);
+      admission.gate.grant("executor", heldTicket(admission.gate, "executor"));
+      await vi.advanceTimersByTimeAsync(1);
+
+      expect(spy.retryScheduled).toHaveBeenCalledTimes(1);
+      expect(admission.gate.status().executor.state).toBe("idle");
+      expect(admission.changes.map((change) => change.kind)).toEqual([
+        "granted",
+        "released",
+      ]);
+
+      abort.abort();
+      await promise;
+    });
+
+    it("gives the slot back before the launcher refusal backoff", async () => {
+      vi.useFakeTimers();
+      const { takeNext, peekNext } = scriptedTakes(
+        [{ ...task("unplaced"), attempts: 1 }],
+        undefined,
+      );
+      const store = {
+        takeNext,
+        peekNext,
+        release: vi.fn().mockResolvedValue(undefined),
+        complete: vi.fn(),
+        fail: vi.fn(),
+      } as unknown as TaskStore;
+      const admission = externalAdmission();
+      const abort = new AbortController();
+      mocks.runSession.mockResolvedValue({
+        ok: false,
+        durationMs: 10,
+        failureReason: "launcherRefused",
+      } satisfies SessionResult);
+
+      const promise = runExecutorLoop(
+        buildConfig(),
         store,
         new Waker(),
         spy.reporter,
@@ -1338,11 +1522,12 @@ describe("runExecutorLoop while a session is being prepared", () => {
 });
 
 describe("isTransientFailure", () => {
-  it("a session timeout is transient", () => {
-    expect(
-      isTransientFailure({ ok: false, durationMs: 1, failureReason: "timeout" }),
-    ).toBe(true);
-  });
+  it.each(["timeout", "launcherRefused", "poolMemoryLimit"] as const)(
+    "a session ended by %s is transient",
+    (failureReason) => {
+      expect(isTransientFailure({ ok: false, durationMs: 1, failureReason })).toBe(true);
+    },
+  );
 
   it("is_error with an API/connection error is transient", () => {
     for (const text of [

@@ -7,18 +7,25 @@ import { writeMcpConfig } from "./mcp-config.js";
 import type { TaskSummarizer } from "./memory/summarizer.js";
 import { composePrompt } from "./prompt-compose.js";
 import { runSession } from "./runner.js";
+import { LAUNCHER_REFUSAL_BACKOFF_MS } from "./session-launcher.js";
 import type { SessionRecorder } from "./sessions/index.js";
 import type { ExecutorReporter } from "./status.js";
 import type { TaskStore } from "./tasks.js";
-import type { SessionResult, Task, WorkerConfig } from "./types.js";
+import type { SessionFailureReason, SessionResult, Task, WorkerConfig } from "./types.js";
 import { detectUsageLimit } from "./usage-limit.js";
 import type { Waker } from "./waker.js";
 
 const TRANSIENT_RESULT_PATTERN =
   /API Error|Connection (closed|error|reset)|ECONNRESET|ETIMEDOUT|ENOTFOUND|EPIPE|socket hang up|overloaded|rate.?limit|Request timed out/i;
 
+const TRANSIENT_FAILURE_REASONS: ReadonlySet<SessionFailureReason | undefined> = new Set([
+  "timeout",
+  "launcherRefused",
+  "poolMemoryLimit",
+]);
+
 export function isTransientFailure(result: SessionResult): boolean {
-  if (result.failureReason === "timeout") return true;
+  if (TRANSIENT_FAILURE_REASONS.has(result.failureReason)) return true;
   if (result.failureReason !== "isError") return false;
   return TRANSIENT_RESULT_PATTERN.test(result.resultText ?? "");
 }
@@ -153,6 +160,21 @@ export async function runExecutorLoop(
           await summarizer
             .summarize(task, result, { willRetry: false, lease }, signal)
             .catch(() => undefined);
+        } else if (result.failureReason === "launcherRefused") {
+          await store.release(task.id, "session launcher refused the session");
+          reporter.taskFinished({
+            taskId: task.id,
+            title: task.title,
+            ok: false,
+            durationMs: result.durationMs,
+            error: "session launcher refused the session, task requeued",
+            failureReason: result.failureReason,
+            willRetry: true,
+          });
+          backoff = {
+            task,
+            resumeAt: new Date(Date.now() + LAUNCHER_REFUSAL_BACKOFF_MS),
+          };
         } else {
           const error = result.error ?? "unknown error";
           const auth = detectAuthFailure(result);
@@ -167,6 +189,7 @@ export async function runExecutorLoop(
               costUsd: result.costUsd,
               numTurns: result.numTurns,
               error: "authentication failed — task requeued",
+              failureReason: result.failureReason,
               willRetry: true,
               sessionId: result.sessionId,
             });
@@ -184,6 +207,7 @@ export async function runExecutorLoop(
               costUsd: result.costUsd,
               numTurns: result.numTurns,
               error: "usage limit reached — task requeued",
+              failureReason: result.failureReason,
               willRetry: true,
               sessionId: result.sessionId,
             });
@@ -204,6 +228,7 @@ export async function runExecutorLoop(
             costUsd: result.costUsd,
             numTurns: result.numTurns,
             error,
+            failureReason: result.failureReason,
             willRetry,
             attempt: task.attempts,
             maxAttempts: executor.maxTaskAttempts,
