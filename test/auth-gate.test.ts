@@ -91,13 +91,18 @@ describe("detectAuthFailure", () => {
     ).toBeNull();
   });
 
-  it("aborted and unspawnable sessions are never auth failures", () => {
+  it("aborted, unspawnable and refused sessions are never auth failures", () => {
     expect(
       detectAuthFailure(failure({ failureReason: "abort", resultText: "Not logged in" })),
     ).toBeNull();
     expect(
       detectAuthFailure(
         failure({ failureReason: "spawn", error: "Failed to start: Not logged in" }),
+      ),
+    ).toBeNull();
+    expect(
+      detectAuthFailure(
+        failure({ failureReason: "launcherRefused", error: "Not logged in to the pool" }),
       ),
     ).toBeNull();
   });

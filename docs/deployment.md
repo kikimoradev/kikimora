@@ -46,28 +46,28 @@ Each JSON line carries an envelope plus the event's own fields:
 }
 ```
 
-| Event                                                              | Fields                                                                                                                                  |
-| ------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------- |
-| `worker.started`                                                   | `version`, `claudeVersion` (when readable), `nodeVersion`, `authKind`, `pid`, `projectDir`, `paused` (when started paused)              |
-| `worker.draining`                                                  | `reason` (`drain`, or `SIGTERM` under a shutdown grace), `timeoutMs` (when the drain has a deadline)                                    |
-| `worker.stopped`                                                   | `signal` (when stopped by SIGINT/SIGTERM), `drained` (exited through a drain), `forced` (a deadline or a signal cut the drain short)    |
-| `control.changed`                                                  | `state`: an agent moved between `running`, `pausing` and `paused`                                                                       |
-| `update.available` / `update.installed`                            | `from`, `to`; `update.available` adds `installError` when a background install failed                                                   |
-| `cycle.started` / `cycle.finished`                                 | `cycle`; finished adds `ok`, `durationMs`, `costUsd`, `addedTasks`, `skippedDuplicates`, `error`, `sessionId`                           |
-| `monitor.sleeping` / `monitor.offHours` / `monitor.limitWait`      | `nextCycleAt` / `resumeAt`                                                                                                              |
-| `task.started` / `task.finished`                                   | `taskId`, `title`; finished adds `ok`, `durationMs`, `costUsd`, `numTurns`, `willRetry`, `attempt`, `maxAttempts`, `error`, `sessionId` |
-| `task.retryScheduled`                                              | `taskId`, `resumeAt`                                                                                                                    |
-| `executor.waiting` / `executor.limitWait`                          | none / `resumeAt`                                                                                                                       |
-| `monitor.authBlocked` / `executor.authBlocked`                     | `reason`: credentials were rejected; both agents stay paused until `kikimora resume`                                                    |
-| `monitor.admissionWait` / `executor.admissionWait`                 | `ticket`, `since`, `seq`; the executor adds the `taskId` it waits to start                                                              |
-| `admission.granted` / `admission.released` / `admission.cancelled` | `ticket`, `seq`: a slot was granted, given back after the session, or a wait ended without a grant                                      |
-| `summary.started` / `summary.finished`                             | `taskId`; finished adds `ok`, `durationMs`, `costUsd`, `error`, `sessionId`                                                             |
-| `session.spawned`                                                  | `pid`, `role`, `pool`, plus `ticket` and `seq` under external admission: the session process started, before Claude Code reports in     |
-| `session.init`                                                     | `model`, `sessionId`, plus `taskId` (executor, summarizer) or `cycle` (monitor)                                                         |
-| `session.stderr` / `session.procError` / `session.killed`          | `line` / `message` / `reason`                                                                                                           |
-| `session.text` / `session.tool` / `session.toolError`              | only with `--verbose`                                                                                                                   |
+| Event                                                              | Fields                                                                                                                                                   |
+| ------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `worker.started`                                                   | `version`, `claudeVersion` (when readable), `nodeVersion`, `authKind`, `pid`, `projectDir`, `paused` (when started paused)                               |
+| `worker.draining`                                                  | `reason` (`drain`, or `SIGTERM` under a shutdown grace), `timeoutMs` (when the drain has a deadline)                                                     |
+| `worker.stopped`                                                   | `signal` (when stopped by SIGINT/SIGTERM), `drained` (exited through a drain), `forced` (a deadline or a signal cut the drain short)                     |
+| `control.changed`                                                  | `state`: an agent moved between `running`, `pausing` and `paused`                                                                                        |
+| `update.available` / `update.installed`                            | `from`, `to`; `update.available` adds `installError` when a background install failed                                                                    |
+| `cycle.started` / `cycle.finished`                                 | `cycle`; finished adds `ok`, `durationMs`, `costUsd`, `addedTasks`, `skippedDuplicates`, `error`, `failureReason`, `sessionId`                           |
+| `monitor.sleeping` / `monitor.offHours` / `monitor.limitWait`      | `nextCycleAt` / `resumeAt`                                                                                                                               |
+| `task.started` / `task.finished`                                   | `taskId`, `title`; finished adds `ok`, `durationMs`, `costUsd`, `numTurns`, `willRetry`, `attempt`, `maxAttempts`, `error`, `failureReason`, `sessionId` |
+| `task.retryScheduled`                                              | `taskId`, `resumeAt`                                                                                                                                     |
+| `executor.waiting` / `executor.limitWait`                          | none / `resumeAt`                                                                                                                                        |
+| `monitor.authBlocked` / `executor.authBlocked`                     | `reason`: credentials were rejected; both agents stay paused until `kikimora resume`                                                                     |
+| `monitor.admissionWait` / `executor.admissionWait`                 | `ticket`, `since`, `seq`; the executor adds the `taskId` it waits to start                                                                               |
+| `admission.granted` / `admission.released` / `admission.cancelled` | `ticket`, `seq`: a slot was granted, given back after the session, or a wait ended without a grant                                                       |
+| `summary.started` / `summary.finished`                             | `taskId`; finished adds `ok`, `durationMs`, `costUsd`, `error`, `failureReason`, `sessionId`                                                             |
+| `session.spawned`                                                  | `pid`, `role`, `pool`, plus `ticket` and `seq` under external admission: the session process started, before Claude Code reports in                      |
+| `session.init`                                                     | `model`, `sessionId`, plus `taskId` (executor, summarizer) or `cycle` (monitor)                                                                          |
+| `session.stderr` / `session.procError` / `session.killed`          | `line` / `message` / `reason`                                                                                                                            |
+| `session.text` / `session.tool` / `session.toolError`              | only with `--verbose`                                                                                                                                    |
 
-Unset optional fields are omitted; they are not written as `null`. A `*.finished` event carries `sessionId` when Claude Code reported a result, which links the outcome to the session transcript below. A session killed by a timeout or a shutdown has no `sessionId` on its `*.finished` event.
+Unset optional fields are omitted; they are not written as `null`. A `*.finished` event carries `sessionId` when Claude Code reported a result, which links the outcome to the session transcript below. A session killed by a timeout or a shutdown has no `sessionId` on its `*.finished` event. A failed session gives its `*.finished` event a `failureReason`: `timeout`, `abort`, `isError` (Claude Code reported an error result), `exit`, `spawn`, or one of the two a [session launcher](#session-launcher) reports, `launcherRefused` and `poolMemoryLimit`.
 
 ## Session transcripts
 
@@ -104,6 +104,18 @@ The launcher starts with the worker's environment plus three variables, and must
 - The worker refuses to start when the value is not such an array, or when preflight cannot find the first element as a file or in `PATH`.
 - `session.spawned` logs the pid of the process the worker started, which is the launcher's, and `status` shows it on the held slot.
 - Without the variable a session starts as `claude` directly, with the worker's environment unchanged.
+
+Two exits of a session started through a launcher, and only of such a session, tell the worker why it ended:
+
+| The session ends with                                          | `failureReason`   | Meaning                                                                                                                                                                                                                         |
+| -------------------------------------------------------------- | ----------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| exit code 75 (`EX_TEMPFAIL`) before Claude Code reports `init` | `launcherRefused` | a refusal to place the session: the executor requeues the task without spending an attempt or running a memory summary and retries after 30 s; the monitor repeats the cycle after 30 s, or at its next regular cycle if sooner |
+| `SIGKILL`, or exit code 137, that the worker did not send      | `poolMemoryLimit` | a kill by the pool's memory limit: the executor retries the task as a transient failure, up to `maxTaskAttempts`                                                                                                                |
+
+- A launcher that `exec`s Claude Code has nothing to report: the kernel's out-of-memory kill of the pool reaches the worker as `SIGKILL`.
+- A launcher that waits for its session, for example to hold a Windows Job Object, exits with 137 (128 + SIGKILL, what a shell reports for a child killed that way) after the pool killed the session for memory, and otherwise with the session's own exit code.
+- A session the worker stops itself, on a timeout, a shutdown or a drain deadline, stays `timeout` or `abort` whatever the launcher exits with.
+- A refused session never reached Claude Code, so its `*.finished` event has no `sessionId` and the [session index](control.md#the-session-index) has no record of it.
 
 A timeout, a shutdown or a drain deadline stops a session with every process it started. On Linux and macOS each session leads its own process group, which receives `SIGTERM` and, 5 s later, `SIGKILL`; this also reaches MCP servers and shells whose parent has already exited. On Windows the worker runs `taskkill /T /F` on the session process, which reaches the processes still under it. A launcher that places the session in a Job Object also covers the rest.
 

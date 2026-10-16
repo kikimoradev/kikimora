@@ -179,6 +179,7 @@ export function createHeadlessReporters(
           addedTasks: outcome.addedTasks,
           skippedDuplicates: outcome.skippedDuplicates,
           error: outcome.error,
+          failureReason: outcome.failureReason,
           sessionId: outcome.sessionId,
         }),
       });
@@ -219,6 +220,7 @@ export function createHeadlessReporters(
           attempt: outcome.attempt,
           maxAttempts: outcome.maxAttempts,
           error: outcome.error,
+          failureReason: outcome.failureReason,
           sessionId: outcome.sessionId,
         }),
       });
@@ -288,6 +290,7 @@ export function createHeadlessReporters(
           durationMs: outcome.durationMs,
           costUsd: outcome.costUsd,
           error: outcome.error,
+          failureReason: outcome.failureReason,
           sessionId: outcome.sessionId,
         }),
       });

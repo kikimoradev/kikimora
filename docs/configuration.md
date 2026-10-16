@@ -110,7 +110,7 @@ Both use the local time of the worker process (see `TZ` in [the droplet runbook]
 
 - `sessionTimeoutMs` kills a session that runs longer, with the MCP servers and shells it started: SIGTERM, then SIGKILL after 5 s ([details](deployment.md#session-launcher)). A timeout counts as a **transient** failure.
 - A `fable` session on a hard task can run for many minutes. Leave `executor.sessionTimeoutMs` unset or generous when the executor runs on `fable`. Raise the summarizer's 5-minute default before switching it to `fable`.
-- The executor retries transient failures (timeouts, known error patterns in the result) up to `maxTaskAttempts`, waiting `retryDelayMs` between attempts. Other failures mark the task `failed` at once.
+- The executor retries transient failures (timeouts, known error patterns in the result, a kill by the memory limit of a resource pool) up to `maxTaskAttempts`, waiting `retryDelayMs` between attempts. Other failures mark the task `failed` at once. A [session launcher](deployment.md#session-launcher) that refuses a session costs no attempt.
 - `/retry <task-id>` in the TUI, or `kikimora tasks retry <id>`, requeues a failed task with its attempt count reset.
 
 ## The `.kikimora/` directory

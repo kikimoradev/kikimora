@@ -8,6 +8,7 @@ import { writeMcpConfig } from "./mcp-config.js";
 import { composePrompt } from "./prompt-compose.js";
 import { parseTaskReport, TASK_REPORT_JSON_SCHEMA } from "./report.js";
 import { runSession } from "./runner.js";
+import { LAUNCHER_REFUSAL_BACKOFF_MS } from "./session-launcher.js";
 import type { SessionRecorder } from "./sessions/index.js";
 import type { MonitorReporter } from "./status.js";
 import type { TaskStore } from "./tasks.js";
@@ -70,6 +71,8 @@ export async function runMonitorLoop(
     if (lease === null) continue;
 
     let start: number;
+    let requested: boolean;
+    let refused = false;
     try {
       if (aborted()) break;
       if (!readyAfterAdmission()) continue;
@@ -92,7 +95,7 @@ export async function runMonitorLoop(
       if (aborted()) break;
       if (controller.state !== "running") continue;
 
-      controller.takeRunRequest();
+      requested = controller.takeRunRequest();
       cycle += 1;
       reporter.cycleStarted(cycle);
 
@@ -122,7 +125,18 @@ export async function runMonitorLoop(
 
         if (aborted()) break;
 
-        if (!result.ok) {
+        if (result.failureReason === "launcherRefused") {
+          refused = true;
+          reporter.cycleFinished({
+            cycle,
+            ok: false,
+            durationMs: result.durationMs,
+            addedTasks: 0,
+            skippedDuplicates: 0,
+            error: "session launcher refused the session, cycle requeued",
+            failureReason: result.failureReason,
+          });
+        } else if (!result.ok) {
           const auth = detectAuthFailure(result);
           if (auth) {
             gates.auth.engage(auth);
@@ -134,6 +148,7 @@ export async function runMonitorLoop(
               addedTasks: 0,
               skippedDuplicates: 0,
               error: `authentication failed — ${auth.reason}`,
+              failureReason: result.failureReason,
               sessionId: result.sessionId,
             });
             continue;
@@ -148,6 +163,7 @@ export async function runMonitorLoop(
             addedTasks: 0,
             skippedDuplicates: 0,
             error: limit ? "usage limit reached" : (result.error ?? "unknown error"),
+            failureReason: result.failureReason,
             sessionId: result.sessionId,
           });
           if (limit) continue;
@@ -195,10 +211,14 @@ export async function runMonitorLoop(
 
     if (aborted()) break;
 
-    const wait = monitor.intervalMs - (Date.now() - start);
+    const untilNextCycle = monitor.intervalMs - (Date.now() - start);
+    const wait = refused
+      ? Math.min(untilNextCycle, LAUNCHER_REFUSAL_BACKOFF_MS)
+      : untilNextCycle;
     if (wait > 0) {
       reporter.sleepUntil(new Date(Date.now() + wait));
       await controller.sleep(wait, signal);
     }
+    if (refused && requested) controller.requestRun();
   }
 }

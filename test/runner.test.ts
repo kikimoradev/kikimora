@@ -2,7 +2,7 @@ import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AdmissionGate, LOCAL_LEASE, type AdmissionLease } from "../src/admission.js";
-import { runSession } from "../src/runner.js";
+import { runSession, type SessionSpec } from "../src/runner.js";
 import { NO_LAUNCHER } from "../src/session-launcher.js";
 import {
   buildSessionSpec,
@@ -535,6 +535,143 @@ describe("runSession with a session launcher", () => {
     expect(result.failureReason).toBe("spawn");
     expect(result.error).toContain(missing);
     expect(collector.events).toEqual([]);
+  }, 15_000);
+});
+
+describe("runSession reading the launcher's verdict", () => {
+  let collector: SessionEventCollector;
+
+  beforeEach(() => {
+    collector = createSessionEventCollector();
+  });
+
+  function launchedSpec(
+    mode: string,
+    launcherEnv: Record<string, string>,
+    overrides: Partial<SessionSpec> = {},
+  ): SessionSpec {
+    return buildSessionSpec(collector.sink, {
+      launcher: fakeLauncher,
+      childEnv: fakeClaudeEnv(mode, launcherEnv),
+      ...overrides,
+    });
+  }
+
+  it("treats exit code 75 before Claude Code starts as a refusal to place the session", async () => {
+    const started = vi.fn();
+    const finished = vi.fn();
+    const spec = launchedSpec(
+      "ok",
+      { FAKE_LAUNCHER_EXIT_BEFORE: "75" },
+      { index: { started, finished } },
+    );
+
+    const result = await runSession(spec, new AbortController().signal);
+
+    expect(result).toMatchObject({
+      ok: false,
+      failureReason: "launcherRefused",
+      error: "Session launcher refused the session (exit code 75)",
+    });
+    expect(collector.events[0]).toMatchObject({ type: "spawned" });
+    expect(started).not.toHaveBeenCalled();
+    expect(finished).not.toHaveBeenCalled();
+  }, 15_000);
+
+  it("treats exit code 75 after Claude Code started as an ordinary exit", async () => {
+    const spec = launchedSpec("ok", { FAKE_LAUNCHER_EXIT_AFTER: "75" });
+
+    const result = await runSession(spec, new AbortController().signal);
+
+    expect(result).toMatchObject({
+      ok: false,
+      failureReason: "exit",
+      error: "Process exited with code 75",
+    });
+  }, 15_000);
+
+  it("blames the pool memory limit when a waiting launcher exits with 137", async () => {
+    const finished = vi.fn();
+    const spec = launchedSpec(
+      "killed_after_init",
+      { FAKE_LAUNCHER_EXIT_AFTER: "137" },
+      { index: { started: vi.fn(), finished } },
+    );
+
+    const result = await runSession(spec, new AbortController().signal);
+
+    expect(result).toMatchObject({
+      ok: false,
+      failureReason: "poolMemoryLimit",
+      error: "Session killed by the pool memory limit",
+    });
+    expect(finished).toHaveBeenCalledWith(
+      expect.objectContaining({ ok: false, failureReason: "poolMemoryLimit" }),
+    );
+  }, 15_000);
+
+  posixOnly(
+    "blames the pool memory limit when the session a launcher exec'd dies by SIGKILL",
+    async () => {
+      const spec = launchedSpec(
+        "killed_after_init",
+        {},
+        { launcher: ["/bin/sh", "-c", 'exec "$@"', "launch"] },
+      );
+
+      const result = await runSession(spec, new AbortController().signal);
+
+      expect(result.failureReason).toBe("poolMemoryLimit");
+    },
+    15_000,
+  );
+
+  posixOnly(
+    "keeps a SIGKILL without a launcher an ordinary exit",
+    async () => {
+      const spec = launchedSpec("killed_after_init", {}, { launcher: NO_LAUNCHER });
+
+      const result = await runSession(spec, new AbortController().signal);
+
+      expect(result).toMatchObject({
+        ok: false,
+        failureReason: "exit",
+        error: "Process terminated by signal SIGKILL",
+      });
+    },
+    15_000,
+  );
+
+  posixOnly(
+    "keeps exit code 137 without a launcher an ordinary exit",
+    async () => {
+      const spec = launchedSpec(
+        "exit_code_after_init",
+        { FAKE_CLAUDE_EXIT_CODE: "137" },
+        { launcher: NO_LAUNCHER },
+      );
+
+      const result = await runSession(spec, new AbortController().signal);
+
+      expect(result).toMatchObject({
+        ok: false,
+        failureReason: "exit",
+        error: "Process exited with code 137",
+      });
+    },
+    15_000,
+  );
+
+  it("keeps a session the worker stopped itself a timeout, whatever the launcher reports", async () => {
+    const spec = launchedSpec(
+      "hang_after_init",
+      { FAKE_LAUNCHER_EXIT_AFTER: "137" },
+      { sessionTimeoutMs: 1_000 },
+    );
+
+    const result = await runSession(spec, new AbortController().signal);
+
+    expect(result.failureReason).toBe("timeout");
   }, 15_000);
 });
 

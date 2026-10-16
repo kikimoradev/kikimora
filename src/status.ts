@@ -8,7 +8,7 @@ import {
   type SessionEvent,
   type SessionEventSink,
 } from "./session-events.js";
-import type { Task } from "./types.js";
+import type { SessionFailureReason, Task } from "./types.js";
 import { formatCost, formatElapsed } from "./units.js";
 
 export type TailTone = "ok" | "warn" | "error";
@@ -55,6 +55,7 @@ export interface MonitorCycleOutcome {
   addedTasks: number;
   skippedDuplicates: number;
   error?: string | undefined;
+  failureReason?: SessionFailureReason | undefined;
   sessionId?: string | undefined;
   finishedAt: number;
 }
@@ -67,6 +68,7 @@ export interface ExecutorTaskOutcome {
   costUsd?: number | undefined;
   numTurns?: number | undefined;
   error?: string | undefined;
+  failureReason?: SessionFailureReason | undefined;
   willRetry?: boolean | undefined;
   attempt?: number | undefined;
   maxAttempts?: number | undefined;
@@ -80,6 +82,7 @@ export interface SummaryOutcome {
   durationMs: number;
   costUsd?: number | undefined;
   error?: string | undefined;
+  failureReason?: SessionFailureReason | undefined;
   sessionId?: string | undefined;
   finishedAt: number;
 }

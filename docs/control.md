@@ -110,7 +110,7 @@ Kikimora indexes each session it runs in `.kikimora/data/memory.db`, next to lon
 - from the end: `finishedAt`, `ok`, `failureReason`, `costUsd`, `numTurns`;
 - `logPath` and `jsonlPath`, relative to `.kikimora/`, so the index stays valid in a container and on its host.
 
-A session is indexed when Claude Code reports its `init` event. A session killed before Claude Code reported a result is closed with `ok: false`, a `failureReason` and no cost.
+A session is indexed when Claude Code reports its `init` event. A session killed before Claude Code reported a result is closed with `ok: false`, a `failureReason` and no cost. The [log events](deployment.md#log-events) list the failure reasons; `status` carries the same `failureReason` on its recent outcomes.
 
 `sessions.list` returns the newest first. `before` is a keyset cursor: pass the `startedAt` of the last row you received to fetch the next page. `sessions.get` returns **metadata only, never the transcript**: a reply is one line, and an executor session's JSON transcript can run to megabytes. Read the files with `kikimora sessions show <id> --log` locally, or from the volume on a server. [Session transcripts](deployment.md#session-transcripts) describes the two files per session.
 
