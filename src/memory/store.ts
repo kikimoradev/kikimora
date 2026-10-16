@@ -162,6 +162,10 @@ export class MemoryStore {
     return rows.map(toRecord);
   }
 
+  exportTo(path: string): void {
+    this.db.prepare("VACUUM INTO ?").run(path);
+  }
+
   close(): void {
     this.db.close();
   }

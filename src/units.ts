@@ -17,6 +17,12 @@ export function formatElapsed(ms: number): string {
   return formatUptime(safe);
 }
 
+export function formatBytes(bytes: number): string {
+  if (bytes < 1024) return `${bytes} B`;
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KiB`;
+  return `${(bytes / (1024 * 1024)).toFixed(1)} MiB`;
+}
+
 export function formatCost(costUsd: number): string {
   if (costUsd <= 0) return "$0.00";
   if (costUsd < 0.001) return "<$0.001";

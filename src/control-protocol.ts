@@ -9,6 +9,7 @@ import {
 import type { Settings } from "./config.js";
 import type { AgentControlState } from "./control.js";
 import { DRAIN_TIMEOUT_MAX_MS, type DrainReason, type DrainSnapshot } from "./drain.js";
+import type { MemoryExport } from "./memory/export.js";
 import type { TaskSummaryRecord } from "./memory/store.js";
 import { PROMPT_AGENTS, type PromptAgent } from "./prompt-files.js";
 import {
@@ -104,6 +105,7 @@ export const controlRequestSchema = z.discriminatedUnion("cmd", [
     .object({ cmd: z.literal("memory.search"), query: nonBlank, limit: limitSchema })
     .strict(),
   z.object({ cmd: z.literal("memory.recent"), limit: limitSchema }).strict(),
+  z.object({ cmd: z.literal("memory.export"), path: nonBlank }).strict(),
   z.object({ cmd: z.literal("prompt.get"), agent: promptAgentSchema }).strict(),
   z
     .object({ cmd: z.literal("prompt.set"), agent: promptAgentSchema, content: nonBlank })
@@ -168,6 +170,7 @@ export interface ControlResponseData {
   "tasks.cancel": boolean;
   "memory.search": TaskSummaryRecord[];
   "memory.recent": TaskSummaryRecord[];
+  "memory.export": MemoryExport;
   "prompt.get": PromptContent;
   "prompt.set": undefined;
   "context.get": ContextContent;

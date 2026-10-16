@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { defineCommand } from "citty";
 import {
   fail,
@@ -8,6 +9,7 @@ import {
 } from "./control-commands.js";
 import { MEMORY_LIMIT_DEFAULT, MEMORY_LIMIT_MAX } from "./control-protocol.js";
 import type { TaskSummaryRecord } from "./memory/store.js";
+import { formatBytes } from "./units.js";
 
 function parseLimit(raw: string | undefined): number | null {
   if (raw === undefined) return MEMORY_LIMIT_DEFAULT;
@@ -78,6 +80,30 @@ export async function runMemoryRecent(
   writeRecords(response.data, options);
 }
 
+export async function runMemoryExport(
+  path: string,
+  options: { json?: boolean | undefined } & ControlCommandIo = {},
+): Promise<void> {
+  if (path.trim() === "") {
+    fail("The export path is empty.");
+    return;
+  }
+  const response = await requestControl(
+    { cmd: "memory.export", path: resolve(path) },
+    options,
+  );
+  if (response === null) return;
+  const write = writerFor(options);
+  if (options.json === true) {
+    write(JSON.stringify(response.data, null, 2));
+    return;
+  }
+  const { entries, bytes } = response.data;
+  write(
+    `Exported ${String(entries)} ${entries === 1 ? "entry" : "entries"} (${formatBytes(bytes)}) to ${response.data.path}`,
+  );
+}
+
 const limitArg = {
   type: "string",
   description: `How many entries (1-${String(MEMORY_LIMIT_MAX)}, default ${String(MEMORY_LIMIT_DEFAULT)})`,
@@ -87,7 +113,7 @@ const jsonArg = { type: "boolean", description: "Print JSON instead of text" } a
 export const memoryCommand = defineCommand({
   meta: {
     name: "memory",
-    description: `Search the running worker's long-term memory. ${SOCKET_ENV_HINT}`,
+    description: `Search or export the running worker's long-term memory. ${SOCKET_ENV_HINT}`,
   },
   subCommands: {
     search: defineCommand({
@@ -104,6 +130,22 @@ export const memoryCommand = defineCommand({
       meta: { name: "recent", description: "The newest task summaries" },
       args: { limit: limitArg, json: jsonArg },
       run: ({ args }) => runMemoryRecent({ limit: args.limit, json: args.json }),
+    }),
+    export: defineCommand({
+      meta: {
+        name: "export",
+        description:
+          "Copy memory.db, the session index included, to a new file while the worker runs",
+      },
+      args: {
+        path: {
+          type: "positional",
+          required: true,
+          description: "Where the worker writes the copy; it must not exist yet",
+        },
+        json: jsonArg,
+      },
+      run: ({ args }) => runMemoryExport(args.path, { json: args.json }),
     }),
   },
 });

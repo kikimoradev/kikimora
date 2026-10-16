@@ -16,6 +16,7 @@ import { createHeadlessReporters, emitAdmissionChange } from "./headless/reporte
 import { createHeadlessSink } from "./headless/sink.js";
 import { teeReporter } from "./headless/tee.js";
 import { logger } from "./logger.js";
+import { exportMemory } from "./memory/export.js";
 import { MemoryStore } from "./memory/store.js";
 import { SessionSummarizer } from "./memory/summarizer.js";
 import { runMonitorLoop } from "./monitor.js";
@@ -215,6 +216,7 @@ export async function startWorker(options: StartWorkerOptions = {}): Promise<voi
       admission: gates.admission,
       tasks: store,
       memory,
+      memoryExport: { export: (path) => exportMemory(memory, path) },
       sessions,
       settings,
       prompts,
