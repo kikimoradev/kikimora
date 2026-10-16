@@ -7,6 +7,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A [session launcher](docs/deployment.md#session-launcher) can refuse a session by exiting with 75 before Claude Code starts. The executor then returns the task to the queue without spending an attempt and tries again after 30 s, and the monitor repeats the cycle after 30 s, a requested check included; before, the task failed for good.
+- A session that a launcher started and that ends by `SIGKILL`, or whose launcher exits with 137, without the worker stopping it, is reported as killed by the pool memory limit (`poolMemoryLimit`) and retried like other transient failures, up to `maxTaskAttempts`.
+- `task.finished`, `cycle.finished`, `summary.finished` and the recent outcomes in `kikimora status` carry the session's `failureReason`, so a supervisor can show why a session failed. Without a launcher, sessions fail and retry as before.
+
 ## [0.12.0] - 2026-10-16
 
 ### Added
