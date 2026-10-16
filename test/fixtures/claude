@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 
+import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
 
 const modelIndex = process.argv.indexOf("--model");
@@ -15,8 +16,16 @@ const promptOut = pick("FAKE_CLAUDE_PROMPT_OUT");
 const argsOut = pick("FAKE_CLAUDE_ARGS_OUT");
 const resultText = pick("FAKE_CLAUDE_RESULT_TEXT");
 const sessionId = pick("FAKE_CLAUDE_SESSION_ID") ?? "sess-1";
+const envOut = pick("FAKE_CLAUDE_ENV_OUT");
+const treeOut = pick("FAKE_CLAUDE_TREE_OUT");
 
 if (argsOut) writeFileSync(argsOut, JSON.stringify(process.argv.slice(2)));
+if (envOut) {
+  const kikimoraEnv = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => key.startsWith("KIKIMORA_")),
+  );
+  writeFileSync(envOut, JSON.stringify({ pid: process.pid, env: kikimoraEnv }));
+}
 
 function emit(event) {
   process.stdout.write(`${JSON.stringify(event)}\n`);
@@ -110,6 +119,46 @@ function emitOk(isError) {
   emitOutcome(isError);
 }
 
+const HOLD = "setInterval(() => {}, 1000);";
+const IGNORE_SIGTERM = 'process.on("SIGTERM", () => {});';
+
+function spawnNode(source, stdout) {
+  return spawn(process.execPath, ["-e", source], {
+    stdio: ["ignore", stdout, "ignore"],
+    windowsHide: true,
+  });
+}
+
+function readPid(child) {
+  return new Promise((resolve) => {
+    let buffer = "";
+    child.stdout.on("data", (chunk) => {
+      buffer += chunk;
+      const newline = buffer.indexOf("\n");
+      if (newline !== -1) resolve(Number(buffer.slice(0, newline)));
+    });
+  });
+}
+
+function spawnDescendant(prefix, exitAfterSpawn) {
+  const descendant = `const c = require("node:child_process").spawn(process.execPath, ["-e", ${JSON.stringify(`${IGNORE_SIGTERM}${HOLD}`)}], { stdio: "ignore", windowsHide: true });`;
+  const report = `process.stdout.write(c.pid + "\\n", () => { ${exitAfterSpawn ? "process.exit(0);" : ""} });`;
+  return spawnNode(`${prefix}${descendant}${report}${exitAfterSpawn ? "" : HOLD}`, "pipe");
+}
+
+async function spawnTree() {
+  const intermediate = spawnDescendant(IGNORE_SIGTERM, false);
+  const parentOfOrphan = spawnDescendant("", true);
+  const [grandchild, orphan] = await Promise.all([
+    readPid(intermediate),
+    readPid(parentOfOrphan),
+  ]);
+  writeFileSync(
+    treeOut,
+    JSON.stringify({ attached: [intermediate.pid, grandchild], orphaned: [orphan] }),
+  );
+}
+
 let stdin = "";
 process.stdin.setEncoding("utf8");
 process.stdin.on("data", (chunk) => {
@@ -155,6 +204,11 @@ function run() {
         emitOutcome(false);
         process.exit(0);
       }, Number(pick("FAKE_CLAUDE_DELAY_MS") ?? "1000"));
+      break;
+    case "hang_with_tree":
+      process.on("SIGTERM", () => process.exit(143));
+      setInterval(() => {}, 1000);
+      void spawnTree().then(emitInit);
       break;
     case "hang_after_init":
       emitInit();

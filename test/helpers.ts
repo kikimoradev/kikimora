@@ -4,13 +4,18 @@ import { tmpdir } from "node:os";
 import { delimiter, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { vi } from "vitest";
-import { AdmissionGate, type AdmissionChange } from "../src/admission.js";
+import { AdmissionGate, LOCAL_LEASE, type AdmissionChange } from "../src/admission.js";
 import { AuthGate } from "../src/auth-gate.js";
 import { AgentController, type AgentControlState } from "../src/control.js";
 import type { LoopGates } from "../src/gates.js";
 import type { TaskSummarizer } from "../src/memory/summarizer.js";
 import type { SessionSpec } from "../src/runner.js";
 import type { SessionEvent, SessionEventSink } from "../src/session-events.js";
+import {
+  NO_LAUNCHER,
+  type SessionLauncher,
+  type SessionPlacement,
+} from "../src/session-launcher.js";
 import type { ExecutorReporter, MonitorReporter } from "../src/status.js";
 import type {
   AgentConfig,
@@ -32,6 +37,13 @@ export function removeTempDir(dir: string): Promise<void> {
 
 export const fixturesDir = fileURLToPath(new URL("./fixtures", import.meta.url));
 export const fakeClaudePath = join(fixturesDir, "claude");
+export const fakeClaudeLauncher: SessionLauncher =
+  process.platform === "win32" ? [process.execPath] : NO_LAUNCHER;
+export const localPlacement: SessionPlacement = {
+  role: "monitor",
+  pool: "monitor",
+  lease: LOCAL_LEASE,
+};
 
 export function snapshotEnv(): () => void {
   const saved = { ...process.env };
@@ -445,6 +457,7 @@ export function buildSummarizerConfig(
 export function buildConfig(overrides: Partial<WorkerConfig> = {}): WorkerConfig {
   return {
     command: fakeClaudePath,
+    launcher: fakeClaudeLauncher,
     monitor: buildMonitorConfig(),
     executor: buildExecutorConfig(),
     summarizer: buildSummarizerConfig(),
@@ -470,6 +483,8 @@ export function buildSessionSpec(
 ): SessionSpec {
   return {
     command: fakeClaudePath,
+    launcher: fakeClaudeLauncher,
+    placement: localPlacement,
     model: "haiku",
     effort: "medium",
     systemPrompt: "system\n",

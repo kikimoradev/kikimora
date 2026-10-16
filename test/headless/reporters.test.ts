@@ -309,6 +309,40 @@ describe("createHeadlessReporters", () => {
     ]);
   });
 
+  it("logs the spawned session process with its placement", () => {
+    const { events, executor, summarizer } = collect();
+
+    executor.session({
+      type: "spawned",
+      pid: 77,
+      role: "executor",
+      pool: "executor",
+      ticket: "t-1",
+      seq: 4,
+    });
+    summarizer.session({
+      type: "spawned",
+      pid: 78,
+      role: "summarizer",
+      pool: "executor",
+    });
+
+    expect(events).toEqual([
+      {
+        level: "info",
+        agent: "executor",
+        event: "session.spawned",
+        fields: { pid: 77, role: "executor", pool: "executor", ticket: "t-1", seq: 4 },
+      },
+      {
+        level: "info",
+        agent: "summarizer",
+        event: "session.spawned",
+        fields: { pid: 78, role: "summarizer", pool: "executor" },
+      },
+    ]);
+  });
+
   it("always logs session init, stderr, procError and killing", () => {
     const { events, monitor } = collect();
 

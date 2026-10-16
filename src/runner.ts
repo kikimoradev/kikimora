@@ -1,6 +1,11 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
 import type { SessionEventSink } from "./session-events.js";
+import {
+  sessionCommand,
+  type SessionLauncher,
+  type SessionPlacement,
+} from "./session-launcher.js";
 import type { SessionMeta, SessionRecorder } from "./sessions/index.js";
 import { StreamRenderer } from "./stream.js";
 import type { EffortLevel, SessionFailureReason, SessionResult } from "./types.js";
@@ -12,6 +17,8 @@ type KillReason = "timeout" | "abort";
 
 export interface SessionSpec {
   command: string;
+  launcher: SessionLauncher;
+  placement: SessionPlacement;
   model: string;
   effort: EffortLevel;
   systemPrompt: string;
@@ -53,9 +60,16 @@ export async function runSession(
   args.push("--mcp-config", spec.mcpConfigPath, "--strict-mcp-config");
   if (spec.jsonSchema) args.push("--json-schema", spec.jsonSchema);
 
-  const child = spawn(spec.command, args, {
+  const launch = sessionCommand(
+    spec.command,
+    args,
+    spec.launcher,
+    spec.placement,
+    spec.childEnv,
+  );
+  const child = spawn(launch.file, launch.args, {
     cwd: spec.cwd,
-    env: spec.childEnv,
+    env: launch.env,
     stdio: ["pipe", "pipe", "pipe"],
   });
 
@@ -106,10 +120,11 @@ export async function runSession(
       return {
         ok: false,
         durationMs: Date.now() - startedAt,
-        error: `Failed to start "${spec.command}": ${spawnError.message}`,
+        error: `Failed to start "${launch.file}": ${spawnError.message}`,
         failureReason: "spawn",
       };
     }
+    announceSpawn(child, spec);
 
     child.on("error", (err) =>
       spec.events({ type: "procError", message: `Process error: ${err.message}` }),
@@ -160,11 +175,20 @@ export async function runSession(
       terminalReason: summary.terminalReason,
     };
   } finally {
+    if (child.pid !== undefined) spec.placement.lease.exited(child.pid);
     if (timeout) clearTimeout(timeout);
     signal.removeEventListener("abort", onAbort);
     rl.close();
     stderrRl.close();
   }
+}
+
+function announceSpawn(child: ChildProcess, spec: SessionSpec): void {
+  const { pid } = child;
+  if (pid === undefined) return;
+  const { role, pool, lease } = spec.placement;
+  const seq = lease.spawned(pid);
+  spec.events({ type: "spawned", pid, role, pool, ticket: lease.ticket, seq });
 }
 
 function classifyFailure(

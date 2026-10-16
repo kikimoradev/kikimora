@@ -29,6 +29,7 @@ export type AdmissionSlot =
       since: number;
       seq: number;
       taskId?: string | undefined;
+      pid?: number | undefined;
     };
 
 export interface AdmissionChange {
@@ -42,6 +43,9 @@ export type AdmissionGrantOutcome =
   { granted: true } | { granted: false; reason: "local" | "stale" };
 
 export interface AdmissionLease {
+  readonly ticket: string | undefined;
+  spawned(pid: number): number | undefined;
+  exited(pid: number): void;
   release(): void;
 }
 
@@ -58,7 +62,12 @@ export interface AdmissionStatus {
   executor: AdmissionSlot;
 }
 
-const LOCAL_LEASE: AdmissionLease = { release: () => undefined };
+export const LOCAL_LEASE: AdmissionLease = {
+  ticket: undefined,
+  spawned: () => undefined,
+  exited: () => undefined,
+  release: () => undefined,
+};
 
 export class AdmissionGate {
   private seq = 0;
@@ -140,6 +149,11 @@ export class AdmissionGate {
   private leaseOf(role: AdmissionRole, ticket: string): AdmissionLease {
     let released = false;
     return {
+      ticket,
+      spawned: (pid) => this.attach(role, ticket, pid),
+      exited: (pid) => {
+        this.detach(role, ticket, pid);
+      },
       release: () => {
         if (released) return;
         released = true;
@@ -149,6 +163,20 @@ export class AdmissionGate {
         }
       },
     };
+  }
+
+  private attach(role: AdmissionRole, ticket: string, pid: number): number | undefined {
+    const slot = this.slots[role];
+    if (slot.state !== "holding" || slot.ticket !== ticket) return undefined;
+    const seq = this.nextSeq();
+    this.slots[role] = { ...slot, pid, seq };
+    return seq;
+  }
+
+  private detach(role: AdmissionRole, ticket: string, pid: number): void {
+    const slot = this.slots[role];
+    if (slot.state !== "holding" || slot.ticket !== ticket || slot.pid !== pid) return;
+    this.slots[role] = { ...slot, pid: undefined, seq: this.nextSeq() };
   }
 
   private settle(

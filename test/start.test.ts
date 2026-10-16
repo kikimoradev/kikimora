@@ -215,8 +215,8 @@ describe("startWorker", () => {
 
     await runStart({ stdout: jsonSink() });
 
-    expect(mocks.ensureReady).toHaveBeenCalledWith();
-    expect(mocks.loadWorkerConfig).toHaveBeenCalledWith({}, verifiedPaths(dir));
+    expect(mocks.ensureReady).toHaveBeenCalledWith({}, { launcher: [] });
+    expect(mocks.loadWorkerConfig).toHaveBeenCalledWith({}, verifiedPaths(dir), []);
     expect(mocks.taskStoreOpen).toHaveBeenCalledWith(config.tasksFilePath);
     expect(mocks.runMonitorLoop).toHaveBeenCalledWith(
       config,

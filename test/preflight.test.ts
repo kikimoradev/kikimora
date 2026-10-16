@@ -203,6 +203,42 @@ describe("ensureReady", () => {
     await expect(ensureReady(dirs())).resolves.toBeDefined();
     expect(logger.success).toHaveBeenCalledWith("Playwright MCP (playwright-mcp)");
   });
+
+  it("does not look for a launcher when none is configured", async () => {
+    await expect(ensureReady(dirs(), { launcher: [] })).resolves.toBeDefined();
+    expect(logger.success).not.toHaveBeenCalledWith(
+      expect.stringContaining("session launcher"),
+    );
+  });
+
+  it("finds a launcher named as a command in PATH", async () => {
+    const launcher = join(binDir, "pool-launch");
+    await writeFile(launcher, '#!/bin/sh\nexec "$@"\n', "utf8");
+    await chmod(launcher, 0o755);
+
+    await expect(
+      ensureReady(dirs(), { launcher: ["pool-launch", "--pool"] }),
+    ).resolves.toBeDefined();
+    expect(logger.success).toHaveBeenCalledWith("session launcher (pool-launch)");
+  });
+
+  it("accepts a launcher given as an executable path", async () => {
+    const launcher = join(dir, "launch");
+    await writeFile(launcher, '#!/bin/sh\nexec "$@"\n', "utf8");
+    await chmod(launcher, 0o755);
+
+    await expect(ensureReady(dirs(), { launcher: [launcher] })).resolves.toBeDefined();
+    expect(logger.success).toHaveBeenCalledWith(`session launcher (${launcher})`);
+  });
+
+  it("throws when the launcher is neither a file nor a command in PATH", async () => {
+    await expect(
+      ensureReady(dirs(), { launcher: [join(dir, "missing-launch")] }),
+    ).rejects.toThrow(/Preflight failed[\s\S]*KIKIMORA_SESSION_LAUNCHER names/);
+    await expect(ensureReady(dirs(), { launcher: ["missing-launch"] })).rejects.toThrow(
+      /neither an executable file nor a command in PATH/,
+    );
+  });
 });
 
 describe("parseClaudeAuthStatus", () => {

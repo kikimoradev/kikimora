@@ -1,8 +1,10 @@
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { LOCAL_LEASE } from "../src/admission.js";
 import { AgentController } from "../src/control.js";
 import { DrainController } from "../src/drain.js";
 import type { TaskSummarizer } from "../src/memory/summarizer.js";
+import type { SessionSpec } from "../src/runner.js";
 import type { TaskStore } from "../src/tasks.js";
 import type { SessionResult, Task } from "../src/types.js";
 import { Waker } from "../src/waker.js";
@@ -327,7 +329,7 @@ describe("runExecutorLoop", () => {
     expect(summarizerSpy.summarize).toHaveBeenCalledWith(
       expect.objectContaining({ id: "a", attempts: 1 }),
       result,
-      { willRetry: false },
+      { willRetry: false, lease: LOCAL_LEASE },
       controller.signal,
     );
     const finishedOrder = spy.taskFinished.mock.invocationCallOrder[0] ?? Infinity;
@@ -359,7 +361,7 @@ describe("runExecutorLoop", () => {
     expect(summarizerSpy.summarize).toHaveBeenCalledWith(
       expect.objectContaining({ id: "flaky" }),
       result,
-      { willRetry: true },
+      { willRetry: true, lease: LOCAL_LEASE },
       controller.signal,
     );
   });
@@ -933,9 +935,11 @@ describe("runExecutorLoop", () => {
       const admission = externalAdmission();
       const abort = new AbortController();
       const statesDuringSummary: string[] = [];
+      const summaryLeases: unknown[] = [];
       const summarizer: TaskSummarizer = {
-        summarize: () => {
+        summarize: (_task, _result, outcome) => {
           statesDuringSummary.push(admission.gate.status().executor.state);
+          summaryLeases.push(outcome.lease);
           return Promise.resolve();
         },
       };
@@ -959,10 +963,15 @@ describe("runExecutorLoop", () => {
       expect(admission.gate.status().executor).toMatchObject({ taskId: "a" });
       expect(takeNext).not.toHaveBeenCalled();
 
-      admission.gate.grant("executor", heldTicket(admission.gate, "executor"));
+      const ticket = heldTicket(admission.gate, "executor");
+      admission.gate.grant("executor", ticket);
       await vi.waitFor(() => expect(spy.waiting).toHaveBeenCalled());
 
       expect(complete).toHaveBeenCalledWith("a");
+      const spec = mocks.runSession.mock.calls[0]?.[0] as SessionSpec;
+      expect(spec.placement).toMatchObject({ role: "executor", pool: "executor" });
+      expect(spec.placement.lease.ticket).toBe(ticket);
+      expect(summaryLeases).toEqual([spec.placement.lease]);
       expect(statesDuringSummary).toEqual(["holding"]);
       expect(admission.changes.map((change) => change.kind)).toEqual([
         "granted",

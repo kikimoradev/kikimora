@@ -5,6 +5,7 @@ import { DRAIN_TIMEOUT_MAX_MS } from "./drain.js";
 import { assertReadable } from "./fs.js";
 import { MEMORY_SERVER_NAME, PLAYWRIGHT_SERVER_NAME } from "./mcp-config.js";
 import { projectPaths, systemPromptFiles } from "./paths.js";
+import { NO_LAUNCHER, type SessionLauncher } from "./session-launcher.js";
 import { EFFORT_LEVELS, type WorkerConfig } from "./types.js";
 
 export const COMMAND = "claude";
@@ -220,6 +221,7 @@ async function assertPromptPathsReadable(paths: WorkerPromptPaths): Promise<void
 export async function loadWorkerConfig(
   dirs: ConfigDirs = {},
   verified?: WorkerPromptPaths,
+  launcher: SessionLauncher = NO_LAUNCHER,
 ): Promise<WorkerConfig> {
   const project = projectPaths(dirs.projectDir);
   const settings = await loadSettings(project.settingsFile);
@@ -231,6 +233,7 @@ export async function loadWorkerConfig(
 
   return {
     command: COMMAND,
+    launcher,
     monitor: {
       model: settings.monitor.model,
       effort: settings.monitor.effort,

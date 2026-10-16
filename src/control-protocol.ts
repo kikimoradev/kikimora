@@ -262,6 +262,7 @@ export interface ControlAdmissionSlot {
   ticket?: string | undefined;
   since?: string | undefined;
   taskId?: string | undefined;
+  pid?: number | undefined;
 }
 
 export interface ControlAdmissionStatus {
@@ -366,6 +367,7 @@ function serializeAdmissionSlot(slot: AdmissionSlot): ControlAdmissionSlot {
     ticket: slot.ticket,
     since: iso(slot.since),
     taskId: slot.taskId,
+    pid: slot.pid,
   };
 }
 

@@ -1,7 +1,7 @@
 import { execFile } from "node:child_process";
 import { constants } from "node:fs/promises";
 import { existsSync } from "node:fs";
-import { delimiter, join } from "node:path";
+import { delimiter, isAbsolute, join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import {
   COMMAND,
@@ -15,6 +15,11 @@ import { canAccess } from "./fs.js";
 import { logger } from "./logger.js";
 import { PLAYWRIGHT_MCP_COMMAND } from "./mcp-config.js";
 import { projectPaths } from "./paths.js";
+import {
+  NO_LAUNCHER,
+  SESSION_LAUNCHER_ENV,
+  type SessionLauncher,
+} from "./session-launcher.js";
 import { parseVersion } from "./update/version.js";
 
 const INSTALL_HINT = "https://docs.claude.com/en/docs/claude-code/setup";
@@ -48,6 +53,7 @@ export interface PreflightResult {
 
 export interface PreflightOptions {
   claudeTimeoutMs?: number | undefined;
+  launcher?: SessionLauncher | undefined;
 }
 
 interface Check {
@@ -77,6 +83,25 @@ async function findOnPath(command: string): Promise<string | undefined> {
     }
   }
   return undefined;
+}
+
+function namesPath(command: string): boolean {
+  return isAbsolute(command) || command.includes("/") || command.includes("\\");
+}
+
+async function checkLauncher(launcher: SessionLauncher): Promise<Check[]> {
+  const [file] = launcher;
+  if (file === undefined) return [];
+  const found = namesPath(file)
+    ? await canAccess(file, constants.X_OK)
+    : (await findOnPath(file)) !== undefined;
+  return [
+    check(
+      `session launcher (${file})`,
+      found,
+      `${SESSION_LAUNCHER_ENV} names "${file}", which is neither an executable file nor a command in PATH`,
+    ),
+  ];
 }
 
 function claudeLabel(version: string | null): string {
@@ -238,9 +263,10 @@ export async function ensureReady(
   const paths = resolvePromptPaths(dirs);
   const settingsFile = projectPaths(dirs.projectDir).settingsFile;
 
-  const [cli, browserChecks, ...fileChecks] = await Promise.all([
+  const [cli, browserChecks, launcherChecks, ...fileChecks] = await Promise.all([
     checkClaudeCli(options.claudeTimeoutMs ?? CLAUDE_PROBE_TIMEOUT_MS),
     checkBrowserTooling(settingsFile),
+    checkLauncher(options.launcher ?? NO_LAUNCHER),
     Promise.resolve(checkSqliteFts5()),
     Promise.resolve(checkSettingsFile(settingsFile)),
     checkFile(paths.monitor.promptPath, PROMPT_FILE_LABELS.monitor.promptPath),
@@ -258,7 +284,7 @@ export async function ensureReady(
       PROMPT_FILE_LABELS.summarizer.systemPromptPath,
     ),
   ]);
-  const checks = [...cli.checks, ...fileChecks, ...browserChecks];
+  const checks = [...cli.checks, ...launcherChecks, ...fileChecks, ...browserChecks];
 
   for (const result of checks) {
     if (result.ok) logger.success(result.label);

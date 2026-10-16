@@ -21,6 +21,20 @@ function sessionSink(
 ): SessionEventSink {
   return (event) => {
     switch (event.type) {
+      case "spawned":
+        emit({
+          level: "info",
+          agent,
+          event: "session.spawned",
+          fields: compactFields({
+            pid: event.pid,
+            role: event.role,
+            pool: event.pool,
+            ticket: event.ticket,
+            seq: event.seq,
+          }),
+        });
+        return;
       case "init":
         emit({
           level: "info",
