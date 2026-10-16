@@ -934,7 +934,7 @@ describe("runMonitorLoop", () => {
 
       expect(mocks.runSession).toHaveBeenCalledTimes(1);
       const spec = mocks.runSession.mock.calls[0]?.[0] as SessionSpec;
-      expect(spec.placement).toMatchObject({ role: "monitor", pool: "monitor" });
+      expect(spec.placement.pool).toBe("monitor");
       expect(spec.placement.lease.ticket).toBe(ticket);
       expect(spy.cycleFinished).toHaveBeenCalledWith(
         expect.objectContaining({ ok: true }),

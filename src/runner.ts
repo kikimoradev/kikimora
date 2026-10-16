@@ -4,6 +4,7 @@ import { leadsOwnProcessGroup, terminateProcessTree } from "./process-tree.js";
 import type { SessionEventSink } from "./session-events.js";
 import {
   sessionCommand,
+  type PlacedSession,
   type SessionLauncher,
   type SessionPlacement,
 } from "./session-launcher.js";
@@ -61,13 +62,12 @@ export async function runSession(
   args.push("--mcp-config", spec.mcpConfigPath, "--strict-mcp-config");
   if (spec.jsonSchema) args.push("--json-schema", spec.jsonSchema);
 
-  const launch = sessionCommand(
-    spec.command,
-    args,
-    spec.launcher,
-    spec.placement,
-    spec.childEnv,
-  );
+  const placed: PlacedSession = {
+    role: spec.meta.agent,
+    pool: spec.placement.pool,
+    ticket: spec.placement.lease.ticket,
+  };
+  const launch = sessionCommand(spec.command, args, spec.launcher, placed, spec.childEnv);
   const child = spawn(launch.file, launch.args, {
     cwd: spec.cwd,
     env: launch.env,
@@ -131,7 +131,7 @@ export async function runSession(
         failureReason: "spawn",
       };
     }
-    announceSpawn(child, spec);
+    announceSpawn(child, spec, placed);
 
     child.on("error", (err) =>
       spec.events({ type: "procError", message: `Process error: ${err.message}` }),
@@ -191,12 +191,15 @@ export async function runSession(
   }
 }
 
-function announceSpawn(child: ChildProcess, spec: SessionSpec): void {
+function announceSpawn(
+  child: ChildProcess,
+  spec: SessionSpec,
+  placed: PlacedSession,
+): void {
   const { pid } = child;
   if (pid === undefined) return;
-  const { role, pool, lease } = spec.placement;
-  const seq = lease.spawned(pid);
-  spec.events({ type: "spawned", pid, role, pool, ticket: lease.ticket, seq });
+  const seq = spec.placement.lease.spawned(pid);
+  spec.events({ type: "spawned", pid, ...placed, seq });
 }
 
 function classifyFailure(

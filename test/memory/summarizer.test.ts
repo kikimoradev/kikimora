@@ -116,11 +116,8 @@ describe("SessionSummarizer", () => {
 
     const spec = mocks.runSession.mock.calls[0]?.[0] as SessionSpec;
     expect(spec.launcher).toBe(NO_LAUNCHER);
-    expect(spec.placement).toEqual({
-      role: "summarizer",
-      pool: "executor",
-      lease: LOCAL_LEASE,
-    });
+    expect(spec.placement).toEqual({ pool: "executor", lease: LOCAL_LEASE });
+    expect(spec.meta.agent).toBe("summarizer");
     expect(spec.model).toBe("haiku");
     expect(spec.effort).toBe("low");
     expect(spec.systemPrompt).toBe("summarizer system\n");

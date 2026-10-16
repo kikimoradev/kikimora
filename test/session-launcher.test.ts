@@ -1,19 +1,16 @@
 import { describe, expect, it } from "vitest";
-import { LOCAL_LEASE, type AdmissionLease } from "../src/admission.js";
 import {
   invalidLauncherMessage,
   NO_LAUNCHER,
   parseSessionLauncher,
   sessionCommand,
-  type SessionPlacement,
+  type PlacedSession,
 } from "../src/session-launcher.js";
 
-const grantedLease: AdmissionLease = { ...LOCAL_LEASE, ticket: "ticket-9" };
-
-const executorPlacement: SessionPlacement = {
+const executorSession: PlacedSession = {
   role: "executor",
   pool: "executor",
-  lease: grantedLease,
+  ticket: "ticket-9",
 };
 
 describe("parseSessionLauncher", () => {
@@ -51,7 +48,7 @@ describe("sessionCommand", () => {
   it("runs the command itself with the given environment when there is no launcher", () => {
     const env = { PATH: "/bin" };
 
-    const command = sessionCommand("claude", ["-p"], NO_LAUNCHER, executorPlacement, env);
+    const command = sessionCommand("claude", ["-p"], NO_LAUNCHER, executorSession, env);
 
     expect(command).toEqual({ file: "claude", args: ["-p"], env });
     expect(command.env).toBe(env);
@@ -59,7 +56,7 @@ describe("sessionCommand", () => {
 
   it("keeps an inherited environment inherited when there is no launcher", () => {
     expect(
-      sessionCommand("claude", ["-p"], NO_LAUNCHER, executorPlacement, undefined).env,
+      sessionCommand("claude", ["-p"], NO_LAUNCHER, executorSession, undefined).env,
     ).toBeUndefined();
   });
 
@@ -68,7 +65,7 @@ describe("sessionCommand", () => {
       "claude",
       ["-p", "--model", "opus"],
       ["/opt/launch", "--wait"],
-      { ...executorPlacement, role: "summarizer" },
+      { ...executorSession, role: "summarizer" },
       { PATH: "/bin" },
     );
 
@@ -89,7 +86,7 @@ describe("sessionCommand", () => {
       "claude",
       [],
       ["/opt/launch"],
-      executorPlacement,
+      executorSession,
       undefined,
     );
 
@@ -102,7 +99,7 @@ describe("sessionCommand", () => {
       "claude",
       [],
       ["/opt/launch"],
-      { role: "monitor", pool: "monitor", lease: LOCAL_LEASE },
+      { role: "monitor", pool: "monitor", ticket: undefined },
       { KIKIMORA_ADMISSION_TICKET: "stale" },
     );
 

@@ -105,7 +105,7 @@ export class SessionSummarizer implements TaskSummarizer {
         {
           command: this.deps.command,
           launcher: this.deps.launcher,
-          placement: { role: "summarizer", pool: "executor", lease: outcome.lease },
+          placement: { pool: "executor", lease: outcome.lease },
           model: summarizer.model,
           effort: summarizer.effort,
           systemPrompt,

@@ -39,11 +39,7 @@ export const fixturesDir = fileURLToPath(new URL("./fixtures", import.meta.url))
 export const fakeClaudePath = join(fixturesDir, "claude");
 export const fakeClaudeLauncher: SessionLauncher =
   process.platform === "win32" ? [process.execPath] : NO_LAUNCHER;
-export const localPlacement: SessionPlacement = {
-  role: "monitor",
-  pool: "monitor",
-  lease: LOCAL_LEASE,
-};
+export const localPlacement: SessionPlacement = { pool: "monitor", lease: LOCAL_LEASE };
 
 export function snapshotEnv(): () => void {
   const saved = { ...process.env };

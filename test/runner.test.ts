@@ -433,7 +433,8 @@ describe("runSession with a session launcher", () => {
       },
       {
         launcher: fakeLauncher,
-        placement: { role: "summarizer", pool: "executor", lease },
+        meta: { agent: "summarizer", taskId: "ci-7" },
+        placement: { pool: "executor", lease },
         childEnv: fakeClaudeEnv("ok", {
           FAKE_LAUNCHER_OUT: launcherOut,
           FAKE_CLAUDE_ENV_OUT: claudeOut,
@@ -476,7 +477,7 @@ describe("runSession with a session launcher", () => {
     });
     const spec = buildSessionSpec(collector.sink, {
       launcher: fakeLauncher,
-      placement: { role: "monitor", pool: "monitor", lease: LOCAL_LEASE },
+      placement: { pool: "monitor", lease: LOCAL_LEASE },
       childEnv,
     });
 

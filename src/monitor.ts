@@ -103,7 +103,7 @@ export async function runMonitorLoop(
           {
             command: config.command,
             launcher: config.launcher,
-            placement: { role: "monitor", pool: "monitor", lease },
+            placement: { pool: "monitor", lease },
             model: monitor.model,
             effort: monitor.effort,
             systemPrompt,

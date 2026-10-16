@@ -1,11 +1,11 @@
 import type { AdmissionRole } from "./admission.js";
-import type { SessionRole } from "./session-launcher.js";
+import type { SessionAgent } from "./sessions/index.js";
 
 export type SessionEvent =
   | {
       type: "spawned";
       pid: number;
-      role: SessionRole;
+      role: SessionAgent;
       pool: AdmissionRole;
       ticket?: string | undefined;
       seq?: number | undefined;

@@ -969,7 +969,7 @@ describe("runExecutorLoop", () => {
 
       expect(complete).toHaveBeenCalledWith("a");
       const spec = mocks.runSession.mock.calls[0]?.[0] as SessionSpec;
-      expect(spec.placement).toMatchObject({ role: "executor", pool: "executor" });
+      expect(spec.placement.pool).toBe("executor");
       expect(spec.placement.lease.ticket).toBe(ticket);
       expect(summaryLeases).toEqual([spec.placement.lease]);
       expect(statesDuringSummary).toEqual(["holding"]);

@@ -1,21 +1,24 @@
 import type { AdmissionLease, AdmissionRole } from "./admission.js";
+import type { SessionAgent } from "./sessions/index.js";
 
 export const SESSION_LAUNCHER_ENV = "KIKIMORA_SESSION_LAUNCHER";
 export const SESSION_ROLE_ENV = "KIKIMORA_SESSION_ROLE";
 export const ADMISSION_POOL_ENV = "KIKIMORA_ADMISSION_POOL";
 export const ADMISSION_TICKET_ENV = "KIKIMORA_ADMISSION_TICKET";
 
-export const SESSION_ROLES = ["monitor", "executor", "summarizer"] as const;
-export type SessionRole = (typeof SESSION_ROLES)[number];
-
 export type SessionLauncher = readonly string[];
 
 export const NO_LAUNCHER: SessionLauncher = [];
 
 export interface SessionPlacement {
-  role: SessionRole;
   pool: AdmissionRole;
   lease: AdmissionLease;
+}
+
+export interface PlacedSession {
+  role: SessionAgent;
+  pool: AdmissionRole;
+  ticket: string | undefined;
 }
 
 export interface SessionCommand {
@@ -49,7 +52,7 @@ export function sessionCommand(
   command: string,
   args: string[],
   launcher: SessionLauncher,
-  placement: SessionPlacement,
+  session: PlacedSession,
   env: NodeJS.ProcessEnv | undefined,
 ): SessionCommand {
   const [file, ...prefix] = launcher;
@@ -57,18 +60,18 @@ export function sessionCommand(
   return {
     file,
     args: [...prefix, command, ...args],
-    env: placementEnv(env ?? process.env, placement),
+    env: placementEnv(env ?? process.env, session),
   };
 }
 
 function placementEnv(
   base: NodeJS.ProcessEnv,
-  placement: SessionPlacement,
+  session: PlacedSession,
 ): NodeJS.ProcessEnv {
   return {
     ...base,
-    [SESSION_ROLE_ENV]: placement.role,
-    [ADMISSION_POOL_ENV]: placement.pool,
-    [ADMISSION_TICKET_ENV]: placement.lease.ticket,
+    [SESSION_ROLE_ENV]: session.role,
+    [ADMISSION_POOL_ENV]: session.pool,
+    [ADMISSION_TICKET_ENV]: session.ticket,
   };
 }

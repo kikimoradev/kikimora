@@ -121,7 +121,7 @@ export async function runExecutorLoop(
           {
             command: config.command,
             launcher: config.launcher,
-            placement: { role: "executor", pool: "executor", lease },
+            placement: { pool: "executor", lease },
             model: executor.model,
             effort: executor.effort,
             systemPrompt,
