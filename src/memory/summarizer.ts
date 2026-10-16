@@ -1,9 +1,11 @@
 import { readFile } from "node:fs/promises";
+import type { AdmissionLease } from "../admission.js";
 import { detectAuthFailure } from "../auth-gate.js";
 import type { LoopGates } from "../gates.js";
 import { writeMcpConfig } from "../mcp-config.js";
 import { runSession } from "../runner.js";
 import type { SessionEventSink } from "../session-events.js";
+import type { SessionLauncher } from "../session-launcher.js";
 import type { SessionRecorder } from "../sessions/index.js";
 import type { SummaryOutcome } from "../status.js";
 import type { SessionResult, SummarizerConfig, Task } from "../types.js";
@@ -13,6 +15,7 @@ import { composeSummaryPrompt, parseSummary, SUMMARY_JSON_SCHEMA } from "./summa
 
 export interface TaskOutcomeContext {
   willRetry: boolean;
+  lease: AdmissionLease;
 }
 
 export interface TaskSummarizer {
@@ -32,6 +35,7 @@ export interface SummaryReporter {
 
 export interface SessionSummarizerDeps {
   command: string;
+  launcher: SessionLauncher;
   summarizer: SummarizerConfig;
   streamPartial: boolean;
   cwd: string;
@@ -100,6 +104,8 @@ export class SessionSummarizer implements TaskSummarizer {
       const sessionResult = await runSession(
         {
           command: this.deps.command,
+          launcher: this.deps.launcher,
+          placement: { pool: "executor", lease: outcome.lease },
           model: summarizer.model,
           effort: summarizer.effort,
           systemPrompt,

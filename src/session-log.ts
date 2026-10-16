@@ -47,7 +47,7 @@ export class SessionLog {
   ) {}
 
   readonly sink: SessionEventSink = (event) => {
-    if (event.type === "partial") return;
+    if (event.type === "partial" || event.type === "spawned") return;
     const at = this.now();
     const streams =
       event.type === "init"

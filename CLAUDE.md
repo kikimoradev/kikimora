@@ -33,6 +33,7 @@ pnpm test                 # vitest run
 pnpm test test/executor.test.ts        # a single test file
 pnpm vitest run -t "test name"         # a single test by name
 pnpm test:coverage        # coverage thresholds enforced in vitest.config.ts
+pnpm test:sessions        # runner, launcher, process tree and admission tests (the Windows CI job)
 pnpm build                # tsup -> dist/
 ```
 
@@ -46,7 +47,7 @@ pnpm build                # tsup -> dist/
 - `kikimora init` goes to `initCommand` (`src/init-command.ts`), non-interactive scaffolding through `src/scaffold.ts`, which the wizard shares. It reads every input and validates `--settings` with `parseSettings` before writing the first file. `--force` covers every file the call writes. Without flags in a TTY it opens the wizard.
 - `kikimora status|version|pause|resume|drain` go to `src/control-commands.ts`, and `tasks|settings|prompt|context|memory|sessions` to the `*-command.ts` groups. All of them are clients of the control socket.
 - `kikimora update` goes to `src/update-command.ts`.
-- Everything else goes to `mainCommand` (`src/main.ts`, citty). Flags: `--headless`, `--log-format pretty|json` (env fallback `KIKIMORA_LOG_FORMAT`), `--verbose`, `--paused` (env fallback `KIKIMORA_START_PAUSED`).
+- Everything else goes to `mainCommand` (`src/main.ts`, citty). Flags: `--headless`, `--log-format pretty|json` (env fallback `KIKIMORA_LOG_FORMAT`), `--verbose`, `--paused` (env fallback `KIKIMORA_START_PAUSED`). `main.ts` also parses `KIKIMORA_ADMISSION` and `KIKIMORA_SESSION_LAUNCHER` and exits 1 on a malformed value.
 
 The manual dispatch exists because citty treats the first positional raw arg as a subcommand name and runs the parent `run` after a subcommand.
 
@@ -85,6 +86,7 @@ The **`AdmissionGate` (`admission.ts`)** lets a supervisor decide when sessions 
 - The wait races `controller.pauseRequested` and the abort signal; a cancelled wait goes back to `controller.gate()`, so a drain still settles.
 - After a grant each loop checks again (state, both other gates, working hours unless a check was requested) and gives an unused slot back. The executor peeks at the queue (`TaskStore.peekNext`) and claims the task only after the grant, holds the slot through the summarizer, and gives it back before a retry backoff. Every exit releases the lease in a `finally`.
 - `status` reports `admission` per agent with a `seq` that grows with every change; `admission.granted|released|cancelled` log events carry the same `seq`.
+- The `AdmissionLease` carries its `ticket` (undefined for the shared `LOCAL_LEASE`). `runSession` calls `lease.spawned(pid)` after the spawn and `lease.exited(pid)` after the close, which put the pid on the held slot and take it off, each with a new `seq`. The executor hands its lease to the summarizer through `TaskOutcomeContext`, so the summary runs under the executor's ticket.
 
 All three gates travel together as `LoopGates` (`gates.ts`). Preflight also runs `claude --version` and `claude auth status --json` once; both results reach `start.ts` as `PreflightResult.claude`. Preflight refuses to start without a login; with an older CLI that has no `auth status`, it logs a warning and continues.
 
@@ -117,15 +119,19 @@ In an interactive terminal `start.ts` constructs both controllers as `paused`, s
 - A first signal with `graceMsFor(signal) > 0` calls `onDrain`.
 - Any other signal, including every signal after a drain began, calls `onAbort` and aborts.
 - After the abort the listeners detach, so a further signal gets Node's default and ends the process.
+- It listens to `SIGINT`, `SIGTERM` and `SIGHUP`. Sessions lead their own process group, so a closing terminal reaches them only through this abort.
 
 `start.ts` grants `SIGTERM` a grace of `config.shutdownGraceMs` unless a drain is already running. The value is read at signal time, so a patched setting applies to the next signal. `onDrain` requests a drain with that deadline.
 
 ### Components
 
-- **`runner.ts`**: the only place that spawns the `claude` process. Arguments: `-p --model --effort --system-prompt --output-format stream-json --verbose --permission-mode bypassPermissions`, `--include-partial-messages` when `streamPartial` is on, `--mcp-config <path> --strict-mcp-config`, and `--json-schema` for the monitor and summarizer. The prompt goes in over stdin. On timeout or abort it sends SIGTERM, then SIGKILL after 5 s. `stream.ts` parses stream-json into `SessionEvent`s and builds a `SessionSummary`.
+- **`runner.ts`**: the only place that spawns the `claude` process. Arguments: `-p --model --effort --system-prompt --output-format stream-json --verbose --permission-mode bypassPermissions`, `--include-partial-messages` when `streamPartial` is on, `--mcp-config <path> --strict-mcp-config`, and `--json-schema` for the monitor and summarizer. The prompt goes in over stdin. `stream.ts` parses stream-json into `SessionEvent`s and builds a `SessionSummary`.
+  - `session-launcher.ts`: `KIKIMORA_SESSION_LAUNCHER` (`WorkerConfig.launcher`, empty = none) is an argv prefix. `sessionCommand` turns it into `<launcher…> claude <args>` with `KIKIMORA_SESSION_ROLE` (from `meta.agent`), `KIKIMORA_ADMISSION_POOL` and `KIKIMORA_ADMISSION_TICKET` (from `SessionSpec.placement`) in the environment; without a launcher the command, arguments and `childEnv` pass through untouched. The first `SessionEvent` of a session is `spawned`; `SessionLog` and the TUI skip it, headless logs it as `session.spawned`.
+  - `process-tree.ts`: on POSIX the session is spawned `detached`, so it leads a process group. On timeout or abort `terminateProcessTree` sends SIGTERM to the group, SIGKILL after 5 s, and `runSession` awaits it, so no descendant outlives the session. On Windows it runs `taskkill /PID <pid> /T /F`, only while the session process is alive, because Windows reuses pids.
 - **`tasks.ts` (`TaskStore`)**: a JSON task store (`.kikimora/data/tasks.json`) with atomic writes (tmp + rename). Operations are serialized through a promise chain. On startup it resets stalled `in_progress` tasks to `pending`.
 - **`src/memory/`**: long-term memory.
   - `store.ts`: SQLite via `node:sqlite` with FTS5.
+  - `export.ts`: `exportMemory` runs `VACUUM INTO` on the worker's handle into a temporary sibling, checks it with `PRAGMA quick_check`, counts the entries and renames it into place. Behind `memory.export` and `kikimora memory export`; never copy `memory.db` with file tools while it is open.
   - `summarizer.ts`: a session on the `summarizer.model` (default `sonnet`) that reads the executor session log and writes the result to the database.
   - `mcp.ts`: a stdio MCP server with the `memory_search` and `memory_get` tools. An MCP config points back at the same binary: `kikimora mcp serve --db ...`.
 - **`mcp-config.ts`**: the MCP configuration handed to every session. `composeMcpConfig` builds the document in this order:
@@ -146,7 +152,7 @@ In an interactive terminal `start.ts` constructs both controllers as `paused`, s
   - Transport: a unix domain socket (a named pipe on win32) at `controlSocketPath(projectDir)` in `paths.ts`. The path is tmpdir + uid + the first 16 hex characters of the sha256 of the resolved project path. It sits outside `.kikimora/` to stay under the 104-byte `sun_path` limit. `KIKIMORA_CONTROL_SOCKET` overrides it and is validated in the same function, so the worker and the CLI agree.
   - `start.ts` starts the server in both TUI and headless mode. Startup probes the socket first: a live listener means another instance, and the worker exits 1 with "already running (pid …)"; a stale file is unlinked.
   - Protocol: one newline-delimited JSON request per connection, validated by the zod discriminated union `controlRequestSchema`, answered with `{ok:true,data}` or `{ok:false,error}`, typed per command (`ControlResponseData`).
-  - Commands: `status`, `version`, `pause`, `resume`, `drain`, `monitor.check`, `admission.grant`, plus mirrors of the TUI: `settings.get|patch`, `tasks.list|add|retry|cancel`, `memory.search|recent`, `prompt.get|set`, `context.get|set`, `sessions.list|get`. The server receives the same store instances as the dashboard through the neutral interfaces in `worker-controls.ts`. Do not import `src/ui/` there.
+  - Commands: `status`, `version`, `pause`, `resume`, `drain`, `monitor.check`, `admission.grant`, plus mirrors of the TUI: `settings.get|patch`, `tasks.list|add|retry|cancel`, `memory.search|recent|export`, `prompt.get|set`, `context.get|set`, `sessions.list|get`. The server receives the same store instances as the dashboard through the neutral interfaces in `worker-controls.ts`. Do not import `src/ui/` there.
   - `version` answers the static `WorkerIdentity` (`worker-identity.ts`): kikimora, Claude Code and Node versions, pid, `startedAt`, `projectDir`, and `authKind`. `authKind` resolves `ANTHROPIC_API_KEY`, then `CLAUDE_CODE_OAUTH_TOKEN`, then the preflight `claude auth status` report, matching Claude Code's own precedence. `start.ts` builds the identity once; it is spread into the `status` document and logged in the headless `worker.started` event.
   - Protocol fields may only be added. Do not rename them or set them to `null`; omit optional ones.
   - The CLI side goes through `requestControl` in `control-commands.ts` and exits 1 when no worker answers or the request is rejected. An `Unrecognized control request.` from an older worker is reported as a version skew with a restart hint.

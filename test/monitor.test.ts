@@ -1,5 +1,6 @@
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import type { SessionSpec } from "../src/runner.js";
 import type { TaskStore } from "../src/tasks.js";
 import type { SessionResult, Task } from "../src/types.js";
 import { Waker } from "../src/waker.js";
@@ -932,6 +933,9 @@ describe("runMonitorLoop", () => {
       await vi.advanceTimersByTimeAsync(1);
 
       expect(mocks.runSession).toHaveBeenCalledTimes(1);
+      const spec = mocks.runSession.mock.calls[0]?.[0] as SessionSpec;
+      expect(spec.placement.pool).toBe("monitor");
+      expect(spec.placement.lease.ticket).toBe(ticket);
       expect(spy.cycleFinished).toHaveBeenCalledWith(
         expect.objectContaining({ ok: true }),
       );

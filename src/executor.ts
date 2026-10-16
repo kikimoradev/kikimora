@@ -120,6 +120,8 @@ export async function runExecutorLoop(
         const result = await runSession(
           {
             command: config.command,
+            launcher: config.launcher,
+            placement: { pool: "executor", lease },
             model: executor.model,
             effort: executor.effort,
             systemPrompt,
@@ -149,7 +151,7 @@ export async function runExecutorLoop(
             sessionId: result.sessionId,
           });
           await summarizer
-            .summarize(task, result, { willRetry: false }, signal)
+            .summarize(task, result, { willRetry: false, lease }, signal)
             .catch(() => undefined);
         } else {
           const error = result.error ?? "unknown error";
@@ -208,7 +210,7 @@ export async function runExecutorLoop(
             sessionId: result.sessionId,
           });
           await summarizer
-            .summarize(task, result, { willRetry }, signal)
+            .summarize(task, result, { willRetry, lease }, signal)
             .catch(() => undefined);
           if (willRetry && executor.retryDelayMs > 0) {
             backoff = { task, resumeAt: new Date(Date.now() + executor.retryDelayMs) };

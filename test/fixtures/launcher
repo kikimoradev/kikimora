@@ -1,0 +1,24 @@
+import { spawn } from "node:child_process";
+import { writeFileSync } from "node:fs";
+
+const [command, ...args] = process.argv.slice(2);
+const out = process.env.FAKE_LAUNCHER_OUT;
+
+if (out) {
+  const kikimoraEnv = Object.fromEntries(
+    Object.entries(process.env).filter(([key]) => key.startsWith("KIKIMORA_")),
+  );
+  writeFileSync(
+    out,
+    JSON.stringify({ pid: process.pid, argv: process.argv.slice(2), env: kikimoraEnv }),
+  );
+}
+
+const session = spawn(process.execPath, [command, ...args], {
+  stdio: "inherit",
+  windowsHide: true,
+});
+process.on("SIGTERM", () => session.kill("SIGTERM"));
+session.on("exit", (code, signal) => {
+  process.exit(code ?? (signal === null ? 1 : 128));
+});

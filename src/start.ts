@@ -16,6 +16,7 @@ import { createHeadlessReporters, emitAdmissionChange } from "./headless/reporte
 import { createHeadlessSink } from "./headless/sink.js";
 import { teeReporter } from "./headless/tee.js";
 import { logger } from "./logger.js";
+import { exportMemory } from "./memory/export.js";
 import { MemoryStore } from "./memory/store.js";
 import { SessionSummarizer } from "./memory/summarizer.js";
 import { runMonitorLoop } from "./monitor.js";
@@ -23,6 +24,7 @@ import { requestMonitorCheck, type MonitorCheckOutcome } from "./monitor-check.j
 import { controlSocketPath, packageVersion, projectPaths } from "./paths.js";
 import { ensureReady } from "./preflight.js";
 import { createPromptFileAccess } from "./prompt-files.js";
+import { NO_LAUNCHER, type SessionLauncher } from "./session-launcher.js";
 import { SessionLog, teeSession } from "./session-log.js";
 import { SessionIndex, type SessionRecorder } from "./sessions/index.js";
 import { createSettingsController } from "./settings-controller.js";
@@ -42,6 +44,7 @@ export interface StartWorkerOptions {
   verbose?: boolean | undefined;
   paused?: boolean | undefined;
   admission?: AdmissionMode | undefined;
+  launcher?: SessionLauncher | undefined;
   stdout?: { write(chunk: string): unknown } | undefined;
 }
 
@@ -51,9 +54,10 @@ export async function startWorker(options: StartWorkerOptions = {}): Promise<voi
   let store;
   let memory;
   try {
-    const preflight = await ensureReady();
+    const launcher = options.launcher ?? NO_LAUNCHER;
+    const preflight = await ensureReady({}, { launcher });
     claude = preflight.claude;
-    config = await loadWorkerConfig({}, preflight.paths);
+    config = await loadWorkerConfig({}, preflight.paths, launcher);
     store = await TaskStore.open(config.tasksFilePath);
     memory = MemoryStore.open(config.memoryDbPath);
   } catch (err) {
@@ -212,6 +216,7 @@ export async function startWorker(options: StartWorkerOptions = {}): Promise<voi
       admission: gates.admission,
       tasks: store,
       memory,
+      memoryExport: { export: (path) => exportMemory(memory, path) },
       sessions,
       settings,
       prompts,
@@ -273,6 +278,7 @@ export async function startWorker(options: StartWorkerOptions = {}): Promise<voi
 
   const summarizer = new SessionSummarizer({
     command: config.command,
+    launcher: config.launcher,
     summarizer: config.summarizer,
     streamPartial: config.streamPartial,
     cwd: config.cwd,

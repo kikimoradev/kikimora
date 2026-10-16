@@ -102,6 +102,8 @@ export async function runMonitorLoop(
         const result = await runSession(
           {
             command: config.command,
+            launcher: config.launcher,
+            placement: { pool: "monitor", lease },
             model: monitor.model,
             effort: monitor.effort,
             systemPrompt,

@@ -428,7 +428,7 @@ export class WorkerStatusStore {
     state: AgentState<Phase, Outcome>,
     event: SessionEvent,
   ): void {
-    if (event.type === "stream") return;
+    if (event.type === "stream" || event.type === "spawned") return;
     state.lastEventAt = Date.now();
     if (event.type === "partial") {
       state.partialSeen = true;
@@ -451,7 +451,7 @@ export class WorkerStatusStore {
 
   private pushEvent<Phase, Outcome>(
     state: AgentState<Phase, Outcome>,
-    event: Exclude<SessionEvent, { type: "partial" | "stream" }>,
+    event: Exclude<SessionEvent, { type: "partial" | "stream" | "spawned" }>,
   ): void {
     switch (event.type) {
       case "init":

@@ -1,3 +1,5 @@
+import type { SessionLauncher } from "./session-launcher.js";
+
 export const EFFORT_LEVELS = ["low", "medium", "high", "xhigh", "max"] as const;
 
 export type EffortLevel = (typeof EFFORT_LEVELS)[number];
@@ -50,6 +52,7 @@ export type SummarizerConfig = Omit<AgentConfig, "promptPath" | "mcpServers">;
 
 export interface WorkerConfig {
   command: string;
+  launcher: SessionLauncher;
   monitor: MonitorConfig;
   executor: ExecutorConfig;
   summarizer: SummarizerConfig;

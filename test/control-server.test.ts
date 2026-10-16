@@ -71,6 +71,13 @@ function fakeDeps() {
       search: vi.fn().mockReturnValue([]),
       recent: vi.fn().mockReturnValue([]),
     },
+    memoryExport: {
+      export: vi
+        .fn()
+        .mockImplementation((path: string) =>
+          Promise.resolve({ path, bytes: 8192, entries: 3 }),
+        ),
+    },
     sessions: {
       list: vi.fn().mockReturnValue([]),
       get: vi.fn().mockReturnValue(undefined),
@@ -639,6 +646,41 @@ describe("startControlServer", () => {
 
     expect(deps.memory.search).toHaveBeenCalledWith("deploy", 5);
     expect(deps.memory.recent).toHaveBeenCalledWith(10);
+  });
+
+  it("exports memory to the requested path and reports a refused export", async () => {
+    const fakes = fakeDeps();
+    await startServer({ fakes });
+
+    const exported = await sendControlRequest(socketPath, {
+      cmd: "memory.export",
+      path: "/backups/memory.db",
+    });
+    fakes.memoryExport.export.mockRejectedValueOnce(
+      new Error("/backups/memory.db already exists; export to a new path."),
+    );
+    const refused = await sendControlRequest(socketPath, {
+      cmd: "memory.export",
+      path: "/backups/memory.db",
+    });
+    const blank = await sendControlRequest(socketPath, {
+      cmd: "memory.export",
+      path: " ",
+    });
+
+    expect(exported).toEqual({
+      ok: true,
+      data: { path: "/backups/memory.db", bytes: 8192, entries: 3 },
+    });
+    expect(refused).toEqual({
+      ok: false,
+      error: "/backups/memory.db already exists; export to a new path.",
+    });
+    expect(blank).toEqual({
+      ok: false,
+      error: "Invalid memory.export request: path: must not be blank",
+    });
+    expect(fakes.memoryExport.export).toHaveBeenCalledTimes(2);
   });
 
   it("lists sessions with the default limit and forwards every filter", async () => {

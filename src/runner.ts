@@ -1,6 +1,13 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
+import { leadsOwnProcessGroup, terminateProcessTree } from "./process-tree.js";
 import type { SessionEventSink } from "./session-events.js";
+import {
+  sessionCommand,
+  type PlacedSession,
+  type SessionLauncher,
+  type SessionPlacement,
+} from "./session-launcher.js";
 import type { SessionMeta, SessionRecorder } from "./sessions/index.js";
 import { StreamRenderer } from "./stream.js";
 import type { EffortLevel, SessionFailureReason, SessionResult } from "./types.js";
@@ -12,6 +19,8 @@ type KillReason = "timeout" | "abort";
 
 export interface SessionSpec {
   command: string;
+  launcher: SessionLauncher;
+  placement: SessionPlacement;
   model: string;
   effort: EffortLevel;
   systemPrompt: string;
@@ -53,10 +62,17 @@ export async function runSession(
   args.push("--mcp-config", spec.mcpConfigPath, "--strict-mcp-config");
   if (spec.jsonSchema) args.push("--json-schema", spec.jsonSchema);
 
-  const child = spawn(spec.command, args, {
+  const placed: PlacedSession = {
+    role: spec.meta.agent,
+    pool: spec.placement.pool,
+    ticket: spec.placement.lease.ticket,
+  };
+  const launch = sessionCommand(spec.command, args, spec.launcher, placed, spec.childEnv);
+  const child = spawn(launch.file, launch.args, {
     cwd: spec.cwd,
-    env: spec.childEnv,
+    env: launch.env,
     stdio: ["pipe", "pipe", "pipe"],
+    detached: leadsOwnProcessGroup(),
   });
 
   const indexed: { sessionId: string | null } = { sessionId: null };
@@ -76,10 +92,15 @@ export async function runSession(
   };
   const renderer = new StreamRenderer(events, spec.streamPartial);
 
-  const killState: { reason: KillReason | null } = { reason: null };
+  const killState: { reason: KillReason | null; termination: Promise<void> | null } = {
+    reason: null,
+    termination: null,
+  };
   const kill = (reason: KillReason): void => {
-    killState.reason ??= reason;
-    killChild(child, reason, spec.events);
+    if (killState.termination !== null || hasExited(child)) return;
+    killState.reason = reason;
+    spec.events({ type: "killing", reason });
+    killState.termination = terminateProcessTree(child, KILL_GRACE_MS);
   };
 
   const timeout = spec.sessionTimeoutMs
@@ -106,10 +127,11 @@ export async function runSession(
       return {
         ok: false,
         durationMs: Date.now() - startedAt,
-        error: `Failed to start "${spec.command}": ${spawnError.message}`,
+        error: `Failed to start "${launch.file}": ${spawnError.message}`,
         failureReason: "spawn",
       };
     }
+    announceSpawn(child, spec, placed);
 
     child.on("error", (err) =>
       spec.events({ type: "procError", message: `Process error: ${err.message}` }),
@@ -128,6 +150,7 @@ export async function runSession(
         resolvePromise({ code: exitCode, exitSignal: closeSignal }),
       );
     });
+    if (killState.termination !== null) await killState.termination;
 
     const summary = renderer.getSummary();
     const ok = code === 0 && !summary.isError && killState.reason === null;
@@ -160,11 +183,23 @@ export async function runSession(
       terminalReason: summary.terminalReason,
     };
   } finally {
+    if (child.pid !== undefined) spec.placement.lease.exited(child.pid);
     if (timeout) clearTimeout(timeout);
     signal.removeEventListener("abort", onAbort);
     rl.close();
     stderrRl.close();
   }
+}
+
+function announceSpawn(
+  child: ChildProcess,
+  spec: SessionSpec,
+  placed: PlacedSession,
+): void {
+  const { pid } = child;
+  if (pid === undefined) return;
+  const seq = spec.placement.lease.spawned(pid);
+  spec.events({ type: "spawned", pid, ...placed, seq });
 }
 
 function classifyFailure(
@@ -195,17 +230,6 @@ function describeFailure(
   }
 }
 
-function killChild(
-  child: ChildProcess,
-  reason: KillReason,
-  events: SessionEventSink,
-): void {
-  if (child.exitCode !== null || child.signalCode !== null) return;
-  events({ type: "killing", reason });
-  child.kill("SIGTERM");
-  setTimeout(() => {
-    if (child.exitCode === null && child.signalCode === null) {
-      child.kill("SIGKILL");
-    }
-  }, KILL_GRACE_MS).unref();
+function hasExited(child: ChildProcess): boolean {
+  return child.exitCode !== null || child.signalCode !== null;
 }

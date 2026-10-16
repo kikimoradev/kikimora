@@ -121,10 +121,11 @@ describe("abortOnSignals", () => {
     expect(process.listenerCount(OTHER_SIGNAL)).toBe(1);
   });
 
-  it("listens to SIGINT and SIGTERM by default", () => {
+  it("listens to SIGINT, SIGTERM and SIGHUP by default", () => {
     const before = {
       SIGINT: process.listeners("SIGINT"),
       SIGTERM: process.listeners("SIGTERM"),
+      SIGHUP: process.listeners("SIGHUP"),
     };
     const spy = policy();
     const signal = abortOnSignals(spy);
@@ -134,11 +135,13 @@ describe("abortOnSignals", () => {
       .filter((listener) => !before.SIGINT.includes(listener));
     expect(added).toHaveLength(1);
     expect(process.listeners("SIGTERM")).toHaveLength(before.SIGTERM.length + 1);
+    expect(process.listeners("SIGHUP")).toHaveLength(before.SIGHUP.length + 1);
     added[0]?.("SIGINT");
 
     expect(signal.aborted).toBe(true);
     expect(spy.onAbort).toHaveBeenCalledWith("SIGINT");
     expect(process.listeners("SIGINT")).toEqual(before.SIGINT);
     expect(process.listeners("SIGTERM")).toEqual(before.SIGTERM);
+    expect(process.listeners("SIGHUP")).toEqual(before.SIGHUP);
   });
 });

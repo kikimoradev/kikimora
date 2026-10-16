@@ -15,6 +15,7 @@ Headless mode turns on when stdin or stdout is not a TTY. `--headless` forces it
 | `--paused`                    | off      | start both agents paused; `kikimora resume` starts them (the TUI starts agents paused regardless)                            |
 | `KIKIMORA_START_PAUSED`       | unset    | fallback for `--paused` (`1` or `true`)                                                                                      |
 | `KIKIMORA_ADMISSION`          | `local`  | `external` makes every session wait for a slot granted by a supervisor ([external admission](control.md#external-admission)) |
+| `KIKIMORA_SESSION_LAUNCHER`   | unset    | start every session through a command of yours, given as a JSON array ([session launcher](#session-launcher))                |
 
 - `pretty` is for `journalctl -f` and reading by eye.
 - `json` is NDJSON, one JSON object per line, for log aggregators such as Loki, Datadog or CloudWatch.
@@ -61,6 +62,7 @@ Each JSON line carries an envelope plus the event's own fields:
 | `monitor.admissionWait` / `executor.admissionWait`                 | `ticket`, `since`, `seq`; the executor adds the `taskId` it waits to start                                                              |
 | `admission.granted` / `admission.released` / `admission.cancelled` | `ticket`, `seq`: a slot was granted, given back after the session, or a wait ended without a grant                                      |
 | `summary.started` / `summary.finished`                             | `taskId`; finished adds `ok`, `durationMs`, `costUsd`, `error`, `sessionId`                                                             |
+| `session.spawned`                                                  | `pid`, `role`, `pool`, plus `ticket` and `seq` under external admission: the session process started, before Claude Code reports in     |
 | `session.init`                                                     | `model`, `sessionId`, plus `taskId` (executor, summarizer) or `cycle` (monitor)                                                         |
 | `session.stderr` / `session.procError` / `session.killed`          | `line` / `message` / `reason`                                                                                                           |
 | `session.text` / `session.tool` / `session.toolError`              | only with `--verbose`                                                                                                                   |
@@ -81,6 +83,29 @@ Each session writes two files side by side under `.kikimora/logs/<agent>/<YYYY-M
 ```bash
 find ~/your-project/.kikimora/logs -type f -mtime +30 -delete
 ```
+
+## Session launcher
+
+`KIKIMORA_SESSION_LAUNCHER` puts a command of yours in front of every monitor, executor and summarizer session, for example to move it into a resource pool before Claude Code starts. The value is a JSON array of strings, and the session runs as that array followed by `claude` and its arguments:
+
+```bash
+KIKIMORA_SESSION_LAUNCHER='["/usr/local/bin/pool-launch","--"]' kikimora
+# a session starts as: /usr/local/bin/pool-launch -- claude -p --model … --strict-mcp-config
+```
+
+The launcher starts with the worker's environment plus three variables, and must run the rest of its arguments with stdin, stdout and stderr untouched, ideally by `exec`:
+
+| Variable                    | Value                                                                                               |
+| --------------------------- | --------------------------------------------------------------------------------------------------- |
+| `KIKIMORA_SESSION_ROLE`     | `monitor`, `executor` or `summarizer`                                                               |
+| `KIKIMORA_ADMISSION_POOL`   | `monitor` or `executor`; the summarizer runs in the executor's pool                                 |
+| `KIKIMORA_ADMISSION_TICKET` | the granted ticket under [external admission](control.md#external-admission); unset in `local` mode |
+
+- The worker refuses to start when the value is not such an array, or when preflight cannot find the first element as a file or in `PATH`.
+- `session.spawned` logs the pid of the process the worker started, which is the launcher's, and `status` shows it on the held slot.
+- Without the variable a session starts as `claude` directly, with the worker's environment unchanged.
+
+A timeout, a shutdown or a drain deadline stops a session with every process it started. On Linux and macOS each session leads its own process group, which receives `SIGTERM` and, 5 s later, `SIGKILL`; this also reaches MCP servers and shells whose parent has already exited. On Windows the worker runs `taskkill /T /F` on the session process, which reaches the processes still under it. A launcher that places the session in a Job Object also covers the rest.
 
 ## Controlling a running worker
 
@@ -105,9 +130,9 @@ kikimora sessions list    # what ran, when, at what cost
 
 ## Stopping the worker
 
-By default `SIGINT` (Ctrl+C) and `SIGTERM` (`systemctl stop`, `docker stop`) stop the worker at once:
+By default `SIGINT` (Ctrl+C), `SIGHUP` (the terminal closes) and `SIGTERM` (`systemctl stop`, `docker stop`) stop the worker at once:
 
-1. A running session is killed (`session.killed reason=abort`).
+1. A running session is killed with the processes it started (`session.killed reason=abort`).
 2. Its task stays `in_progress` and returns to the queue on the next start.
 3. The worker closes its logs and socket and logs `worker.stopped signal=…`.
 
@@ -130,7 +155,7 @@ To drain on `SIGTERM`, set a grace in `.kikimora/settings.json`:
 
 - The default `0` keeps the immediate stop.
 - A patched value applies to the next signal.
-- `SIGINT` stops at once regardless of the grace.
+- `SIGINT` and `SIGHUP` stop at once regardless of the grace.
 - A signal during a drain stops the worker at once, as without a grace. A further signal after that ends the process without cleanup.
 
 The supervisor's stop timeout must be longer than the grace. Otherwise it sends `SIGKILL` in the middle of the drain. Kikimora cannot catch `SIGKILL`: no `worker.stopped` is logged, and the session dies with the process. Give the supervisor at least 10 s on top of the grace, to kill what still runs and close the logs:

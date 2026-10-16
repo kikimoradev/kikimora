@@ -49,6 +49,7 @@
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
+    "test:sessions": "vitest run test/runner.test.ts test/session-launcher.test.ts test/process-tree.test.ts test/admission.test.ts",
     "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test",
     "prepublishOnly": "pnpm check && pnpm build"
   },

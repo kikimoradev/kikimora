@@ -53,9 +53,10 @@ describe("SessionLog", () => {
     ]);
   });
 
-  it("skips partial events", async () => {
+  it("skips partial events and the process spawn that precedes init", async () => {
     const at = new Date(2026, 6, 2, 10, 0, 0);
     const log = new SessionLog(dir, () => at);
+    log.sink({ type: "spawned", pid: 42, role: "monitor", pool: "monitor" });
     log.sink({ type: "init", model: "haiku", sessionId: "s", toolCount: 0 });
     log.sink({ type: "partial", text: "fragment" });
     log.sink({ type: "text", text: "full" });
@@ -68,6 +69,9 @@ describe("SessionLog", () => {
         "[10:00:00] full",
         "",
       ].join("\n"),
+    );
+    expect(await readdir(join(dir, "2026-07-02"))).not.toContain(
+      expect.stringContaining("unknown"),
     );
   });
 

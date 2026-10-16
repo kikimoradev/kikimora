@@ -1,15 +1,79 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { AdmissionGate, LOCAL_LEASE, type AdmissionLease } from "../src/admission.js";
 import { runSession } from "../src/runner.js";
+import { NO_LAUNCHER } from "../src/session-launcher.js";
 import {
   buildSessionSpec,
   createSessionEventCollector,
   createTempDir,
   fakeClaudeEnv,
+  fakeClaudePath,
+  fixturesDir,
   removeTempDir,
   type SessionEventCollector,
 } from "./helpers.js";
+
+const fakeLauncher = [process.execPath, join(fixturesDir, "launcher")];
+const posixOnly = it.skipIf(process.platform === "win32");
+
+interface LauncherRecord {
+  pid: number;
+  argv: string[];
+  env: Record<string, string>;
+}
+
+interface ClaudeRecord {
+  pid: number;
+  env: Record<string, string>;
+}
+
+interface TreeRecord {
+  attached: number[];
+  orphaned: number[];
+}
+
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (error) {
+    return (error as NodeJS.ErrnoException).code === "EPERM";
+  }
+}
+
+function killQuietly(pid: number): void {
+  try {
+    process.kill(pid, "SIGKILL");
+  } catch {
+    return;
+  }
+}
+
+function kikimoraVars(env: NodeJS.ProcessEnv): Record<string, string | undefined> {
+  return Object.fromEntries(
+    Object.entries(env).filter(([key]) => key.startsWith("KIKIMORA_")),
+  );
+}
+
+async function readJson<T>(path: string): Promise<T> {
+  return JSON.parse(await readFile(path, "utf8")) as T;
+}
+
+async function grantedLease(gate: AdmissionGate): Promise<AdmissionLease> {
+  const waiting = gate.acquire("executor", {
+    signal: new AbortController().signal,
+    interrupted: () => new Promise(() => undefined),
+    taskId: "ci-7",
+    onWait: (wait) => {
+      setImmediate(() => gate.grant("executor", wait.ticket));
+    },
+  });
+  const lease = await waiting;
+  if (lease === null) throw new Error("the gate granted no lease");
+  return lease;
+}
 
 describe("runSession (integration with fake claude)", () => {
   let dir: string;
@@ -93,6 +157,7 @@ describe("runSession (integration with fake claude)", () => {
   it("returns a spawn error when the command is missing", async () => {
     const spec = buildSessionSpec(collector.sink, {
       command: "claude-does-not-exist-xyz",
+      launcher: NO_LAUNCHER,
     });
     const result = await runSession(spec, new AbortController().signal);
 
@@ -331,6 +396,7 @@ describe("runSession (integration with fake claude)", () => {
     const finished = vi.fn();
     const spec = buildSessionSpec(collector.sink, {
       command: join(dir, "missing-binary"),
+      launcher: NO_LAUNCHER,
       index: { started, finished },
     });
 
@@ -340,4 +406,202 @@ describe("runSession (integration with fake claude)", () => {
     expect(started).not.toHaveBeenCalled();
     expect(finished).not.toHaveBeenCalled();
   }, 15_000);
+});
+
+describe("runSession with a session launcher", () => {
+  let dir: string;
+  let collector: SessionEventCollector;
+
+  beforeEach(async () => {
+    dir = await createTempDir();
+    collector = createSessionEventCollector();
+  });
+
+  afterEach(() => removeTempDir(dir));
+
+  it("starts the session through the launcher with its role, pool and ticket", async () => {
+    const launcherOut = join(dir, "launcher.json");
+    const claudeOut = join(dir, "claude.json");
+    const gate = new AdmissionGate("external");
+    const lease = await grantedLease(gate);
+    const slotPids: (number | undefined)[] = [];
+    const spec = buildSessionSpec(
+      (event) => {
+        collector.sink(event);
+        if (event.type === "spawned") {
+          const slot = gate.status().executor;
+          slotPids.push(slot.state === "holding" ? slot.pid : undefined);
+        }
+      },
+      {
+        launcher: fakeLauncher,
+        meta: { agent: "summarizer", taskId: "ci-7" },
+        placement: { pool: "executor", lease },
+        childEnv: fakeClaudeEnv("ok", {
+          FAKE_LAUNCHER_OUT: launcherOut,
+          FAKE_CLAUDE_ENV_OUT: claudeOut,
+          KIKIMORA_SESSION_ROLE: "stale",
+        }),
+      },
+    );
+
+    const result = await runSession(spec, new AbortController().signal);
+
+    expect(result.ok).toBe(true);
+    const launcher = await readJson<LauncherRecord>(launcherOut);
+    expect(launcher.argv.slice(0, 3)).toEqual([fakeClaudePath, "-p", "--model"]);
+    const placement = {
+      KIKIMORA_SESSION_ROLE: "summarizer",
+      KIKIMORA_ADMISSION_POOL: "executor",
+      KIKIMORA_ADMISSION_TICKET: lease.ticket,
+    };
+    expect(launcher.env).toMatchObject(placement);
+    expect((await readJson<ClaudeRecord>(claudeOut)).env).toMatchObject(placement);
+    expect(collector.events[0]).toEqual({
+      type: "spawned",
+      pid: launcher.pid,
+      role: "summarizer",
+      pool: "executor",
+      ticket: lease.ticket,
+      seq: expect.any(Number) as number,
+    });
+    expect(slotPids).toEqual([launcher.pid]);
+    const after = gate.status().executor;
+    expect(after.state).toBe("holding");
+    expect(after.state === "holding" ? after.pid : "idle").toBeUndefined();
+  }, 15_000);
+
+  it("leaves the ticket out without a supervisor, even when the worker inherited one", async () => {
+    const launcherOut = join(dir, "launcher-local.json");
+    const childEnv = fakeClaudeEnv("ok", {
+      FAKE_LAUNCHER_OUT: launcherOut,
+      KIKIMORA_ADMISSION_TICKET: "inherited",
+    });
+    const spec = buildSessionSpec(collector.sink, {
+      launcher: fakeLauncher,
+      placement: { pool: "monitor", lease: LOCAL_LEASE },
+      childEnv,
+    });
+
+    await runSession(spec, new AbortController().signal);
+
+    const { env } = await readJson<LauncherRecord>(launcherOut);
+    expect(env).not.toHaveProperty("KIKIMORA_ADMISSION_TICKET");
+    expect(env).toEqual({
+      ...kikimoraVars(childEnv),
+      KIKIMORA_ADMISSION_TICKET: undefined,
+      KIKIMORA_SESSION_ROLE: "monitor",
+      KIKIMORA_ADMISSION_POOL: "monitor",
+    });
+    expect(collector.events[0]).toEqual({
+      type: "spawned",
+      pid: expect.any(Number) as number,
+      role: "monitor",
+      pool: "monitor",
+      ticket: undefined,
+      seq: undefined,
+    });
+  }, 15_000);
+
+  posixOnly(
+    "without a launcher spawns claude itself and passes the environment through untouched",
+    async () => {
+      const argsOut = join(dir, "direct-args.json");
+      const claudeOut = join(dir, "direct-claude.json");
+      const childEnv = fakeClaudeEnv("ok", {
+        FAKE_CLAUDE_ARGS_OUT: argsOut,
+        FAKE_CLAUDE_ENV_OUT: claudeOut,
+        KIKIMORA_LOG_FORMAT: "json",
+      });
+      const spec = buildSessionSpec(collector.sink, { launcher: NO_LAUNCHER, childEnv });
+
+      await runSession(spec, new AbortController().signal);
+
+      const claude = await readJson<ClaudeRecord>(claudeOut);
+      expect(claude.env).toEqual(kikimoraVars(childEnv));
+      expect(claude.env).not.toHaveProperty("KIKIMORA_SESSION_ROLE");
+      expect((await readJson<string[]>(argsOut))[0]).toBe("-p");
+      expect(collector.events[0]).toMatchObject({ type: "spawned", pid: claude.pid });
+    },
+    15_000,
+  );
+
+  it("reports a launcher that cannot start as a spawn failure", async () => {
+    const missing = join(dir, "missing-launcher");
+    const spec = buildSessionSpec(collector.sink, { launcher: [missing] });
+
+    const result = await runSession(spec, new AbortController().signal);
+
+    expect(result.failureReason).toBe("spawn");
+    expect(result.error).toContain(missing);
+    expect(collector.events).toEqual([]);
+  }, 15_000);
+});
+
+describe("runSession stopping the session process tree", () => {
+  let dir: string;
+  let tree: TreeRecord | undefined;
+
+  beforeEach(async () => {
+    dir = await createTempDir();
+    tree = undefined;
+  });
+
+  afterEach(async () => {
+    for (const pid of [...(tree?.attached ?? []), ...(tree?.orphaned ?? [])]) {
+      killQuietly(pid);
+    }
+    await removeTempDir(dir);
+  });
+
+  async function runTree(trigger: "timeout" | "abort"): Promise<TreeRecord> {
+    const treeOut = join(dir, `tree-${trigger}.json`);
+    const collector = createSessionEventCollector();
+    const controller = new AbortController();
+    const spec = buildSessionSpec(collector.sink, {
+      childEnv: fakeClaudeEnv("hang_with_tree", { FAKE_CLAUDE_TREE_OUT: treeOut }),
+      sessionTimeoutMs: trigger === "timeout" ? 4_000 : undefined,
+    });
+    const running = runSession(spec, controller.signal);
+    if (trigger === "abort") {
+      await vi.waitFor(
+        () =>
+          expect(collector.events).toContainEqual(
+            expect.objectContaining({ type: "init" }),
+          ),
+        { timeout: 4_000 },
+      );
+      controller.abort();
+    }
+
+    const result = await running;
+
+    expect(result.failureReason).toBe(trigger);
+    tree = await readJson<TreeRecord>(treeOut);
+    return tree;
+  }
+
+  it("leaves no descendant of a timed-out session running", async () => {
+    const { attached } = await runTree("timeout");
+
+    expect(attached).toHaveLength(2);
+    expect(attached.filter(isAlive)).toEqual([]);
+  }, 30_000);
+
+  it("leaves no descendant of an aborted session running", async () => {
+    const { attached } = await runTree("abort");
+
+    expect(attached.filter(isAlive)).toEqual([]);
+  }, 30_000);
+
+  posixOnly(
+    "also stops descendants whose parent already exited",
+    async () => {
+      const { orphaned } = await runTree("timeout");
+
+      expect(orphaned).toHaveLength(1);
+      expect(orphaned.filter(isAlive)).toEqual([]);
+    },
+    30_000,
+  );
 });

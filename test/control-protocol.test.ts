@@ -223,6 +223,7 @@ describe("parseControlRequest", () => {
         "tasks.cancel",
         "memory.search",
         "memory.recent",
+        "memory.export",
         "sessions.list",
         "sessions.get",
         "prompt.get",
@@ -307,6 +308,31 @@ describe("buildControlStatus", () => {
         since: expect.stringMatching(/Z$/) as string,
         taskId: "t-9",
       },
+    });
+  });
+
+  it("serializes the pid of the session that holds a slot", async () => {
+    const gate = new AdmissionGate("external", undefined, () => "ticket-2");
+    const acquiring = gate.acquire("monitor", {
+      signal: new AbortController().signal,
+      interrupted: () => new Promise<void>(() => undefined),
+      onWait: () => undefined,
+    });
+    gate.grant("monitor", "ticket-2");
+    (await acquiring)?.spawned(5150);
+
+    const status = buildControlStatus({
+      ...context,
+      admission: gate.status(),
+      snapshot: buildSnapshot(),
+    });
+
+    expect(JSON.parse(JSON.stringify(status.admission.monitor))).toEqual({
+      state: "holding",
+      seq: 3,
+      ticket: "ticket-2",
+      since: expect.stringMatching(/Z$/) as string,
+      pid: 5150,
     });
   });
 

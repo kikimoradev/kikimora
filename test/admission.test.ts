@@ -75,9 +75,13 @@ describe("AdmissionGate in local mode", () => {
     const wanted = request();
 
     const lease = await gate.acquire("monitor", wanted);
+    const spawnedSeq = lease?.spawned(4242);
+    lease?.exited(4242);
     lease?.release();
 
     expect(lease).not.toBeNull();
+    expect(lease?.ticket).toBeUndefined();
+    expect(spawnedSeq).toBeUndefined();
     expect(wanted.waits).toEqual([]);
     expect(onChange).not.toHaveBeenCalled();
     expect(gate.grant("monitor", "anything")).toEqual({
@@ -232,6 +236,31 @@ describe("AdmissionGate in external mode", () => {
     gate.grant("monitor", "ticket-1");
     (await monitor)?.release();
     expect(gate.status().monitor).toEqual({ state: "idle", seq: 6 });
+  });
+
+  it("puts the pid of the running session on the held slot and takes it off at exit", async () => {
+    const { gate, changes } = externalGate();
+    const acquiring = gate.acquire("executor", request({ taskId: "t-1" }));
+    gate.grant("executor", "ticket-1");
+    const lease = await acquiring;
+    if (lease === null) throw new Error("no lease");
+
+    expect(lease.ticket).toBe("ticket-1");
+    expect(lease.spawned(101)).toBe(3);
+    expect(gate.status().executor).toMatchObject({ state: "holding", pid: 101, seq: 3 });
+
+    lease.exited(999);
+    expect(gate.status().executor).toMatchObject({ pid: 101, seq: 3 });
+    lease.exited(101);
+    expect(gate.status().executor).toMatchObject({ state: "holding", seq: 4 });
+    expect(gate.status().executor).toHaveProperty("pid", undefined);
+
+    expect(lease.spawned(102)).toBe(5);
+    lease.release();
+    expect(lease.spawned(103)).toBeUndefined();
+    lease.exited(102);
+    expect(gate.status().executor).toEqual({ state: "idle", seq: 6 });
+    expect(changes.map((change) => change.kind)).toEqual(["granted", "released"]);
   });
 
   it("issues random tickets by default", () => {

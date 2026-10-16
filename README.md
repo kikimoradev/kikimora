@@ -154,7 +154,7 @@ Without a TTY (systemd, Docker, CI, a pipe), kikimora skips the dashboard and st
 | `kikimora pause [monitor\|executor]`                            | pause after the current session, same as `/pause`                                                           |
 | `kikimora resume [monitor\|executor]`                           | resume paused agents                                                                                        |
 | `kikimora drain [--timeout <ms>]`                               | let the current sessions finish, then exit; after the timeout, kill what still runs                         |
-| `kikimora tasks\|settings\|prompt\|context\|memory\|sessions …` | manage the running worker's queue, settings, prompts, context and memory, and list its sessions             |
+| `kikimora tasks\|settings\|prompt\|context\|memory\|sessions …` | manage the running worker's queue, settings, prompts, context and memory, export memory, list its sessions  |
 | `kikimora update [--check]`                                     | update to the newest published version; a running worker also checks in the background                      |
 
 A second `kikimora` in the same project exits with an error while one is running.

@@ -1,7 +1,10 @@
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { LOCAL_LEASE } from "../../src/admission.js";
 import type { LoopGates } from "../../src/gates.js";
+import type { SessionSpec } from "../../src/runner.js";
+import { NO_LAUNCHER } from "../../src/session-launcher.js";
 import type { SessionResult, Task } from "../../src/types.js";
 import {
   authFailureResult,
@@ -72,6 +75,7 @@ describe("SessionSummarizer", () => {
   function buildSummarizer() {
     return new SessionSummarizer({
       command: "claude",
+      launcher: NO_LAUNCHER,
       summarizer: buildSummarizerConfig({ sessionTimeoutMs: 60_000 }),
       streamPartial: false,
       cwd: "/workspace",
@@ -103,23 +107,17 @@ describe("SessionSummarizer", () => {
     await buildSummarizer().summarize(
       task(),
       executorResult(),
-      { willRetry: false },
+      { willRetry: false, lease: LOCAL_LEASE },
       new AbortController().signal,
     );
 
     expect(spy.summaryStarted).toHaveBeenCalledOnce();
     expect(resolveLogPath).toHaveBeenCalledWith("executor-session");
 
-    const spec = mocks.runSession.mock.calls[0]?.[0] as {
-      model: string;
-      effort: string;
-      systemPrompt: string;
-      prompt: string;
-      sessionTimeoutMs: number;
-      mcpConfigPath: string;
-      jsonSchema: string;
-      events: unknown;
-    };
+    const spec = mocks.runSession.mock.calls[0]?.[0] as SessionSpec;
+    expect(spec.launcher).toBe(NO_LAUNCHER);
+    expect(spec.placement).toEqual({ pool: "executor", lease: LOCAL_LEASE });
+    expect(spec.meta.agent).toBe("summarizer");
     expect(spec.model).toBe("haiku");
     expect(spec.effort).toBe("low");
     expect(spec.systemPrompt).toBe("summarizer system\n");
@@ -149,7 +147,7 @@ describe("SessionSummarizer", () => {
     await buildSummarizer().summarize(
       task({ attempts: 2 }),
       executorResult({ ok: false, error: "session timeout" }),
-      { willRetry: true },
+      { willRetry: true, lease: LOCAL_LEASE },
       new AbortController().signal,
     );
 
@@ -166,7 +164,7 @@ describe("SessionSummarizer", () => {
     await buildSummarizer().summarize(
       task(),
       executorResult({ sessionId: undefined }),
-      { willRetry: false },
+      { willRetry: false, lease: LOCAL_LEASE },
       new AbortController().signal,
     );
 
@@ -186,7 +184,7 @@ describe("SessionSummarizer", () => {
     await buildSummarizer().summarize(
       task(),
       executorResult(),
-      { willRetry: false },
+      { willRetry: false, lease: LOCAL_LEASE },
       new AbortController().signal,
     );
 
@@ -204,7 +202,7 @@ describe("SessionSummarizer", () => {
     await buildSummarizer().summarize(
       task(),
       executorResult(),
-      { willRetry: false },
+      { willRetry: false, lease: LOCAL_LEASE },
       new AbortController().signal,
     );
 
@@ -225,7 +223,7 @@ describe("SessionSummarizer", () => {
     await buildSummarizer().summarize(
       task(),
       executorResult(),
-      { willRetry: false },
+      { willRetry: false, lease: LOCAL_LEASE },
       new AbortController().signal,
     );
 
@@ -249,7 +247,7 @@ describe("SessionSummarizer", () => {
     await buildSummarizer().summarize(
       task(),
       executorResult(),
-      { willRetry: false },
+      { willRetry: false, lease: LOCAL_LEASE },
       new AbortController().signal,
     );
 
@@ -265,7 +263,7 @@ describe("SessionSummarizer", () => {
     await buildSummarizer().summarize(
       task(),
       executorResult(),
-      { willRetry: false },
+      { willRetry: false, lease: LOCAL_LEASE },
       new AbortController().signal,
     );
 
@@ -287,7 +285,7 @@ describe("SessionSummarizer", () => {
       buildSummarizer().summarize(
         task(),
         executorResult(),
-        { willRetry: false },
+        { willRetry: false, lease: LOCAL_LEASE },
         new AbortController().signal,
       ),
     ).resolves.toBeUndefined();
@@ -307,7 +305,7 @@ describe("SessionSummarizer", () => {
     await buildSummarizer().summarize(
       task(),
       executorResult(),
-      { willRetry: false },
+      { willRetry: false, lease: LOCAL_LEASE },
       controller.signal,
     );
 
@@ -322,7 +320,7 @@ describe("SessionSummarizer", () => {
     await buildSummarizer().summarize(
       task(),
       executorResult(),
-      { willRetry: false },
+      { willRetry: false, lease: LOCAL_LEASE },
       controller.signal,
     );
 

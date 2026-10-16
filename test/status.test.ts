@@ -205,6 +205,7 @@ describe("WorkerStatusStore", () => {
 
   it("session events land in the tail, init sets the sessionId", () => {
     const store = createStore();
+    store.monitor.session({ type: "spawned", pid: 42, role: "monitor", pool: "monitor" });
     store.monitor.session({
       type: "init",
       model: "haiku",

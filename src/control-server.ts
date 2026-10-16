@@ -21,7 +21,12 @@ import type { SettingsController } from "./settings-controller.js";
 import { buildManualTask } from "./tasks.js";
 import type { NewTask } from "./types.js";
 import type { Waker } from "./waker.js";
-import type { MemoryReader, SessionReader, TaskControls } from "./worker-controls.js";
+import type {
+  MemoryExporter,
+  MemoryReader,
+  SessionReader,
+  TaskControls,
+} from "./worker-controls.js";
 
 const CONNECTION_TIMEOUT_MS = 5_000;
 const MAX_REQUEST_BYTES = 1_048_576;
@@ -53,6 +58,7 @@ export interface ControlServerDeps {
   admission: Pick<AdmissionGate, "grant">;
   tasks: TaskControls;
   memory: MemoryReader;
+  memoryExport: MemoryExporter;
   sessions: SessionReader;
   settings: Pick<SettingsController, "current" | "patch">;
   prompts: PromptFileAccess;
@@ -228,6 +234,8 @@ async function handleRequest(
       return { ok: true, data: deps.memory.search(request.query, request.limit) };
     case "memory.recent":
       return { ok: true, data: deps.memory.recent(request.limit) };
+    case "memory.export":
+      return { ok: true, data: await deps.memoryExport.export(request.path) };
     case "prompt.get":
       return {
         ok: true,

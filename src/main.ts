@@ -4,6 +4,11 @@ import { isConfigured, runConfigure } from "./configure.js";
 import { parseHeadlessLogFormat } from "./headless/format.js";
 import { logger } from "./logger.js";
 import { packageVersion } from "./paths.js";
+import {
+  invalidLauncherMessage,
+  parseSessionLauncher,
+  SESSION_LAUNCHER_ENV,
+} from "./session-launcher.js";
 import { startWorker } from "./start.js";
 
 export interface RunKikimoraOptions {
@@ -62,10 +67,25 @@ export async function runKikimora(options: RunKikimoraOptions = {}): Promise<voi
     return;
   }
 
+  const rawLauncher = process.env[SESSION_LAUNCHER_ENV];
+  const launcher = parseSessionLauncher(rawLauncher);
+  if (launcher === null) {
+    logger.error(invalidLauncherMessage(rawLauncher));
+    process.exitCode = 1;
+    return;
+  }
+
   const paused =
     options.paused === true || parseStartPaused(process.env.KIKIMORA_START_PAUSED);
 
-  await startWorker({ headless, logFormat, verbose: options.verbose, paused, admission });
+  await startWorker({
+    headless,
+    logFormat,
+    verbose: options.verbose,
+    paused,
+    admission,
+    launcher,
+  });
 }
 
 export const mainCommand = defineCommand({

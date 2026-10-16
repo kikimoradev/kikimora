@@ -1,4 +1,15 @@
+import type { AdmissionRole } from "./admission.js";
+import type { SessionAgent } from "./sessions/index.js";
+
 export type SessionEvent =
+  | {
+      type: "spawned";
+      pid: number;
+      role: SessionAgent;
+      pool: AdmissionRole;
+      ticket?: string | undefined;
+      seq?: number | undefined;
+    }
   | {
       type: "init";
       model: string;
@@ -90,7 +101,7 @@ export function formatDroppedLines(dropped: number): string {
 }
 
 export function formatSessionEvent(
-  event: Exclude<SessionEvent, { type: "partial" | "stream" }>,
+  event: Exclude<SessionEvent, { type: "partial" | "stream" | "spawned" }>,
 ): string {
   switch (event.type) {
     case "init":

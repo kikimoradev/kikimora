@@ -108,6 +108,7 @@ describe("runKikimora", () => {
       verbose: true,
       paused: false,
       admission: "local",
+      launcher: [],
     });
   });
 
@@ -144,6 +145,40 @@ describe("runKikimora", () => {
 
     expect(logger.error).toHaveBeenCalledWith(
       expect.stringContaining('Invalid KIKIMORA_ADMISSION "queue"'),
+    );
+    expect(process.exitCode).toBe(1);
+    expect(mocks.startWorker).not.toHaveBeenCalled();
+  });
+
+  it("passes the session launcher from the environment to the worker", async () => {
+    const restoreEnv = snapshotEnv();
+    mocks.isConfigured.mockReturnValue(true);
+
+    try {
+      process.env.KIKIMORA_SESSION_LAUNCHER = '["/opt/launch","--pool"]';
+      await runKikimora({ interactive: true });
+    } finally {
+      restoreEnv();
+    }
+
+    expect(mocks.startWorker).toHaveBeenCalledWith(
+      expect.objectContaining({ launcher: ["/opt/launch", "--pool"] }),
+    );
+  });
+
+  it("rejects a malformed session launcher with exit code 1", async () => {
+    const restoreEnv = snapshotEnv();
+    mocks.isConfigured.mockReturnValue(true);
+
+    try {
+      process.env.KIKIMORA_SESSION_LAUNCHER = "/opt/launch";
+      await runKikimora({ interactive: true });
+    } finally {
+      restoreEnv();
+    }
+
+    expect(logger.error).toHaveBeenCalledWith(
+      expect.stringContaining('Invalid KIKIMORA_SESSION_LAUNCHER "/opt/launch"'),
     );
     expect(process.exitCode).toBe(1);
     expect(mocks.startWorker).not.toHaveBeenCalled();
