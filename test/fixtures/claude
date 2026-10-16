@@ -210,6 +210,10 @@ function run() {
       setInterval(() => {}, 1000);
       void spawnTree().then(emitInit);
       break;
+    case "killed_after_init":
+      emitInit();
+      process.stdout.write("", () => process.kill(process.pid, "SIGKILL"));
+      break;
     case "hang_after_init":
       emitInit();
       process.on("SIGTERM", () => process.exit(143));

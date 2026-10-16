@@ -1,5 +1,5 @@
 import { truncate } from "./session-events.js";
-import type { SessionResult } from "./types.js";
+import type { SessionFailureReason, SessionResult } from "./types.js";
 
 const AUTH_STATUSES: ReadonlySet<number> = new Set([401, 403]);
 const AUTH_ERROR_CODE_PATTERN = /authentication_failed|invalid_api_key/i;
@@ -7,6 +7,11 @@ const AUTH_TEXT_PATTERN =
   /not logged in|please run \/login|failed to authenticate|authentication_failed|(?:oauth (?:access )?token|api key) (?:is )?(?:invalid|expired|revoked)|invalid (?:api key|x-api-key)|api error: 40[13]\b/i;
 const REASON_MAX_LENGTH = 160;
 const FALLBACK_REASON = "authentication failed";
+const WITHOUT_AUTH_VERDICT: ReadonlySet<SessionFailureReason | undefined> = new Set([
+  "abort",
+  "spawn",
+  "launcherRefused",
+]);
 
 export interface AuthFailure {
   reason: string;
@@ -38,7 +43,7 @@ function describeReason(result: SessionResult): string {
 
 export function detectAuthFailure(result: SessionResult): AuthFailure | null {
   if (result.ok) return null;
-  if (result.failureReason === "abort" || result.failureReason === "spawn") return null;
+  if (WITHOUT_AUTH_VERDICT.has(result.failureReason)) return null;
 
   const structural = isStructuralAuthError(result);
   if (result.failureReason === "timeout") {

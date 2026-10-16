@@ -76,6 +76,8 @@ export const SESSION_FAILURE_REASONS = [
   "isError",
   "exit",
   "spawn",
+  "launcherRefused",
+  "poolMemoryLimit",
 ] as const;
 
 export type SessionFailureReason = (typeof SESSION_FAILURE_REASONS)[number];

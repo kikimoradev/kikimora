@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   invalidLauncherMessage,
+  launcherFailureReason,
   NO_LAUNCHER,
   parseSessionLauncher,
   sessionCommand,
@@ -111,5 +112,47 @@ describe("sessionCommand", () => {
       KIKIMORA_SESSION_ROLE: "monitor",
       KIKIMORA_ADMISSION_POOL: "monitor",
     });
+  });
+});
+
+describe("launcherFailureReason", () => {
+  const launcher = ["/usr/local/bin/launch"];
+
+  it("reads a refusal from exit code 75 before Claude Code started", () => {
+    expect(
+      launcherFailureReason(launcher, { code: 75, signal: null, initialized: false }),
+    ).toBe("launcherRefused");
+  });
+
+  it("leaves exit code 75 alone once Claude Code started", () => {
+    expect(
+      launcherFailureReason(launcher, { code: 75, signal: null, initialized: true }),
+    ).toBeNull();
+  });
+
+  it.each([
+    [
+      "SIGKILL before init",
+      { code: null, signal: "SIGKILL" as const, initialized: false },
+    ],
+    ["SIGKILL after init", { code: null, signal: "SIGKILL" as const, initialized: true }],
+    ["exit code 137", { code: 137, signal: null, initialized: true }],
+  ])("reads the pool memory limit from %s", (_label, exit) => {
+    expect(launcherFailureReason(launcher, exit)).toBe("poolMemoryLimit");
+  });
+
+  it.each([
+    ["another exit code", { code: 2, signal: null, initialized: true }],
+    ["another signal", { code: null, signal: "SIGTERM" as const, initialized: true }],
+  ])("has no verdict for %s", (_label, exit) => {
+    expect(launcherFailureReason(launcher, exit)).toBeNull();
+  });
+
+  it.each([
+    { code: 75, signal: null, initialized: false },
+    { code: 137, signal: null, initialized: true },
+    { code: null, signal: "SIGKILL" as const, initialized: true },
+  ])("has no verdict without a launcher (%o)", (exit) => {
+    expect(launcherFailureReason(NO_LAUNCHER, exit)).toBeNull();
   });
 });

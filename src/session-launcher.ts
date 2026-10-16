@@ -1,5 +1,6 @@
 import type { AdmissionLease, AdmissionRole } from "./admission.js";
 import type { SessionAgent } from "./sessions/index.js";
+import type { SessionFailureReason } from "./types.js";
 
 export const SESSION_LAUNCHER_ENV = "KIKIMORA_SESSION_LAUNCHER";
 export const SESSION_ROLE_ENV = "KIKIMORA_SESSION_ROLE";
@@ -74,4 +75,33 @@ function placementEnv(
     [ADMISSION_POOL_ENV]: session.pool,
     [ADMISSION_TICKET_ENV]: session.ticket,
   };
+}
+
+export const LAUNCHER_REFUSED_EXIT_CODE = 75;
+export const POOL_MEMORY_LIMIT_EXIT_CODE = 137;
+export const LAUNCHER_REFUSAL_BACKOFF_MS = 30_000;
+
+export interface SessionExit {
+  code: number | null;
+  signal: NodeJS.Signals | null;
+  initialized: boolean;
+}
+
+export type LauncherFailureReason = Extract<
+  SessionFailureReason,
+  "launcherRefused" | "poolMemoryLimit"
+>;
+
+export function launcherFailureReason(
+  launcher: SessionLauncher,
+  exit: SessionExit,
+): LauncherFailureReason | null {
+  if (launcher.length === 0) return null;
+  if (exit.code === LAUNCHER_REFUSED_EXIT_CODE && !exit.initialized) {
+    return "launcherRefused";
+  }
+  if (exit.signal === "SIGKILL" || exit.code === POOL_MEMORY_LIMIT_EXIT_CODE) {
+    return "poolMemoryLimit";
+  }
+  return null;
 }

@@ -1,8 +1,11 @@
 import { spawn } from "node:child_process";
 import { writeFileSync } from "node:fs";
+import { constants } from "node:os";
 
 const [command, ...args] = process.argv.slice(2);
 const out = process.env.FAKE_LAUNCHER_OUT;
+const exitBefore = process.env.FAKE_LAUNCHER_EXIT_BEFORE;
+const exitAfter = process.env.FAKE_LAUNCHER_EXIT_AFTER;
 
 if (out) {
   const kikimoraEnv = Object.fromEntries(
@@ -14,11 +17,17 @@ if (out) {
   );
 }
 
+if (exitBefore !== undefined) {
+  process.stderr.write("launcher: no room in the pool\n");
+  process.exit(Number(exitBefore));
+}
+
 const session = spawn(process.execPath, [command, ...args], {
   stdio: "inherit",
   windowsHide: true,
 });
 process.on("SIGTERM", () => session.kill("SIGTERM"));
 session.on("exit", (code, signal) => {
-  process.exit(code ?? (signal === null ? 1 : 128));
+  if (exitAfter !== undefined) process.exit(Number(exitAfter));
+  process.exit(code ?? (signal === null ? 1 : 128 + constants.signals[signal]));
 });

@@ -3,7 +3,10 @@ import { createInterface } from "node:readline";
 import { leadsOwnProcessGroup, terminateProcessTree } from "./process-tree.js";
 import type { SessionEventSink } from "./session-events.js";
 import {
+  LAUNCHER_REFUSED_EXIT_CODE,
+  launcherFailureReason,
   sessionCommand,
+  type LauncherFailureReason,
   type PlacedSession,
   type SessionLauncher,
   type SessionPlacement,
@@ -156,7 +159,15 @@ export async function runSession(
     const ok = code === 0 && !summary.isError && killState.reason === null;
     const failureReason = ok
       ? undefined
-      : classifyFailure(killState.reason, summary.isError);
+      : classifyFailure(
+          killState.reason,
+          summary.isError,
+          launcherFailureReason(spec.launcher, {
+            code,
+            signal: exitSignal,
+            initialized: indexed.sessionId !== null,
+          }),
+        );
 
     if (indexed.sessionId !== null) {
       spec.index?.finished({
@@ -205,10 +216,11 @@ function announceSpawn(
 function classifyFailure(
   killReason: KillReason | null,
   isError: boolean | undefined,
+  launcherReason: LauncherFailureReason | null,
 ): SessionFailureReason {
   if (killReason !== null) return killReason;
   if (isError) return "isError";
-  return "exit";
+  return launcherReason ?? "exit";
 }
 
 function describeFailure(
@@ -223,6 +235,10 @@ function describeFailure(
       return "Session aborted";
     case "isError":
       return "Session ended with an error (is_error)";
+    case "launcherRefused":
+      return `Session launcher refused the session (exit code ${LAUNCHER_REFUSED_EXIT_CODE})`;
+    case "poolMemoryLimit":
+      return "Session killed by the pool memory limit";
     default:
       return code !== null
         ? `Process exited with code ${code}`
