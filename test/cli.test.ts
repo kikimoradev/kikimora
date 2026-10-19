@@ -596,6 +596,18 @@ describe("CLI start (smoke E2E)", () => {
       expect(JSON.parse(listed.stdout)).toContainEqual(
         expect.objectContaining({ id: "e2e-manual", title: "e2e manual task" }),
       );
+      const purged = await runCommand(dir, env, [
+        "tasks",
+        "delete",
+        "--status",
+        "failed",
+        "--json",
+      ]);
+      expect(purged.code).toBe(0);
+      expect(JSON.parse(purged.stdout)).toEqual({ deleted: [] });
+      const missing = await runCommand(dir, env, ["tasks", "delete", "e2e-missing"]);
+      expect(missing.code).toBe(1);
+      expect(missing.stderr).toContain('No task "e2e-missing".');
 
       const settings = await runCommand(dir, env, ["settings", "get", "--json"]);
       expect(settings.code).toBe(0);

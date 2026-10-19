@@ -261,6 +261,113 @@ describe("TaskStore", () => {
     expect(store.list()[0]?.status).toBe("in_progress");
   });
 
+  async function storeWithEveryStatus(): Promise<TaskStore> {
+    const store = await TaskStore.open(path);
+    await store.addTasks(["d1", "f1", "c1", "d2", "p1", "w1"].map((id) => newTask(id)));
+    for (let taken = 0; taken < 4; taken += 1) await store.takeNext();
+    await store.complete("d1");
+    await store.fail("f1", "boom");
+    await store.release("c1");
+    await store.cancel("c1");
+    await store.complete("d2");
+    await store.takeNext();
+    return store;
+  }
+
+  function statuses(store: TaskStore): string[] {
+    return store.list().map((task) => `${task.id}:${task.status}`);
+  }
+
+  it("delete by id removes one finished task and persists the store", async () => {
+    const store = await storeWithEveryStatus();
+    expect(statuses(store)).toEqual([
+      "d1:done",
+      "f1:failed",
+      "c1:cancelled",
+      "d2:done",
+      "p1:in_progress",
+      "w1:pending",
+    ]);
+
+    expect(await store.delete({ id: "f1" })).toEqual({ ok: true, deleted: ["f1"] });
+
+    expect(store.list().map((task) => task.id)).toEqual(["d1", "c1", "d2", "p1", "w1"]);
+    const reopened = await TaskStore.open(path);
+    expect(reopened.list().map((task) => task.id)).toEqual([
+      "d1",
+      "c1",
+      "d2",
+      "p1",
+      "w1",
+    ]);
+  });
+
+  it("delete by status removes every task in that status", async () => {
+    const store = await storeWithEveryStatus();
+
+    expect(await store.delete({ status: "done" })).toEqual({
+      ok: true,
+      deleted: ["d1", "d2"],
+    });
+    expect(await store.delete({ status: "cancelled" })).toEqual({
+      ok: true,
+      deleted: ["c1"],
+    });
+
+    expect(store.list().map((task) => task.id)).toEqual(["f1", "p1", "w1"]);
+    const reopened = await TaskStore.open(path);
+    expect(reopened.list().map((task) => task.id)).toEqual(["f1", "p1", "w1"]);
+  });
+
+  it("delete refuses unfinished tasks and unknown ids and changes nothing", async () => {
+    const store = await storeWithEveryStatus();
+    const before = await readFile(path, "utf8");
+
+    expect(await store.delete({ id: "w1" })).toEqual({
+      ok: false,
+      reason: "unfinished",
+      id: "w1",
+      status: "pending",
+    });
+    expect(await store.delete({ id: "p1" })).toEqual({
+      ok: false,
+      reason: "unfinished",
+      id: "p1",
+      status: "in_progress",
+    });
+    expect(await store.delete({ id: "missing" })).toEqual({
+      ok: false,
+      reason: "missing",
+      id: "missing",
+    });
+
+    expect(store.list()).toHaveLength(6);
+    expect(await readFile(path, "utf8")).toBe(before);
+  });
+
+  it("delete persists and notifies once per command, and not when nothing matches", async () => {
+    const store = await storeWithEveryStatus();
+    const snapshots: string[][] = [];
+    store.onChange((tasks) => snapshots.push(tasks.map((task) => task.id)));
+
+    await store.delete({ status: "done" });
+    expect(await store.delete({ status: "done" })).toEqual({ ok: true, deleted: [] });
+    await store.delete({ id: "missing" });
+
+    expect(snapshots).toEqual([["f1", "c1", "p1", "w1"]]);
+  });
+
+  it("a deleted task can be reported again", async () => {
+    const store = await storeWithEveryStatus();
+    expect(await store.addTasks([newTask("d1")])).toEqual([]);
+
+    await store.delete({ id: "d1" });
+
+    expect((await store.addTasks([newTask("d1")])).map((task) => task.status)).toEqual([
+      "pending",
+    ]);
+  });
+
   it("loads an old-format store without the attempts field", async () => {
     await TaskStore.open(path);
     await writeFile(

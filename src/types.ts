@@ -128,6 +128,14 @@ export const TASK_STATUSES = [
 
 export type TaskStatus = (typeof TASK_STATUSES)[number];
 
+export const FINAL_TASK_STATUSES = ["done", "failed", "cancelled"] as const;
+
+export type FinalTaskStatus = (typeof FINAL_TASK_STATUSES)[number];
+
+export function isFinalTaskStatus(status: TaskStatus): status is FinalTaskStatus {
+  return (FINAL_TASK_STATUSES as readonly TaskStatus[]).includes(status);
+}
+
 export interface Task {
   id: string;
   title: string;

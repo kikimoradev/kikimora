@@ -17,7 +17,7 @@ import {
   type SettingsController,
 } from "../settings-controller.js";
 import { buildManualTask } from "../tasks.js";
-import { EFFORT_LEVELS, MODELS } from "../types.js";
+import { EFFORT_LEVELS, FINAL_TASK_STATUSES, MODELS } from "../types.js";
 import type { Waker } from "../waker.js";
 import type { MemoryReader, TaskControls } from "../worker-controls.js";
 import { formatInterval } from "./format.js";
@@ -301,6 +301,52 @@ export const COMMANDS: readonly CommandSpec[] = [
           "error",
         );
       }
+    },
+  },
+  {
+    name: "delete",
+    group: "Tasks",
+    args: "<task-id>",
+    summary: "delete a done, failed or cancelled task",
+    run: async (args, ctx) => {
+      const id = args.trim();
+      if (id === "") {
+        ctx.notice("usage: /delete <task-id>", "error");
+        return;
+      }
+      const deletion = await ctx.tasks.delete({ id });
+      if (deletion.ok) {
+        ctx.notice(`task ${id} deleted`, "ok");
+      } else if (deletion.reason === "missing") {
+        ctx.notice(`no task "${id}"`, "error");
+      } else {
+        ctx.notice(
+          `task ${id} is ${deletion.status}, only finished tasks can be deleted`,
+          "error",
+        );
+      }
+    },
+  },
+  {
+    name: "purge",
+    group: "Tasks",
+    args: "<status>",
+    complete: (index) => (index === 0 ? FINAL_TASK_STATUSES : []),
+    summary: "delete every done, failed or cancelled task",
+    run: async (args, ctx) => {
+      const status = FINAL_TASK_STATUSES.find((candidate) => candidate === args.trim());
+      if (status === undefined) {
+        ctx.notice(`usage: /purge <${FINAL_TASK_STATUSES.join("|")}>`, "error");
+        return;
+      }
+      const deletion = await ctx.tasks.delete({ status });
+      const count = deletion.ok ? deletion.deleted.length : 0;
+      ctx.notice(
+        count === 0
+          ? `no ${status} tasks`
+          : `${String(count)} ${status} ${count === 1 ? "task" : "tasks"} deleted`,
+        count === 0 ? "info" : "ok",
+      );
     },
   },
   {

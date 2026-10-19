@@ -7,6 +7,7 @@ import type { AgentController } from "./control.js";
 import {
   buildDrainAck,
   parseControlRequest,
+  TASKS_DELETE_SELECTOR,
   type ControlRequest,
   type ControlResponse,
   type ControlStatus,
@@ -18,7 +19,7 @@ import type { MonitorCheckOutcome } from "./monitor-check.js";
 import { CONTROL_SOCKET_ENV } from "./paths.js";
 import type { PromptAgent, PromptFileAccess } from "./prompt-files.js";
 import type { SettingsController } from "./settings-controller.js";
-import { buildManualTask } from "./tasks.js";
+import { buildManualTask, type TaskDeletion, type TaskSelector } from "./tasks.js";
 import type { NewTask } from "./types.js";
 import type { Waker } from "./waker.js";
 import type {
@@ -181,6 +182,32 @@ async function addTask(
   return { ok: true, data: added };
 }
 
+function deletionSelector(
+  request: Extract<ControlRequest, { cmd: "tasks.delete" }>,
+): TaskSelector {
+  if (request.id !== undefined) return { id: request.id };
+  if (request.status !== undefined) return { status: request.status };
+  throw new Error(`Invalid tasks.delete request: ${TASKS_DELETE_SELECTOR}`);
+}
+
+function describeTaskDeletionRefusal(
+  refusal: Exclude<TaskDeletion, { ok: true }>,
+): string {
+  return refusal.reason === "missing"
+    ? `No task "${refusal.id}".`
+    : `Task "${refusal.id}" is ${refusal.status}. Only done, failed and cancelled tasks can be deleted.`;
+}
+
+async function deleteTasks(
+  deps: ControlServerDeps,
+  request: Extract<ControlRequest, { cmd: "tasks.delete" }>,
+): Promise<ControlResponse<"tasks.delete">> {
+  const deletion = await deps.tasks.delete(deletionSelector(request));
+  return deletion.ok
+    ? { ok: true, data: { deleted: deletion.deleted } }
+    : { ok: false, error: describeTaskDeletionRefusal(deletion) };
+}
+
 async function handleRequest(
   deps: ControlServerDeps,
   request: ControlRequest,
@@ -230,6 +257,8 @@ async function handleRequest(
     }
     case "tasks.cancel":
       return { ok: true, data: await deps.tasks.cancel(request.id) };
+    case "tasks.delete":
+      return deleteTasks(deps, request);
     case "memory.search":
       return { ok: true, data: deps.memory.search(request.query, request.limit) };
     case "memory.recent":

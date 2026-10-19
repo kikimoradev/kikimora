@@ -8,7 +8,7 @@ Changes apply live:
 - a replaced prompt or context file from the next iteration;
 - an added task as soon as the executor is idle.
 
-Commands exit `1` when no worker is running, when the worker rejects the request, and when `retry` or `cancel` matches no task.
+Commands exit `1` when no worker is running, when the worker rejects the request, and when `retry` or `cancel` matches no task or `delete` matches no finished one.
 
 ## Commands
 
@@ -23,6 +23,7 @@ Commands exit `1` when no worker is running, when the worker rejects the request
 | `kikimora tasks list [--status <s>] [--json]`                                               | the task queue, optionally filtered by status                                                           |
 | `kikimora tasks add <description> [--id <id>] [--title <t>] [--json]`                       | queue a task by hand; the id defaults to a generated `manual-…` id, the title to the first line         |
 | `kikimora tasks retry <id>` / `kikimora tasks cancel <id>`                                  | requeue a failed task / cancel a pending one                                                            |
+| `kikimora tasks delete <id>\|--status <s> [--json]`                                         | delete a finished task, or every task with one final status; see below                                  |
 | `kikimora settings get [--json]`                                                            | effective settings, defaults filled in                                                                  |
 | `kikimora settings patch <json\|-> [--json]`                                                | merge a sparse patch into `settings.json`; `null` deletes a key, the result is validated before writing |
 | `kikimora prompt get <agent> [--json]`                                                      | print a project prompt                                                                                  |
@@ -42,6 +43,12 @@ Commands exit `1` when no worker is running, when the worker rejects the request
 `kikimora check` asks the monitor for a cycle now. A sleeping monitor starts one at once, also outside its working hours, and then goes back to its schedule: the next cycle comes one interval later, and outside the working hours it waits for the window again. When a cycle is already running, the command says which one and requests nothing. It is refused, with exit code `1`, while the monitor is paused, while the worker drains and while the usage limit holds; over the socket a refusal is a successful reply with `state` `refused`, a `reason` and, for a usage limit, `until`, so a client can tell the cases apart. The dashboard command `/check` does the same.
 
 `kikimora memory export` writes a copy of `.kikimora/data/memory.db`, task summaries and the session index, while the agents keep working. The worker takes a consistent snapshot with SQLite's `VACUUM INTO`, which includes writes that have not reached the main file yet, checks it with `PRAGMA quick_check` and moves it into place, so a half-written file never appears under the target name. The path is resolved on the worker's machine and must not exist; missing directories are created. Kikimora opens the copy as its `memory.db` on any machine.
+
+### Deleting tasks
+
+The task store keeps every task until it is deleted. `kikimora tasks delete <id>` removes one task that is `done`, `failed` or `cancelled`, and `kikimora tasks delete --status <s>` removes every task with that final status. A `pending` or `in_progress` task and an unknown id are refused, and nothing changes. The store is written once per command, and the reply lists the deleted ids. The dashboard commands `/delete <task-id>` and `/purge <status>` do the same.
+
+The monitor's report is deduplicated by id against every stored task, so a deleted id that the monitor reports again is queued as a new task. Delete a `done` task only when its source no longer reports it.
 
 `kikimora drain` lets the running sessions finish and then stops the worker. [Stopping the worker](deployment.md#stopping-the-worker) describes what it waits for, its deadline and the `SIGTERM` equivalent.
 
@@ -86,6 +93,8 @@ Each connection carries one request and one response:
 | `{"cmd":"tasks.add","description":"…","id"?:"…","title"?:"…"}`                  | the created `Task`; a duplicate id is an error                                                                                          |
 | `{"cmd":"tasks.retry","id":"…"}`                                                | `true` when a failed task was requeued                                                                                                  |
 | `{"cmd":"tasks.cancel","id":"…"}`                                               | `true` when a pending task was cancelled                                                                                                |
+| `{"cmd":"tasks.delete","id":"…"}`                                               | `{"deleted":["…"]}`; an unknown id or a task that is not finished is an error, see [deleting tasks](#deleting-tasks)                    |
+| `{"cmd":"tasks.delete","status":"done"\|"failed"\|"cancelled"}`                 | `{"deleted":[…]}`, the ids of every task in that status, `[]` when there is none                                                        |
 | `{"cmd":"memory.search","query":"…","limit"?:1-100}`                            | task summaries, best match first                                                                                                        |
 | `{"cmd":"memory.recent","limit"?:1-100}`                                        | the newest task summaries                                                                                                               |
 | `{"cmd":"memory.export","path":"…"}`                                            | `{"path":"…","bytes":…,"entries":…}`; `path` is absolute on the worker's machine and must not exist                                     |

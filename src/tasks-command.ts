@@ -7,7 +7,13 @@ import {
   type ControlCommandIo,
 } from "./control-commands.js";
 import { logger } from "./logger.js";
-import { TASK_STATUSES, type Task, type TaskStatus } from "./types.js";
+import type { TaskSelector } from "./tasks.js";
+import {
+  FINAL_TASK_STATUSES,
+  TASK_STATUSES,
+  type Task,
+  type TaskStatus,
+} from "./types.js";
 
 function parseStatus(raw: string | undefined): TaskStatus | null | undefined {
   if (raw === undefined) return undefined;
@@ -104,6 +110,53 @@ export async function runTasksCancel(
   logger.success(`Task ${id} cancelled.`);
 }
 
+function deletionSelector(
+  id: string | undefined,
+  rawStatus: string | undefined,
+): TaskSelector | string {
+  if ((id === undefined) === (rawStatus === undefined)) {
+    return "Give either a task id or --status.";
+  }
+  if (id !== undefined) return { id };
+  const status = FINAL_TASK_STATUSES.find((candidate) => candidate === rawStatus);
+  return status === undefined
+    ? `Cannot delete "${rawStatus ?? ""}" tasks. Only ${FINAL_TASK_STATUSES.join(", ")} tasks can be deleted.`
+    : { status };
+}
+
+export async function runTasksDelete(
+  id: string | undefined,
+  options: {
+    status?: string | undefined;
+    json?: boolean | undefined;
+  } & ControlCommandIo = {},
+): Promise<void> {
+  const selector = deletionSelector(id, options.status);
+  if (typeof selector === "string") {
+    fail(selector);
+    return;
+  }
+  const response = await requestControl({ cmd: "tasks.delete", ...selector }, options);
+  if (response === null) return;
+  const write = writerFor(options);
+  if (options.json === true) {
+    write(JSON.stringify(response.data, null, 2));
+    return;
+  }
+  if ("id" in selector) {
+    logger.success(`Task ${selector.id} deleted.`);
+    return;
+  }
+  const count = response.data.deleted.length;
+  if (count === 0) {
+    write(`No ${selector.status} tasks.`);
+    return;
+  }
+  logger.success(
+    `${String(count)} ${selector.status} ${count === 1 ? "task" : "tasks"} deleted.`,
+  );
+}
+
 const jsonArg = { type: "boolean", description: "Print JSON instead of text" } as const;
 
 export const tasksCommand = defineCommand({
@@ -155,6 +208,22 @@ export const tasksCommand = defineCommand({
         id: { type: "positional", required: true, description: "Task id" },
       },
       run: ({ args }) => runTasksCancel(args.id),
+    }),
+    delete: defineCommand({
+      meta: {
+        name: "delete",
+        description: "Delete a finished task, or every task with a final status",
+      },
+      args: {
+        id: { type: "positional", required: false, description: "Task id" },
+        status: {
+          type: "string",
+          description: `Delete every task with this status (${FINAL_TASK_STATUSES.join(", ")})`,
+        },
+        json: jsonArg,
+      },
+      run: ({ args }) =>
+        runTasksDelete(args.id, { status: args.status, json: args.json }),
     }),
   },
 });
