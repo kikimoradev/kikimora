@@ -61,6 +61,7 @@ interface FakeContext {
   drainFinished: ReturnType<typeof vi.fn>;
   retry: ReturnType<typeof vi.fn>;
   cancel: ReturnType<typeof vi.fn>;
+  deleteTasks: ReturnType<typeof vi.fn>;
   addTasks: ReturnType<typeof vi.fn>;
   recent: ReturnType<typeof vi.fn>;
   search: ReturnType<typeof vi.fn>;
@@ -84,6 +85,7 @@ function fakeContext(): FakeContext {
   );
   const retry = vi.fn().mockResolvedValue(true);
   const cancel = vi.fn().mockResolvedValue(true);
+  const deleteTasks = vi.fn().mockResolvedValue({ ok: true, deleted: ["t-1"] });
   const addTasks = vi
     .fn()
     .mockImplementation((tasks: unknown[]) => Promise.resolve(tasks));
@@ -104,6 +106,7 @@ function fakeContext(): FakeContext {
     drainFinished,
     retry,
     cancel,
+    deleteTasks,
     addTasks,
     recent,
     search,
@@ -119,7 +122,13 @@ function fakeContext(): FakeContext {
       executorControl,
       drain,
       checkMonitor,
-      tasks: { list: vi.fn().mockReturnValue([]), retry, cancel, addTasks },
+      tasks: {
+        list: vi.fn().mockReturnValue([]),
+        retry,
+        cancel,
+        delete: deleteTasks,
+        addTasks,
+      },
       memory: { recent, search },
       settings,
       prompts,
@@ -349,6 +358,49 @@ describe("dispatchCommand", () => {
         text: 'no pending task "t-2" — only pending tasks can be cancelled',
         tone: "error",
       },
+    ]);
+  });
+
+  it("/delete deletes a finished task and reports unfinished and unknown ones", async () => {
+    const { ctx, notices, deleteTasks } = fakeContext();
+    await dispatchCommand("/delete t-1", ctx);
+    deleteTasks
+      .mockResolvedValueOnce({
+        ok: false,
+        reason: "unfinished",
+        id: "t-2",
+        status: "pending",
+      })
+      .mockResolvedValueOnce({ ok: false, reason: "missing", id: "t-3" });
+    await dispatchCommand("/delete t-2", ctx);
+    await dispatchCommand("/delete t-3", ctx);
+    await dispatchCommand("/delete", ctx);
+    expect(deleteTasks).toHaveBeenNthCalledWith(1, { id: "t-1" });
+    expect(notices).toEqual([
+      { text: "task t-1 deleted", tone: "ok" },
+      { text: "task t-2 is pending, only finished tasks can be deleted", tone: "error" },
+      { text: 'no task "t-3"', tone: "error" },
+      { text: "usage: /delete <task-id>", tone: "error" },
+    ]);
+  });
+
+  it("/purge deletes every task with a final status", async () => {
+    const { ctx, notices, deleteTasks } = fakeContext();
+    deleteTasks
+      .mockResolvedValueOnce({ ok: true, deleted: ["a", "b"] })
+      .mockResolvedValueOnce({ ok: true, deleted: ["a"] })
+      .mockResolvedValueOnce({ ok: true, deleted: [] });
+    await dispatchCommand("/purge cancelled", ctx);
+    await dispatchCommand("/purge done", ctx);
+    await dispatchCommand("/purge failed", ctx);
+    await dispatchCommand("/purge pending", ctx);
+    expect(deleteTasks).toHaveBeenCalledTimes(3);
+    expect(deleteTasks).toHaveBeenNthCalledWith(1, { status: "cancelled" });
+    expect(notices).toEqual([
+      { text: "2 cancelled tasks deleted", tone: "ok" },
+      { text: "1 done task deleted", tone: "ok" },
+      { text: "no failed tasks", tone: "info" },
+      { text: "usage: /purge <done|failed|cancelled>", tone: "error" },
     ]);
   });
 

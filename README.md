@@ -126,6 +126,8 @@ PgUp/PgDn scrolls the focused agent panel or any list view (`/tasks`, `/memory`,
 | `/task <description>`         | add a task by hand; an idle executor takes it at once                   |
 | `/retry <task-id>`            | requeue a failed task                                                   |
 | `/cancel <task-id>`           | cancel a pending task                                                   |
+| `/delete <task-id>`           | delete a done, failed or cancelled task                                 |
+| `/purge <status>`             | delete every task with a final status (`done`, `failed`, `cancelled`)   |
 | `/model <agent> <model>`      | set the model (`haiku`, `sonnet`, `opus`, `fable`)                      |
 | `/effort <agent> <level>`     | set the reasoning effort (`low`, `medium`, `high`, `xhigh`, `max`)      |
 | `/interval <minutes>`         | set how often the monitor looks for new tasks                           |

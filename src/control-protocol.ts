@@ -27,7 +27,12 @@ import type {
   WorkerStats,
   WorkerStatus,
 } from "./status.js";
-import { TASK_STATUSES, type Task, type TaskStatus } from "./types.js";
+import {
+  FINAL_TASK_STATUSES,
+  TASK_STATUSES,
+  type Task,
+  type TaskStatus,
+} from "./types.js";
 
 export const CONTROL_TARGETS = ["monitor", "executor", "all"] as const;
 
@@ -36,6 +41,7 @@ export type ControlTarget = (typeof CONTROL_TARGETS)[number];
 export const MEMORY_LIMIT_DEFAULT = 10;
 export const MEMORY_LIMIT_MAX = 100;
 export const UNRECOGNIZED_REQUEST = "Unrecognized control request.";
+export const TASKS_DELETE_SELECTOR = "give either id or status";
 
 const jsonValueSchema: z.ZodType<JsonValue> = z.lazy(() =>
   z.union([
@@ -102,6 +108,17 @@ export const controlRequestSchema = z.discriminatedUnion("cmd", [
   z.object({ cmd: z.literal("tasks.retry"), id: nonBlank }).strict(),
   z.object({ cmd: z.literal("tasks.cancel"), id: nonBlank }).strict(),
   z
+    .object({
+      cmd: z.literal("tasks.delete"),
+      id: nonBlank.optional(),
+      status: z.enum(FINAL_TASK_STATUSES).optional(),
+    })
+    .strict()
+    .refine(
+      (request) => (request.id === undefined) !== (request.status === undefined),
+      TASKS_DELETE_SELECTOR,
+    ),
+  z
     .object({ cmd: z.literal("memory.search"), query: nonBlank, limit: limitSchema })
     .strict(),
   z.object({ cmd: z.literal("memory.recent"), limit: limitSchema }).strict(),
@@ -142,6 +159,10 @@ export interface ContextContent {
   content: string;
 }
 
+export interface TasksDeleted {
+  deleted: string[];
+}
+
 export interface DrainAck {
   state: "draining";
   since: string;
@@ -168,6 +189,7 @@ export interface ControlResponseData {
   "tasks.add": Task;
   "tasks.retry": boolean;
   "tasks.cancel": boolean;
+  "tasks.delete": TasksDeleted;
   "memory.search": TaskSummaryRecord[];
   "memory.recent": TaskSummaryRecord[];
   "memory.export": MemoryExport;

@@ -1,7 +1,13 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";
-import type { NewTask, Task } from "./types.js";
+import {
+  isFinalTaskStatus,
+  type FinalTaskStatus,
+  type NewTask,
+  type Task,
+  type TaskStatus,
+} from "./types.js";
 
 const taskSchema = z.object({
   id: z.string().min(1),
@@ -24,6 +30,18 @@ function corruptStoreError(path: string, reason: string): Error {
     `Corrupted task store file (${path}): ${reason}\nFix or delete the file and restart.`,
   );
 }
+
+export type TaskSelector = { id: string } | { status: FinalTaskStatus };
+
+export type TaskDeletion =
+  | { ok: true; deleted: string[] }
+  | { ok: false; reason: "missing"; id: string }
+  | {
+      ok: false;
+      reason: "unfinished";
+      id: string;
+      status: Exclude<TaskStatus, FinalTaskStatus>;
+    };
 
 const TASK_TITLE_MAX = 60;
 
@@ -207,6 +225,26 @@ export class TaskStore {
       task.updatedAt = new Date().toISOString();
       await this.persist();
       return true;
+    });
+  }
+
+  delete(selector: TaskSelector): Promise<TaskDeletion> {
+    return this.run(async () => {
+      if ("id" in selector) {
+        const task = this.tasks.find((candidate) => candidate.id === selector.id);
+        if (task === undefined) return { ok: false, reason: "missing", id: selector.id };
+        if (!isFinalTaskStatus(task.status)) {
+          return { ok: false, reason: "unfinished", id: task.id, status: task.status };
+        }
+      }
+      const selected = (task: Task): boolean =>
+        "id" in selector ? task.id === selector.id : task.status === selector.status;
+      const deleted = this.tasks.filter(selected).map((task) => task.id);
+      if (deleted.length === 0) return { ok: true, deleted };
+      const kept = this.tasks.filter((task) => !selected(task));
+      this.tasks.splice(0, this.tasks.length, ...kept);
+      await this.persist();
+      return { ok: true, deleted };
     });
   }
 

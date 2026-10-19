@@ -61,6 +61,7 @@ function fakeDeps() {
         .mockReturnValue([buildTask(), buildTask({ id: "t-2", status: "failed" })]),
       retry: vi.fn().mockResolvedValue(true),
       cancel: vi.fn().mockResolvedValue(true),
+      delete: vi.fn().mockResolvedValue({ ok: true, deleted: ["t-2"] }),
       addTasks: vi
         .fn()
         .mockImplementation((tasks: Task[]) =>
@@ -632,6 +633,55 @@ describe("startControlServer", () => {
     expect(fakes.tasks.retry).toHaveBeenCalledWith("t-2");
     expect(fakes.tasks.cancel).toHaveBeenCalledWith("x");
     expect(fakes.waker.notify).toHaveBeenCalledTimes(1);
+  });
+
+  it("deletes finished tasks by id or by status and lists the deleted ids", async () => {
+    const fakes = fakeDeps();
+    fakes.tasks.delete
+      .mockResolvedValueOnce({ ok: true, deleted: ["t-2"] })
+      .mockResolvedValueOnce({ ok: true, deleted: ["c-1", "c-2"] });
+    await startServer({ fakes });
+
+    const byId = await sendControlRequest(socketPath, { cmd: "tasks.delete", id: "t-2" });
+    const byStatus = await sendControlRequest(socketPath, {
+      cmd: "tasks.delete",
+      status: "cancelled",
+    });
+
+    expect(byId).toEqual({ ok: true, data: { deleted: ["t-2"] } });
+    expect(byStatus).toEqual({ ok: true, data: { deleted: ["c-1", "c-2"] } });
+    expect(fakes.tasks.delete).toHaveBeenNthCalledWith(1, { id: "t-2" });
+    expect(fakes.tasks.delete).toHaveBeenNthCalledWith(2, { status: "cancelled" });
+    expect(fakes.waker.notify).not.toHaveBeenCalled();
+  });
+
+  it("refuses to delete an unfinished task or an unknown id", async () => {
+    const fakes = fakeDeps();
+    fakes.tasks.delete
+      .mockResolvedValueOnce({
+        ok: false,
+        reason: "unfinished",
+        id: "ci-42",
+        status: "in_progress",
+      })
+      .mockResolvedValueOnce({ ok: false, reason: "missing", id: "x" });
+    await startServer({ fakes });
+
+    const unfinished = await sendControlRequest(socketPath, {
+      cmd: "tasks.delete",
+      id: "ci-42",
+    });
+    const missing = await sendControlRequest(socketPath, {
+      cmd: "tasks.delete",
+      id: "x",
+    });
+
+    expect(unfinished).toEqual({
+      ok: false,
+      error:
+        'Task "ci-42" is in_progress. Only done, failed and cancelled tasks can be deleted.',
+    });
+    expect(missing).toEqual({ ok: false, error: 'No task "x".' });
   });
 
   it("searches memory with the requested and the default limit", async () => {

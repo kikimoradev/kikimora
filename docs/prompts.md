@@ -75,7 +75,7 @@ Rules:
 
 ## Tips
 
-- **Derive task ids from the source.** The monitor session has no record of its earlier reports, so it can report the same problem on each patrol. The task store skips any id it already holds, whatever that task's status. An id derived from the source (`issue-142`, `ci-9182634`) keeps one problem as one task.
+- **Derive task ids from the source.** The monitor session has no record of its earlier reports, so it can report the same problem on each patrol. The task store skips any id it already holds, whatever that task's status, until the task is [deleted](control.md#deleting-tasks); a deleted id that the monitor reports again comes back as a new pending task. An id derived from the source (`issue-142`, `ci-9182634`) keeps one problem as one task.
 - **Put the whole briefing in the description.** An executor session's input is the executor prompt, the context file and the task; earlier sessions reach it only through memory search. Links, error output and acceptance criteria must be in the task description.
 - **Set the safety boundaries in the prompts.** The executor runs with `--permission-mode bypassPermissions`, so the prompts define what it may do. List what is off-limits: pushing to `main`, deploying, touching secrets.
 - **Commits and pull requests carry no Claude attribution.** Every session runs with `--settings '{"attribution":{"commit":"","pr":""}}'`, so Claude Code adds neither the `Co-Authored-By` trailer nor the generated-with line. A prompt that wants attribution has to ask for it.

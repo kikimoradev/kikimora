@@ -108,6 +108,14 @@ describe("parseControlRequest", () => {
       cmd: "tasks.cancel",
       id: "t-1",
     });
+    expect(accepted('{"cmd":"tasks.delete","id":"t-1"}')).toEqual({
+      cmd: "tasks.delete",
+      id: "t-1",
+    });
+    expect(accepted('{"cmd":"tasks.delete","status":"cancelled"}')).toEqual({
+      cmd: "tasks.delete",
+      status: "cancelled",
+    });
     expect(accepted('{"cmd":"memory.search","query":"deploy"}')).toEqual({
       cmd: "memory.search",
       query: "deploy",
@@ -205,6 +213,24 @@ describe("parseControlRequest", () => {
     );
   });
 
+  it("takes either an id or a final status for tasks.delete", () => {
+    expect(rejected('{"cmd":"tasks.delete"}')).toBe(
+      "Invalid tasks.delete request: (root): give either id or status",
+    );
+    expect(rejected('{"cmd":"tasks.delete","id":"t-1","status":"done"}')).toBe(
+      "Invalid tasks.delete request: (root): give either id or status",
+    );
+    expect(rejected('{"cmd":"tasks.delete","status":"pending"}')).toMatch(
+      /^Invalid tasks.delete request: status: /,
+    );
+    expect(rejected('{"cmd":"tasks.delete","status":"in_progress"}')).toMatch(
+      /^Invalid tasks.delete request: status: /,
+    );
+    expect(rejected('{"cmd":"tasks.delete","id":" "}')).toMatch(
+      /^Invalid tasks.delete request: id: /,
+    );
+  });
+
   it("lists every command", () => {
     expect([...CONTROL_COMMANDS].sort()).toEqual(
       [
@@ -221,6 +247,7 @@ describe("parseControlRequest", () => {
         "tasks.add",
         "tasks.retry",
         "tasks.cancel",
+        "tasks.delete",
         "memory.search",
         "memory.recent",
         "memory.export",

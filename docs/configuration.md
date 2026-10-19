@@ -138,4 +138,4 @@ Commit `settings.json` and `prompts/` if your team shares them. `data/` and `log
 
 To back up `memory.db` without stopping the worker, use [`kikimora memory export`](control.md#commands); copying the file while it is open can miss recent entries.
 
-Tasks live in `data/tasks.json`. Tasks left `in_progress` by a crash are reset to `pending` on the next start. Each session also writes a log under `logs/` that records what the agent did ([session transcripts](deployment.md#session-transcripts)).
+Tasks live in `data/tasks.json`. Tasks left `in_progress` by a crash are reset to `pending` on the next start. Finished tasks stay there until [deleted](control.md#deleting-tasks). Each session also writes a log under `logs/` that records what the agent did ([session transcripts](deployment.md#session-transcripts)).

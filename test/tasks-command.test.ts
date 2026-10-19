@@ -13,8 +13,14 @@ vi.mock("../src/logger.js", async () =>
   (await import("./helpers.js")).loggerModuleMock(),
 );
 
-const { runTasksAdd, runTasksCancel, runTasksList, runTasksRetry, tasksCommand } =
-  await import("../src/tasks-command.js");
+const {
+  runTasksAdd,
+  runTasksCancel,
+  runTasksDelete,
+  runTasksList,
+  runTasksRetry,
+  tasksCommand,
+} = await import("../src/tasks-command.js");
 const { WorkerNotRunningError } = await import("../src/control-client.js");
 const { logger } = await import("../src/logger.js");
 
@@ -160,6 +166,82 @@ describe("tasks commands", () => {
     expect(process.exitCode).toBe(1);
   });
 
+  it("delete sends one id and reports it", async () => {
+    mocks.sendControlRequest.mockResolvedValue({
+      ok: true,
+      data: { deleted: ["ci-42"] },
+    });
+
+    await runTasksDelete("ci-42", { write });
+
+    expect(mocks.sendControlRequest).toHaveBeenCalledWith(expect.any(String), {
+      cmd: "tasks.delete",
+      id: "ci-42",
+    });
+    expect(logger.success).toHaveBeenCalledWith("Task ci-42 deleted.");
+  });
+
+  it("delete sends a final status and counts the deleted tasks", async () => {
+    mocks.sendControlRequest
+      .mockResolvedValueOnce({ ok: true, data: { deleted: ["a", "b"] } })
+      .mockResolvedValueOnce({ ok: true, data: { deleted: ["a"] } })
+      .mockResolvedValueOnce({ ok: true, data: { deleted: [] } });
+
+    await runTasksDelete(undefined, { status: "cancelled", write });
+    await runTasksDelete(undefined, { status: "done", write });
+    await runTasksDelete(undefined, { status: "failed", write });
+
+    expect(mocks.sendControlRequest).toHaveBeenNthCalledWith(1, expect.any(String), {
+      cmd: "tasks.delete",
+      status: "cancelled",
+    });
+    expect(logger.success).toHaveBeenNthCalledWith(1, "2 cancelled tasks deleted.");
+    expect(logger.success).toHaveBeenNthCalledWith(2, "1 done task deleted.");
+    expect(lines).toEqual(["No failed tasks."]);
+    expect(process.exitCode).toBe(savedExitCode);
+  });
+
+  it("delete prints the deleted ids as JSON", async () => {
+    mocks.sendControlRequest.mockResolvedValue({
+      ok: true,
+      data: { deleted: ["a", "b"] },
+    });
+
+    await runTasksDelete(undefined, { status: "done", json: true, write });
+
+    expect(JSON.parse(lines.join("\n"))).toEqual({ deleted: ["a", "b"] });
+  });
+
+  it("delete needs exactly one of an id and a final status", async () => {
+    await runTasksDelete(undefined, { write });
+    await runTasksDelete("ci-42", { status: "done", write });
+    await runTasksDelete(undefined, { status: "pending", write });
+
+    expect(mocks.sendControlRequest).not.toHaveBeenCalled();
+    expect(logger.error).toHaveBeenNthCalledWith(1, "Give either a task id or --status.");
+    expect(logger.error).toHaveBeenNthCalledWith(2, "Give either a task id or --status.");
+    expect(logger.error).toHaveBeenNthCalledWith(
+      3,
+      'Cannot delete "pending" tasks. Only done, failed, cancelled tasks can be deleted.',
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
+  it("delete surfaces a refusal from the worker", async () => {
+    mocks.sendControlRequest.mockResolvedValue({
+      ok: false,
+      error:
+        'Task "ci-42" is pending. Only done, failed and cancelled tasks can be deleted.',
+    });
+
+    await runTasksDelete("ci-42", { write });
+
+    expect(logger.error).toHaveBeenCalledWith(
+      'Task "ci-42" is pending. Only done, failed and cancelled tasks can be deleted.',
+    );
+    expect(process.exitCode).toBe(1);
+  });
+
   it("fails cleanly when no worker is running", async () => {
     mocks.sendControlRequest.mockRejectedValue(new WorkerNotRunningError());
 
@@ -172,7 +254,7 @@ describe("tasks commands", () => {
     expect(lines).toEqual([]);
   });
 
-  it("exposes list, add, retry and cancel as subcommands", async () => {
+  it("exposes list, add, retry, cancel and delete as subcommands", async () => {
     mocks.sendControlRequest.mockResolvedValue({ ok: true, data: [] });
     const stdoutWrite = vi.spyOn(process.stdout, "write").mockImplementation(() => true);
     const subCommands = tasksCommand.subCommands as Record<
@@ -181,14 +263,26 @@ describe("tasks commands", () => {
     >;
 
     try {
-      expect(Object.keys(subCommands).sort()).toEqual(["add", "cancel", "list", "retry"]);
+      expect(Object.keys(subCommands).sort()).toEqual([
+        "add",
+        "cancel",
+        "delete",
+        "list",
+        "retry",
+      ]);
       await subCommands.list?.run({ args: { _: [], json: true } });
+      mocks.sendControlRequest.mockResolvedValue({ ok: true, data: { deleted: [] } });
+      await subCommands.delete?.run({ args: { _: [], status: "done", json: true } });
     } finally {
       stdoutWrite.mockRestore();
     }
 
     expect(mocks.sendControlRequest).toHaveBeenCalledWith(expect.any(String), {
       cmd: "tasks.list",
+    });
+    expect(mocks.sendControlRequest).toHaveBeenCalledWith(expect.any(String), {
+      cmd: "tasks.delete",
+      status: "done",
     });
   });
 });
