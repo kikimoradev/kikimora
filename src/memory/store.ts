@@ -1,6 +1,6 @@
 import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
-import { DatabaseSync } from "node:sqlite";
+import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { z } from "zod";
 
 export interface TaskSummaryRecord {
@@ -17,6 +17,36 @@ export interface TaskSummaryRecord {
 }
 
 export type NewTaskSummaryRecord = Omit<TaskSummaryRecord, "id">;
+
+export type MemoryOrder = "rank" | "newest";
+
+export interface MemoryFilter {
+  beforeId?: number | undefined;
+  ok?: boolean | undefined;
+}
+
+export interface MemorySearchOptions extends MemoryFilter {
+  order?: MemoryOrder | undefined;
+}
+
+interface Conditions {
+  sql: string;
+  params: SQLInputValue[];
+}
+
+function conditionsOf(filter: MemoryFilter, table: string): Conditions {
+  const clauses: string[] = [];
+  const params: SQLInputValue[] = [];
+  if (filter.beforeId !== undefined) {
+    clauses.push(`${table}.id < ?`);
+    params.push(filter.beforeId);
+  }
+  if (filter.ok !== undefined) {
+    clauses.push(`${table}.ok = ?`);
+    params.push(filter.ok ? 1 : 0);
+  }
+  return { sql: clauses.map((clause) => ` AND ${clause}`).join(""), params };
+}
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS summaries (
@@ -132,26 +162,35 @@ export class MemoryStore {
     }
   }
 
-  search(query: string, limit = 10): TaskSummaryRecord[] {
+  search(
+    query: string,
+    limit = 10,
+    options: MemorySearchOptions = {},
+  ): TaskSummaryRecord[] {
     const match = toMatchQuery(query);
     if (match === null) return [];
+    const conditions = conditionsOf(options, "s");
+    const order = options.order === "newest" ? "s.id DESC" : "bm25(summaries_fts)";
     const rows = this.db
       .prepare(
         `SELECT s.*
          FROM summaries_fts
          JOIN summaries s ON s.id = summaries_fts.rowid
-         WHERE summaries_fts MATCH ?
-         ORDER BY bm25(summaries_fts)
+         WHERE summaries_fts MATCH ?${conditions.sql}
+         ORDER BY ${order}
          LIMIT ?`,
       )
-      .all(match, limit);
+      .all(match, ...conditions.params, limit);
     return rows.map(toRecord);
   }
 
-  recent(limit = 10): TaskSummaryRecord[] {
+  recent(limit = 10, filter: MemoryFilter = {}): TaskSummaryRecord[] {
+    const conditions = conditionsOf(filter, "summaries");
     const rows = this.db
-      .prepare(`SELECT * FROM summaries ORDER BY id DESC LIMIT ?`)
-      .all(limit);
+      .prepare(
+        `SELECT * FROM summaries WHERE 1 = 1${conditions.sql} ORDER BY id DESC LIMIT ?`,
+      )
+      .all(...conditions.params, limit);
     return rows.map(toRecord);
   }
 

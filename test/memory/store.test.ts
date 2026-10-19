@@ -142,6 +142,51 @@ describe("MemoryStore", () => {
     expect(store.recent(2).map((r) => r.id)).toEqual([third.id, second.id]);
   });
 
+  it("recent pages below an entry and keeps the entries of one outcome", () => {
+    const first = store.add(buildRecord({ taskId: "redmine-1", ok: false }));
+    const second = store.add(buildRecord({ taskId: "redmine-2" }));
+    const third = store.add(buildRecord({ taskId: "redmine-3", ok: false }));
+    const fourth = store.add(buildRecord({ taskId: "redmine-4" }));
+
+    expect(store.recent(10, { beforeId: third.id }).map((r) => r.id)).toEqual([
+      second.id,
+      first.id,
+    ]);
+    expect(store.recent(10, { ok: false }).map((r) => r.id)).toEqual([
+      third.id,
+      first.id,
+    ]);
+    expect(store.recent(10, { ok: true, beforeId: fourth.id }).map((r) => r.id)).toEqual([
+      second.id,
+    ]);
+    expect(store.recent(1, { beforeId: fourth.id }).map((r) => r.id)).toEqual([third.id]);
+  });
+
+  it("search orders newest first on request and pages below an entry by outcome", () => {
+    const relevant = store.add(
+      buildRecord({ taskId: "redmine-1", summary: "deploy deploy deploy deploy" }),
+    );
+    const failed = store.add(
+      buildRecord({ taskId: "redmine-2", ok: false, summary: "deploy once" }),
+    );
+    const newest = store.add(buildRecord({ taskId: "redmine-3", summary: "deploy" }));
+
+    expect(store.search("deploy", 10, { order: "newest" }).map((r) => r.id)).toEqual([
+      newest.id,
+      failed.id,
+      relevant.id,
+    ]);
+    expect(store.search("deploy", 10).map((r) => r.id)[0]).toBe(relevant.id);
+    expect(
+      store
+        .search("deploy", 10, { order: "newest", beforeId: newest.id })
+        .map((r) => r.id),
+    ).toEqual([failed.id, relevant.id]);
+    expect(store.search("deploy", 10, { ok: false }).map((r) => r.id)).toEqual([
+      failed.id,
+    ]);
+  });
+
   it("recent returns an empty list for an empty store", () => {
     expect(store.recent()).toEqual([]);
   });

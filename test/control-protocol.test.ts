@@ -130,6 +130,24 @@ describe("parseControlRequest", () => {
       cmd: "memory.recent",
       limit: MEMORY_LIMIT_DEFAULT,
     });
+    expect(
+      accepted(
+        '{"cmd":"memory.search","query":"deploy","beforeId":41,"ok":false,"order":"newest"}',
+      ),
+    ).toEqual({
+      cmd: "memory.search",
+      query: "deploy",
+      limit: MEMORY_LIMIT_DEFAULT,
+      beforeId: 41,
+      ok: false,
+      order: "newest",
+    });
+    expect(accepted('{"cmd":"memory.recent","beforeId":41,"ok":true}')).toEqual({
+      cmd: "memory.recent",
+      limit: MEMORY_LIMIT_DEFAULT,
+      beforeId: 41,
+      ok: true,
+    });
     expect(accepted('{"cmd":"prompt.get","agent":"monitor"}')).toEqual({
       cmd: "prompt.get",
       agent: "monitor",
@@ -182,6 +200,13 @@ describe("parseControlRequest", () => {
     expect(rejected('{"cmd":"memory.recent","limit":0}')).toMatch(/limit: /);
     expect(rejected('{"cmd":"memory.recent","limit":101}')).toMatch(/limit: /);
     expect(rejected('{"cmd":"memory.recent","limit":2.5}')).toMatch(/limit: /);
+    expect(rejected('{"cmd":"memory.recent","beforeId":0}')).toMatch(/beforeId: /);
+    expect(rejected('{"cmd":"memory.recent","beforeId":2.5}')).toMatch(/beforeId: /);
+    expect(rejected('{"cmd":"memory.recent","ok":"yes"}')).toMatch(/ok: /);
+    expect(rejected('{"cmd":"memory.recent","order":"newest"}')).toMatch(/order/);
+    expect(rejected('{"cmd":"memory.search","query":"deploy","order":"oldest"}')).toMatch(
+      /order: /,
+    );
     expect(rejected('{"cmd":"settings.patch","patch":[1]}')).toMatch(/patch/);
     expect(rejected('{"cmd":"settings.patch","patch":"x"}')).toMatch(/patch/);
     expect(rejected('{"cmd":"prompt.set","agent":"monitor","content":""}')).toMatch(

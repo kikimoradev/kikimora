@@ -260,9 +260,22 @@ async function handleRequest(
     case "tasks.delete":
       return deleteTasks(deps, request);
     case "memory.search":
-      return { ok: true, data: deps.memory.search(request.query, request.limit) };
+      return {
+        ok: true,
+        data: deps.memory.search(request.query, request.limit, {
+          beforeId: request.beforeId,
+          ok: request.ok,
+          order: request.order,
+        }),
+      };
     case "memory.recent":
-      return { ok: true, data: deps.memory.recent(request.limit) };
+      return {
+        ok: true,
+        data: deps.memory.recent(request.limit, {
+          beforeId: request.beforeId,
+          ok: request.ok,
+        }),
+      };
     case "memory.export":
       return { ok: true, data: await deps.memoryExport.export(request.path) };
     case "prompt.get":
