@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The control requests `memory.recent` and `memory.search` take an optional `beforeId`, which returns only the entries older than that id, and an optional `ok`, which keeps the entries of tasks that succeeded or failed, so a client can page through the whole memory instead of the newest 100 entries. `memory.search` also takes `"order":"newest"` to return its matches newest first; the default stays best match first, and the `memory_search` tool of the agents is unchanged.
+
 ## [0.14.0] - 2026-10-19
 
 ### Added

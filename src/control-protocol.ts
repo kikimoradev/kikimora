@@ -10,7 +10,7 @@ import type { Settings } from "./config.js";
 import type { AgentControlState } from "./control.js";
 import { DRAIN_TIMEOUT_MAX_MS, type DrainReason, type DrainSnapshot } from "./drain.js";
 import type { MemoryExport } from "./memory/export.js";
-import type { TaskSummaryRecord } from "./memory/store.js";
+import type { MemoryOrder, TaskSummaryRecord } from "./memory/store.js";
 import { PROMPT_AGENTS, type PromptAgent } from "./prompt-files.js";
 import {
   SESSION_AGENTS,
@@ -40,6 +40,7 @@ export type ControlTarget = (typeof CONTROL_TARGETS)[number];
 
 export const MEMORY_LIMIT_DEFAULT = 10;
 export const MEMORY_LIMIT_MAX = 100;
+export const MEMORY_ORDERS = ["rank", "newest"] as const satisfies readonly MemoryOrder[];
 export const UNRECOGNIZED_REQUEST = "Unrecognized control request.";
 export const TASKS_DELETE_SELECTOR = "give either id or status";
 
@@ -69,6 +70,10 @@ const sessionLimitSchema = z
   .max(SESSIONS_LIMIT_MAX)
   .default(SESSIONS_LIMIT_DEFAULT);
 const nonBlank = z.string().refine((value) => value.trim() !== "", "must not be blank");
+const memoryFilterShape = {
+  beforeId: z.number().int().positive().optional(),
+  ok: z.boolean().optional(),
+};
 const targetSchema = z.enum(CONTROL_TARGETS);
 const promptAgentSchema = z.enum(PROMPT_AGENTS);
 const sessionAgentSchema = z.enum(SESSION_AGENTS);
@@ -119,9 +124,17 @@ export const controlRequestSchema = z.discriminatedUnion("cmd", [
       TASKS_DELETE_SELECTOR,
     ),
   z
-    .object({ cmd: z.literal("memory.search"), query: nonBlank, limit: limitSchema })
+    .object({
+      cmd: z.literal("memory.search"),
+      query: nonBlank,
+      limit: limitSchema,
+      ...memoryFilterShape,
+      order: z.enum(MEMORY_ORDERS).optional(),
+    })
     .strict(),
-  z.object({ cmd: z.literal("memory.recent"), limit: limitSchema }).strict(),
+  z
+    .object({ cmd: z.literal("memory.recent"), limit: limitSchema, ...memoryFilterShape })
+    .strict(),
   z.object({ cmd: z.literal("memory.export"), path: nonBlank }).strict(),
   z.object({ cmd: z.literal("prompt.get"), agent: promptAgentSchema }).strict(),
   z

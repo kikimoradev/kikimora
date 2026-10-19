@@ -694,8 +694,41 @@ describe("startControlServer", () => {
     });
     await sendControlRequest(socketPath, { cmd: "memory.recent" });
 
-    expect(deps.memory.search).toHaveBeenCalledWith("deploy", 5);
-    expect(deps.memory.recent).toHaveBeenCalledWith(10);
+    expect(deps.memory.search).toHaveBeenCalledWith("deploy", 5, {
+      beforeId: undefined,
+      ok: undefined,
+      order: undefined,
+    });
+    expect(deps.memory.recent).toHaveBeenCalledWith(10, {
+      beforeId: undefined,
+      ok: undefined,
+    });
+  });
+
+  it("pages memory below an entry, by outcome and newest first", async () => {
+    const { deps } = await startServer();
+
+    await sendControlRequest(socketPath, {
+      cmd: "memory.search",
+      query: "deploy",
+      limit: 20,
+      beforeId: 41,
+      ok: false,
+      order: "newest",
+    });
+    await sendControlRequest(socketPath, {
+      cmd: "memory.recent",
+      limit: 20,
+      beforeId: 41,
+      ok: true,
+    });
+
+    expect(deps.memory.search).toHaveBeenCalledWith("deploy", 20, {
+      beforeId: 41,
+      ok: false,
+      order: "newest",
+    });
+    expect(deps.memory.recent).toHaveBeenCalledWith(20, { beforeId: 41, ok: true });
   });
 
   it("exports memory to the requested path and reports a refused export", async () => {
