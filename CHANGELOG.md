@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.14.0] - 2026-10-19
+
 ### Added
 
 - `kikimora tasks delete <id>`, `kikimora tasks delete --status done|failed|cancelled`, the dashboard commands `/delete` and `/purge` and the control request `tasks.delete` delete finished tasks, which until now stayed in `tasks.json` for good. A pending or running task and an unknown id are refused. The monitor's report is deduplicated against the stored tasks, so a deleted id that the monitor reports again comes back as a new task.
@@ -274,7 +276,8 @@ Initial release.
 - Non-interactive `kikimora init` for provisioning, plus a first-run wizard in the terminal.
 - Reference `Dockerfile` and `docker-compose.yml`.
 
-[Unreleased]: https://github.com/kikimoradev/kikimora/compare/v0.13.0...HEAD
+[Unreleased]: https://github.com/kikimoradev/kikimora/compare/v0.14.0...HEAD
+[0.14.0]: https://github.com/kikimoradev/kikimora/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/kikimoradev/kikimora/compare/v0.12.0...v0.13.0
 [0.12.0]: https://github.com/kikimoradev/kikimora/compare/v0.11.0...v0.12.0
 [0.11.0]: https://github.com/kikimoradev/kikimora/compare/v0.10.0...v0.11.0
