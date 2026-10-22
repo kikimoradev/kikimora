@@ -152,7 +152,7 @@ Nothing grants a ticket in `local` mode, and nothing but a supervisor does in `e
 
 `authKind` follows Claude Code's own precedence:
 
-1. `apiKey` when `ANTHROPIC_API_KEY` is set (it outranks an OAuth token, as in `claude -p`), or when `claude auth status` reports an `apiKeySource` such as an `apiKeyHelper` or a Console-created key;
+1. `apiKey` when `ANTHROPIC_API_KEY` is set (it outranks an OAuth token, as in `claude -p`), or when `claude auth status` reports an `apiKeySource` such as an `apiKeyHelper` or a Console-created key, or the `api_key` method of a Console sign-in;
 2. `oauth` when `CLAUDE_CODE_OAUTH_TOKEN` is set or the CLI reports `oauth_token`;
 3. `claude.ai` for a stored `claude auth login`;
 4. `unknown` otherwise.
