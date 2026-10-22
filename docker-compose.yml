@@ -4,7 +4,7 @@ services:
       context: .
       target: runtime
       args:
-        CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-2.1.284}
+        CLAUDE_CODE_VERSION: ${CLAUDE_CODE_VERSION:-2.1.293}
     init: true
     restart: unless-stopped
     group_add:

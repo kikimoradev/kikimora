@@ -7,7 +7,7 @@ COPY . .
 RUN pnpm build && pnpm pack --pack-destination /out
 
 FROM node:22-bookworm-slim AS runtime
-ARG CLAUDE_CODE_VERSION=2.1.284
+ARG CLAUDE_CODE_VERSION=2.1.293
 LABEL org.opencontainers.image.source="https://github.com/kikimoradev/kikimora" \
       org.opencontainers.image.description="kikimora worker with a pinned Claude Code CLI" \
       dev.kikimora.claude-code.version="${CLAUDE_CODE_VERSION}"

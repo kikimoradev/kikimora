@@ -255,7 +255,7 @@ su - kikimora
 
 # Node 22 + the two CLIs
 curl -fsSL https://deb.nodesource.com/setup_22.x | sudo bash - && sudo apt-get install -y nodejs git
-sudo npm install -g @anthropic-ai/claude-code@2.1.284 @kikimoradev/kikimora
+sudo npm install -g @anthropic-ai/claude-code@2.1.293 @kikimoradev/kikimora
 
 # the project kikimora will work on (with .kikimora/ committed, or run kikimora init)
 git clone git@github.com:you/your-project.git ~/your-project
@@ -359,7 +359,7 @@ Both variants come from the same `Dockerfile`. `runtime` is its default target, 
 
 ### Pinned Claude Code version
 
-The image installs one Claude Code version (`CLAUDE_CODE_VERSION`, default `2.1.284`) and disables both auto-updaters (`DISABLE_AUTOUPDATER=1`, `KIKIMORA_DISABLE_AUTOUPDATER=1`). A container runs the CLI version it was built with. To change it:
+The image installs one Claude Code version (`CLAUDE_CODE_VERSION`, default `2.1.293`) and disables both auto-updaters (`DISABLE_AUTOUPDATER=1`, `KIKIMORA_DISABLE_AUTOUPDATER=1`). A container runs the CLI version it was built with. To change it:
 
 ```bash
 CLAUDE_CODE_VERSION=2.1.300 docker compose build --pull && docker compose up -d
