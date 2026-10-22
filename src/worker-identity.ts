@@ -14,6 +14,8 @@ function authKindReportedBy(status: ClaudeAuthStatus | null): AuthKind {
   switch (status.authMethod) {
     case "oauth_token":
       return "oauth";
+    case "api_key":
+      return "apiKey";
     case "claude.ai":
       return "claude.ai";
     default:

@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- The Docker image pins Claude Code 2.1.293 instead of 2.1.284. Its `haiku` alias resolves to Claude Haiku 5.5 instead of Claude Haiku 4.5, so an agent on the default monitor model moves to Haiku 5.5 with this release, and a container runs the same models as a worker on a host with Claude Code 2.1.293.
+
+### Fixed
+
+- `authKind` reports `apiKey` for a Console sign-in with a stored API key, which Claude Code 2.1.286 and later report as the `api_key` method of `claude auth status`, instead of `unknown`.
+
 ## [0.15.0] - 2026-10-19
 
 ### Added

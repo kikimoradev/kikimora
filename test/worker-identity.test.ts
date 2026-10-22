@@ -37,6 +37,7 @@ describe("resolveAuthKind", () => {
     [loggedIn({ authMethod: "claude.ai" }), "claude.ai"],
     [loggedIn({ authMethod: "oauth_token" }), "oauth"],
     [loggedIn({ authMethod: "claude.ai", apiKeySource: "apiKeyHelper" }), "apiKey"],
+    [loggedIn({ authMethod: "api_key" }), "apiKey"],
     [loggedIn({ authMethod: "console" }), "unknown"],
     [{ loggedIn: false, authMethod: "none" }, "unknown"],
     [{ loggedIn: true }, "unknown"],
