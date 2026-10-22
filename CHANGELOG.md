@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.15.1] - 2026-10-22
+
 ### Changed
 
 - The Docker image pins Claude Code 2.1.293 instead of 2.1.284. Its `haiku` alias resolves to Claude Haiku 5.5 instead of Claude Haiku 4.5, so an agent on the default monitor model moves to Haiku 5.5 with this release, and a container runs the same models as a worker on a host with Claude Code 2.1.293.
@@ -290,7 +292,8 @@ Initial release.
 - Non-interactive `kikimora init` for provisioning, plus a first-run wizard in the terminal.
 - Reference `Dockerfile` and `docker-compose.yml`.
 
-[Unreleased]: https://github.com/kikimoradev/kikimora/compare/v0.15.0...HEAD
+[Unreleased]: https://github.com/kikimoradev/kikimora/compare/v0.15.1...HEAD
+[0.15.1]: https://github.com/kikimoradev/kikimora/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/kikimoradev/kikimora/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/kikimoradev/kikimora/compare/v0.13.0...v0.14.0
 [0.13.0]: https://github.com/kikimoradev/kikimora/compare/v0.12.0...v0.13.0
