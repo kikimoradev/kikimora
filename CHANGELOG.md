@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The package requires `@modelcontextprotocol/sdk` 1.32.1 or later instead of 1.29.0, so an install can no longer keep an SDK release with its known high advisories. The lockfile moves the SDK's dependencies to fixed releases as well (`proxy-addr` 2.0.8, `fast-uri` 3.1.8, `ip-address` 10.7.4, `hono` 4.13.13, `qs` 6.16.1), and `pnpm audit` reports no known advisory. The memory MCP server behaves as before.
+
 ## [0.15.1] - 2026-10-22
 
 ### Changed

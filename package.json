@@ -54,7 +54,7 @@
     "prepublishOnly": "pnpm check && pnpm build"
   },
   "dependencies": {
-    "@modelcontextprotocol/sdk": "^1.29.0",
+    "@modelcontextprotocol/sdk": "^1.32.1",
     "citty": "^0.2.2",
     "consola": "^3.4.0",
     "ink": "^7.1.0",
@@ -65,7 +65,7 @@
     "@eslint/js": "^10.0.1",
     "@types/node": "^22.10.0",
     "@types/react": "^19.2.17",
-    "@vitest/coverage-v8": "^4.1.9",
+    "@vitest/coverage-v8": "^4.1.12",
     "eslint": "^10.6.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-react-hooks": "^7.1.1",
@@ -75,7 +75,7 @@
     "tsx": "^4.19.2",
     "typescript": "^6.0.3",
     "typescript-eslint": "^8.62.1",
-    "vitest": "^4.1.9"
+    "vitest": "^4.1.12"
   },
   "pnpm": {
     "onlyBuiltDependencies": [
