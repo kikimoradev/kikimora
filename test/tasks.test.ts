@@ -195,6 +195,69 @@ describe("TaskStore", () => {
     });
   });
 
+  it("suspend gives the attempt back and keeps the session to resume across a reopen", async () => {
+    const store = await TaskStore.open(path);
+    await store.addTasks([newTask("a")]);
+    await store.takeNext();
+    const resume = { sessionId: "sess-1", limitedAt: "2026-10-22T12:33:58.000Z" };
+
+    await store.suspend("a", "usage limit reached", resume);
+
+    expect(store.list()[0]).toMatchObject({
+      status: "pending",
+      attempts: 0,
+      error: "usage limit reached",
+      resume,
+    });
+    const reopened = await TaskStore.open(path);
+    const next = await reopened.takeNext();
+    expect(next).toMatchObject({ attempts: 1, resume });
+  });
+
+  it("release keeps the session to resume, a final outcome or a requeue drops it", async () => {
+    const resume = { sessionId: "sess-1", limitedAt: "2026-10-22T12:33:58.000Z" };
+    const store = await TaskStore.open(path);
+    await store.addTasks([newTask("a"), newTask("b"), newTask("c"), newTask("d")]);
+    const ids = ["a", "b", "c", "d"];
+    const takeAll = async (): Promise<void> => {
+      while ((await store.takeNext()) !== undefined);
+    };
+    await takeAll();
+    for (const id of ids) await store.suspend(id, "usage limit reached", resume);
+    await takeAll();
+    await store.release("a");
+    await store.complete("b");
+    await store.fail("c", "broken");
+    await store.requeue("d", "API Error: overloaded");
+
+    const [a, b, c, d] = store.list();
+    expect(a?.resume).toEqual(resume);
+    expect(b?.resume).toBeUndefined();
+    expect(c?.resume).toBeUndefined();
+    expect(d?.resume).toBeUndefined();
+    const persisted = JSON.parse(await readFile(path, "utf8")) as {
+      tasks: Record<string, unknown>[];
+    };
+    expect(persisted.tasks.map((task) => "resume" in task)).toEqual([
+      true,
+      false,
+      false,
+      false,
+    ]);
+  });
+
+  it("suspend of an unknown id is ignored", async () => {
+    const store = await TaskStore.open(path);
+    await store.addTasks([newTask("a")]);
+
+    await store.suspend("not-there", "usage limit reached", {
+      sessionId: "sess-1",
+      limitedAt: "2026-10-22T12:33:58.000Z",
+    });
+
+    expect(store.list()[0]?.resume).toBeUndefined();
+  });
+
   it("release of an unknown id is ignored", async () => {
     const store = await TaskStore.open(path);
     await store.addTasks([newTask("a")]);

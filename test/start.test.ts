@@ -33,7 +33,8 @@ vi.mock("../src/monitor.js", () => ({ runMonitorLoop: mocks.runMonitorLoop }));
 vi.mock("../src/executor.js", () => ({ runExecutorLoop: mocks.runExecutorLoop }));
 vi.mock("../src/shutdown.js", () => ({ abortOnSignals: mocks.abortOnSignals }));
 vi.mock("../src/tasks.js", () => ({ TaskStore: { open: mocks.taskStoreOpen } }));
-vi.mock("../src/memory/store.js", () => ({
+vi.mock("../src/memory/store.js", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("../src/memory/store.js")>()),
   MemoryStore: { open: mocks.memoryStoreOpen },
 }));
 vi.mock("../src/sessions/index.js", async (importOriginal) => ({

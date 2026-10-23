@@ -201,7 +201,11 @@ export function createHeadlessReporters(
         level: "info",
         agent: "executor",
         event: "task.started",
-        fields: { taskId: task.id, title: task.title },
+        fields: compactFields({
+          taskId: task.id,
+          title: task.title,
+          resumedSessionId: task.resume?.sessionId,
+        }),
       });
     },
     taskFinished: (outcome) => {

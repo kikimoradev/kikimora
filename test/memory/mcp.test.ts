@@ -78,6 +78,50 @@ describe("memory MCP server", () => {
     expect(text).toContain("missing Content-Type header");
   });
 
+  it("memory_search returns the newest entries first by default", async () => {
+    const result = await client.callTool({
+      name: "memory_search",
+      arguments: { query: "export content type header" },
+    });
+
+    const text = firstText(result);
+    expect(text.indexOf("Export regression")).toBeLessThan(
+      text.indexOf("Fixed CSV export"),
+    );
+  });
+
+  it("memory_search returns the best match first when asked for rank order", async () => {
+    const result = await client.callTool({
+      name: "memory_search",
+      arguments: { query: "export content type header", order: "rank" },
+    });
+
+    const text = firstText(result);
+    expect(text.indexOf("Fixed CSV export")).toBeLessThan(
+      text.indexOf("Export regression"),
+    );
+  });
+
+  it("memory_search keeps the newest entries when the limit cuts the hits", async () => {
+    const result = await client.callTool({
+      name: "memory_search",
+      arguments: { query: "export content type header", limit: 1 },
+    });
+
+    const text = firstText(result);
+    expect(text).toContain("Export regression");
+    expect(text).not.toContain("Fixed CSV export");
+  });
+
+  it("memory_search rejects an unknown order", async () => {
+    const result = await client.callTool({
+      name: "memory_search",
+      arguments: { query: "export", order: "oldest" },
+    });
+
+    expect(result.isError).toBe(true);
+  });
+
   it("memory_search with no hits returns a readable message", async () => {
     const result = await client.callTool({
       name: "memory_search",

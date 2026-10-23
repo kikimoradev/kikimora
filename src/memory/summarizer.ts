@@ -42,7 +42,7 @@ export interface SessionSummarizerDeps {
   dataDir: string;
   playwrightOutputDir: string;
   store: MemoryStore;
-  resolveLogPath(sessionId: string): Promise<string | undefined>;
+  resolveLogPaths(sessionId: string): Promise<string[]>;
   reporter: SummaryReporter;
   gates: LoopGates;
   sessions?: SessionRecorder | undefined;
@@ -83,8 +83,8 @@ export class SessionSummarizer implements TaskSummarizer {
         finished(false, { error: "executor session has no id — no log" });
         return;
       }
-      const logPath = await this.deps.resolveLogPath(sessionId);
-      if (logPath === undefined) {
+      const logPaths = await this.deps.resolveLogPaths(sessionId);
+      if (logPaths.length === 0) {
         finished(false, { error: "executor session log file not found" });
         return;
       }
@@ -112,7 +112,7 @@ export class SessionSummarizer implements TaskSummarizer {
             task,
             result,
             willRetry: outcome.willRetry,
-            logPath,
+            logPaths,
           }),
           sessionTimeoutMs: summarizer.sessionTimeoutMs,
           streamPartial: this.deps.streamPartial,

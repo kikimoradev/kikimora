@@ -90,20 +90,40 @@ describe("SessionLog", () => {
     expect(content).toBe("[11:30:00] stderr: something went wrong\n");
   });
 
-  it("pathFor returns the session log file path after init", async () => {
+  it("logPathsFor returns the session log file path after init", async () => {
     const now = vi
       .fn(() => new Date(2026, 6, 2, 10, 0, 5))
       .mockReturnValueOnce(new Date(2026, 6, 2, 10, 0, 0));
     const log = new SessionLog(dir, now);
 
-    expect(log.pathFor("a")).toBeUndefined();
+    expect(log.logPathsFor("a")).toEqual([]);
     log.sink({ type: "init", model: "haiku", sessionId: "a", toolCount: 0 });
     log.sink({ type: "init", model: "opus", sessionId: "b", toolCount: 0 });
     await log.close();
 
-    expect(log.pathFor("a")).toBe(join(dir, "2026-07-02", "10-00-00-a.log"));
-    expect(log.pathFor("b")).toBe(join(dir, "2026-07-02", "10-00-05-b.log"));
-    expect(log.pathFor("nonexistent")).toBeUndefined();
+    expect(log.logPathsFor("a")).toEqual([join(dir, "2026-07-02", "10-00-00-a.log")]);
+    expect(log.logPathsFor("b")).toEqual([join(dir, "2026-07-02", "10-00-05-b.log")]);
+    expect(log.logPathsFor("nonexistent")).toEqual([]);
+  });
+
+  it("logPathsFor lists every file of a resumed session, oldest first", async () => {
+    const now = vi
+      .fn()
+      .mockReturnValueOnce(new Date(2026, 6, 2, 10, 0, 0))
+      .mockReturnValueOnce(new Date(2026, 6, 2, 10, 5, 0))
+      .mockReturnValue(new Date(2026, 6, 2, 14, 0, 0));
+    const log = new SessionLog(dir, now);
+
+    log.sink({ type: "init", model: "opus", sessionId: "s", toolCount: 0 });
+    log.sink({ type: "init", model: "opus", sessionId: "other", toolCount: 0 });
+    log.sink({ type: "init", model: "opus", sessionId: "s", toolCount: 0 });
+    await log.close();
+
+    expect(log.logPathsFor("s")).toEqual([
+      join(dir, "2026-07-02", "10-00-00-s.log"),
+      join(dir, "2026-07-02", "14-00-00-s.log"),
+    ]);
+    expect(log.pathsFor("s")?.log).toBe(join(dir, "2026-07-02", "14-00-00-s.log"));
   });
 
   it("flush guarantees written lines are in the file without closing the log", async () => {
@@ -114,7 +134,7 @@ describe("SessionLog", () => {
 
     await log.flush();
 
-    const path = log.pathFor("s");
+    const [path] = log.logPathsFor("s");
     expect(path).toBeDefined();
     const content = await readFile(path ?? "", "utf8");
     expect(content).toContain("session result");
@@ -196,7 +216,7 @@ describe("SessionLog", () => {
       log: join(dir, "2026-07-02", "10-00-00-s.log"),
       jsonl: join(dir, "2026-07-02", "10-00-00-s.jsonl"),
     });
-    expect(log.pathFor("s")).toBe(log.pathsFor("s")?.log);
+    expect(log.logPathsFor("s")).toEqual([log.pathsFor("s")?.log]);
   });
 
   it("flush covers both streams", async () => {

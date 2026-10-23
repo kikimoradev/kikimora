@@ -18,7 +18,9 @@ export interface TaskSummaryRecord {
 
 export type NewTaskSummaryRecord = Omit<TaskSummaryRecord, "id">;
 
-export type MemoryOrder = "rank" | "newest";
+export const MEMORY_ORDERS = ["rank", "newest"] as const;
+
+export type MemoryOrder = (typeof MEMORY_ORDERS)[number];
 
 export interface MemoryFilter {
   beforeId?: number | undefined;

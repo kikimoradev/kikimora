@@ -28,6 +28,7 @@ export interface SessionSpec {
   effort: EffortLevel;
   systemPrompt: string;
   prompt: string;
+  resume?: string | undefined;
   sessionTimeoutMs?: number | undefined;
   streamPartial: boolean;
   mcpConfigPath: string;
@@ -64,6 +65,7 @@ export async function runSession(
   if (spec.streamPartial) args.push("--include-partial-messages");
   args.push("--mcp-config", spec.mcpConfigPath, "--strict-mcp-config");
   if (spec.jsonSchema) args.push("--json-schema", spec.jsonSchema);
+  if (spec.resume !== undefined) args.push("--resume", spec.resume);
 
   const placed: PlacedSession = {
     role: spec.meta.agent,
@@ -167,6 +169,7 @@ export async function runSession(
             signal: exitSignal,
             initialized: indexed.sessionId !== null,
           }),
+          spec.resume !== undefined && indexed.sessionId === null,
         );
 
     if (indexed.sessionId !== null) {
@@ -185,7 +188,7 @@ export async function runSession(
       durationMs: Date.now() - startedAt,
       costUsd: summary.costUsd,
       numTurns: summary.numTurns,
-      sessionId: summary.sessionId,
+      sessionId: summary.sessionId ?? indexed.sessionId ?? undefined,
       resultText: summary.resultText,
       error: ok ? undefined : describeFailure(failureReason, code, exitSignal),
       failureReason,
@@ -217,8 +220,10 @@ function classifyFailure(
   killReason: KillReason | null,
   isError: boolean | undefined,
   launcherReason: LauncherFailureReason | null,
+  resumeUnstarted: boolean,
 ): SessionFailureReason {
   if (killReason !== null) return killReason;
+  if (resumeUnstarted && launcherReason === null) return "resumeFailed";
   if (isError) return "isError";
   return launcherReason ?? "exit";
 }
@@ -239,6 +244,8 @@ function describeFailure(
       return `Session launcher refused the session (exit code ${LAUNCHER_REFUSED_EXIT_CODE})`;
     case "poolMemoryLimit":
       return "Session killed by the pool memory limit";
+    case "resumeFailed":
+      return "Session could not be resumed";
     default:
       return code !== null
         ? `Process exited with code ${code}`

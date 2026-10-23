@@ -175,6 +175,71 @@ describe("runSession (integration with fake claude)", () => {
     expect(result.ok).toBe(false);
     expect(result.error).toBe("Session timed out");
     expect(result.failureReason).toBe("timeout");
+    expect(result.sessionId).toBeUndefined();
+  }, 15_000);
+
+  it("keeps the session id of a session the timeout killed after init", async () => {
+    const spec = buildSessionSpec(collector.sink, {
+      childEnv: fakeClaudeEnv("hang_after_init", { FAKE_CLAUDE_SESSION_ID: "sess-late" }),
+      sessionTimeoutMs: 2_000,
+    });
+    const result = await runSession(spec, new AbortController().signal);
+
+    expect(result.failureReason).toBe("timeout");
+    expect(result.sessionId).toBe("sess-late");
+    expect(result.costUsd).toBeUndefined();
+  }, 15_000);
+
+  it("resumes the given session with --resume", async () => {
+    const argsOut = join(dir, "args.json");
+    const spec = buildSessionSpec(collector.sink, {
+      childEnv: fakeClaudeEnv("ok", {
+        FAKE_CLAUDE_ARGS_OUT: argsOut,
+        FAKE_CLAUDE_SESSION_ID: "sess-limited",
+      }),
+      resume: "sess-limited",
+    });
+    const result = await runSession(spec, new AbortController().signal);
+
+    const args = await readJson<string[]>(argsOut);
+    expect(args[args.indexOf("--resume") + 1]).toBe("sess-limited");
+    expect(result.ok).toBe(true);
+    expect(result.sessionId).toBe("sess-limited");
+  }, 15_000);
+
+  it("starts a fresh session without --resume", async () => {
+    const argsOut = join(dir, "args.json");
+    const spec = buildSessionSpec(collector.sink, {
+      childEnv: fakeClaudeEnv("ok", { FAKE_CLAUDE_ARGS_OUT: argsOut }),
+    });
+    await runSession(spec, new AbortController().signal);
+
+    expect(await readJson<string[]>(argsOut)).not.toContain("--resume");
+  }, 15_000);
+
+  it("reports resumeFailed when the session to resume never starts", async () => {
+    const started = vi.fn();
+    const spec = buildSessionSpec(collector.sink, {
+      childEnv: fakeClaudeEnv("resume_missing"),
+      resume: "sess-gone",
+      index: { started, finished: vi.fn() },
+    });
+    const result = await runSession(spec, new AbortController().signal);
+
+    expect(result.ok).toBe(false);
+    expect(result.failureReason).toBe("resumeFailed");
+    expect(result.error).toBe("Session could not be resumed");
+    expect(started).not.toHaveBeenCalled();
+  }, 15_000);
+
+  it("keeps the ordinary failure reason of a resumed session that started", async () => {
+    const spec = buildSessionSpec(collector.sink, {
+      childEnv: fakeClaudeEnv("error_result"),
+      resume: "sess-1",
+    });
+    const result = await runSession(spec, new AbortController().signal);
+
+    expect(result.failureReason).toBe("isError");
   }, 15_000);
 
   it("aborts the session on the abort signal", async () => {
@@ -576,6 +641,26 @@ describe("runSession reading the launcher's verdict", () => {
     expect(collector.events[0]).toMatchObject({ type: "spawned" });
     expect(started).not.toHaveBeenCalled();
     expect(finished).not.toHaveBeenCalled();
+  }, 15_000);
+
+  it("keeps a refusal to place a resumed session apart from a failed resume", async () => {
+    const spec = launchedSpec(
+      "resume_missing",
+      { FAKE_LAUNCHER_EXIT_BEFORE: "75" },
+      { resume: "sess-limited" },
+    );
+
+    const result = await runSession(spec, new AbortController().signal);
+
+    expect(result.failureReason).toBe("launcherRefused");
+  }, 15_000);
+
+  it("reports resumeFailed for a launched session that cannot be resumed", async () => {
+    const spec = launchedSpec("resume_missing", {}, { resume: "sess-gone" });
+
+    const result = await runSession(spec, new AbortController().signal);
+
+    expect(result.failureReason).toBe("resumeFailed");
   }, 15_000);
 
   it("treats exit code 75 after Claude Code started as an ordinary exit", async () => {

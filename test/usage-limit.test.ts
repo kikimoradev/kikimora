@@ -67,6 +67,7 @@ describe("detectUsageLimit", () => {
       "You've reached your weekly limit",
       "Claude AI usage limit reached",
       "Session limit reached, try again later",
+      "You've hit your session limit · resets 4:10pm (Europe/Warsaw)",
     ]) {
       expect(detectUsageLimit(failure({ resultText: text }))).toEqual({
         resetAt: null,

@@ -186,6 +186,21 @@ describe("createHeadlessReporters", () => {
     expect(events[0]?.fields).not.toHaveProperty("costUsd");
   });
 
+  it("names the session a resumed task continues", () => {
+    const { events, executor } = collect();
+
+    executor.taskStarted(
+      buildTask({
+        resume: { sessionId: "sess-limited", limitedAt: "2026-10-22T12:33:58.000Z" },
+      }),
+    );
+
+    expect(events[0]).toMatchObject({
+      event: "task.started",
+      fields: { taskId: "task-1", resumedSessionId: "sess-limited" },
+    });
+  });
+
   it("maps executor lifecycle callbacks to events", () => {
     const { events, executor } = collect();
     const task = buildTask();

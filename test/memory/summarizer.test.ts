@@ -69,7 +69,7 @@ describe("SessionSummarizer", () => {
   let store: MemoryStoreType;
   let spy: ExecutorReporterSpy;
   const logPath = "/logs/executor/2026-07-02/10-00-00-executor-session.log";
-  const resolveLogPath = vi.fn();
+  const resolveLogPaths = vi.fn();
   let gates: LoopGates;
 
   function buildSummarizer() {
@@ -82,7 +82,7 @@ describe("SessionSummarizer", () => {
       dataDir: dir,
       playwrightOutputDir: join(dir, "playwright"),
       store,
-      resolveLogPath,
+      resolveLogPaths,
       reporter: spy.reporter,
       gates,
     });
@@ -93,7 +93,7 @@ describe("SessionSummarizer", () => {
     store = MemoryStore.open(join(dir, "memory.db"));
     spy = createExecutorReporterSpy();
     gates = buildGates();
-    resolveLogPath.mockReset().mockResolvedValue(logPath);
+    resolveLogPaths.mockReset().mockResolvedValue([logPath]);
     mocks.readFile.mockReset().mockResolvedValue("summarizer system\n");
     mocks.runSession.mockReset().mockResolvedValue(summarySessionResult());
   });
@@ -112,7 +112,7 @@ describe("SessionSummarizer", () => {
     );
 
     expect(spy.summaryStarted).toHaveBeenCalledOnce();
-    expect(resolveLogPath).toHaveBeenCalledWith("executor-session");
+    expect(resolveLogPaths).toHaveBeenCalledWith("executor-session");
 
     const spec = mocks.runSession.mock.calls[0]?.[0] as SessionSpec;
     expect(spec.launcher).toBe(NO_LAUNCHER);
@@ -179,7 +179,7 @@ describe("SessionSummarizer", () => {
   });
 
   it("skips the summary when the log path cannot be resolved", async () => {
-    resolveLogPath.mockResolvedValue(undefined);
+    resolveLogPaths.mockResolvedValue([]);
 
     await buildSummarizer().summarize(
       task(),

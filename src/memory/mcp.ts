@@ -2,7 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { defineCommand } from "citty";
 import { z } from "zod";
-import { MemoryStore, type TaskSummaryRecord } from "./store.js";
+import { MEMORY_ORDERS, MemoryStore, type TaskSummaryRecord } from "./store.js";
 
 export type MemoryReader = Pick<MemoryStore, "search" | "get">;
 
@@ -33,8 +33,8 @@ export function createMemoryMcpServer(reader: MemoryReader): McpServer {
       title: "Search task memory",
       description:
         "Full-text search over long-term memory: summaries of previously " +
-        "completed tasks (decisions, dead ends, pitfalls). Results sorted by " +
-        "relevance.",
+        "completed tasks (decisions, dead ends, pitfalls). Results sorted " +
+        "newest first; pass order rank for the best match first.",
       inputSchema: {
         query: z
           .string()
@@ -47,10 +47,17 @@ export function createMemoryMcpServer(reader: MemoryReader): McpServer {
           .max(50)
           .optional()
           .describe("Maximum number of results (default 10)"),
+        order: z
+          .enum(MEMORY_ORDERS)
+          .optional()
+          .describe("newest: newest first (default); rank: best match first"),
       },
     },
-    ({ query, limit }) =>
-      textResult(reader.search(query, limit ?? 10), "No results in memory."),
+    ({ query, limit, order }) =>
+      textResult(
+        reader.search(query, limit ?? 10, { order: order ?? "newest" }),
+        "No results in memory.",
+      ),
   );
 
   server.registerTool(

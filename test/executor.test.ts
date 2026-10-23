@@ -982,6 +982,208 @@ describe("runExecutorLoop", () => {
     await promise;
   });
 
+  it("a usage-limit failure suspends the task and resumes its session after the reset", async () => {
+    vi.useFakeTimers({ now: new Date("2026-10-22T12:33:58.000Z") });
+    const limitedAt = "2026-10-22T12:33:58.000Z";
+    const resume = { sessionId: "sess-limited", limitedAt };
+    const { takeNext, peekNext } = scriptedTakes(
+      [
+        { ...task("limited"), attempts: 1 },
+        { ...task("limited"), attempts: 1, resume },
+      ],
+      undefined,
+    );
+    const suspend = vi.fn().mockResolvedValue(undefined);
+    const release = vi.fn().mockResolvedValue(undefined);
+    const complete = vi.fn().mockResolvedValue(undefined);
+    const store = {
+      takeNext,
+      peekNext,
+      suspend,
+      release,
+      complete,
+      fail: vi.fn(),
+      requeue: vi.fn(),
+    } as unknown as TaskStore;
+    const controller = new AbortController();
+    const resetsAt = Math.floor(Date.now() / 1000) + 2;
+    mocks.runSession
+      .mockResolvedValueOnce({
+        ok: false,
+        durationMs: 10,
+        failureReason: "isError",
+        error: "Session ended with an error (is_error)",
+        sessionId: "sess-limited",
+        rateLimit: { status: "rejected", resetsAt, rateLimitType: "five_hour" },
+      } satisfies SessionResult)
+      .mockResolvedValue({ ...ok(), sessionId: "sess-limited" });
+
+    const promise = runExecutorLoop(
+      buildConfig(),
+      store,
+      new Waker(),
+      spy.reporter,
+      summarizerSpy.summarizer,
+      noopController(),
+      buildGates(),
+      controller.signal,
+    );
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(suspend).toHaveBeenCalledWith("limited", "usage limit reached", {
+      sessionId: "sess-limited",
+      limitedAt: expect.stringMatching(/^2026-10-22T12:33:58\.\d{3}Z$/) as unknown,
+    });
+    expect(release).not.toHaveBeenCalled();
+    expect(summarizerSpy.summarize).not.toHaveBeenCalled();
+    expect(spy.taskFinished).toHaveBeenCalledWith(
+      expect.objectContaining({
+        taskId: "limited",
+        willRetry: true,
+        error: "usage limit reached — session resumes after the reset",
+        sessionId: "sess-limited",
+      }),
+    );
+
+    await vi.advanceTimersByTimeAsync(63_000);
+    expect(complete).toHaveBeenCalledWith("limited");
+
+    const first = mocks.runSession.mock.calls[0]?.[0] as SessionSpec;
+    const resumed = mocks.runSession.mock.calls[1]?.[0] as SessionSpec;
+    expect(first.resume).toBeUndefined();
+    expect(resumed.resume).toBe("sess-limited");
+    expect(resumed.prompt).not.toContain("## Task to complete");
+    expect(resumed.prompt).toContain(`stopped this session at ${limitedAt}`);
+    expect(resumed.prompt).toContain("waited 1m 02s");
+    expect(resumed.prompt).toContain("Continue task limited where you left off.");
+    expect(spy.taskStarted).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: "limited", resume }),
+    );
+    expect(summarizerSpy.summarize).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "limited" }),
+      expect.objectContaining({ ok: true, sessionId: "sess-limited" }),
+      expect.anything(),
+      expect.anything(),
+    );
+
+    controller.abort();
+    await promise;
+  });
+
+  it("a usage-limit failure without a session id requeues the task for a fresh session", async () => {
+    const { store, enqueue } = fakeStore([]);
+    const release = vi.fn().mockResolvedValue(undefined);
+    const suspend = vi.fn().mockResolvedValue(undefined);
+    Object.assign(store, { release, suspend });
+    enqueue(task("limited"));
+    const controller = new AbortController();
+    mocks.runSession.mockResolvedValueOnce({
+      ok: false,
+      durationMs: 10,
+      failureReason: "isError",
+      error: "Session ended with an error (is_error)",
+      resultText: "Claude AI usage limit reached",
+    } satisfies SessionResult);
+
+    const promise = runExecutorLoop(
+      buildConfig(),
+      store,
+      new Waker(),
+      spy.reporter,
+      summarizerSpy.summarizer,
+      noopController(),
+      buildGates(),
+      controller.signal,
+    );
+    await vi.waitFor(() =>
+      expect(release).toHaveBeenCalledWith("limited", "usage limit reached"),
+    );
+    controller.abort();
+    await promise;
+
+    expect(suspend).not.toHaveBeenCalled();
+  });
+
+  it("a session that cannot be resumed falls back to a fresh session in the same attempt", async () => {
+    const resume = { sessionId: "sess-gone", limitedAt: "2026-10-22T12:33:58.000Z" };
+    const { store, complete } = fakeStore([{ ...task("r"), resume }]);
+    const controller = new AbortController();
+    mocks.runSession
+      .mockResolvedValueOnce({
+        ok: false,
+        durationMs: 5,
+        error: "Session could not be resumed",
+        failureReason: "resumeFailed",
+        sessionId: "sess-gone",
+      } satisfies SessionResult)
+      .mockResolvedValue({ ...ok(), sessionId: "sess-fresh" });
+
+    const promise = runExecutorLoop(
+      buildConfig(),
+      store,
+      new Waker(),
+      spy.reporter,
+      summarizerSpy.summarizer,
+      noopController(),
+      buildGates(),
+      controller.signal,
+    );
+    await vi.waitFor(() => expect(complete).toHaveBeenCalledWith("r"));
+    controller.abort();
+    await promise;
+
+    const resumed = mocks.runSession.mock.calls[0]?.[0] as SessionSpec;
+    const fresh = mocks.runSession.mock.calls[1]?.[0] as SessionSpec;
+    expect(resumed.resume).toBe("sess-gone");
+    expect(fresh.resume).toBeUndefined();
+    expect(fresh.prompt).toBe(composeTaskPrompt("identity\n", task("r")));
+    expect(spy.taskFinished).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        taskId: "r",
+        ok: false,
+        willRetry: true,
+        failureReason: "resumeFailed",
+        error: "session could not be resumed — starting a fresh session",
+      }),
+    );
+    expect(spy.taskFinished).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ taskId: "r", ok: true, sessionId: "sess-fresh" }),
+    );
+    expect(spy.taskStarted).toHaveBeenCalledTimes(2);
+    expect(spy.taskStarted).toHaveBeenLastCalledWith(
+      expect.objectContaining({ id: "r", resume: undefined }),
+    );
+    expect(summarizerSpy.summarize).toHaveBeenCalledTimes(1);
+  });
+
+  it("an ordinary failure of a resumed session takes the fresh-session retry", async () => {
+    const resume = { sessionId: "sess-limited", limitedAt: "2026-10-22T12:33:58.000Z" };
+    const { store, requeue } = fakeStore([{ ...task("r"), resume }]);
+    const controller = new AbortController();
+    mocks.runSession.mockResolvedValue({
+      ...transientFailure(),
+      sessionId: "sess-limited",
+    });
+
+    const promise = runExecutorLoop(
+      buildConfig(),
+      store,
+      new Waker(),
+      spy.reporter,
+      summarizerSpy.summarizer,
+      noopController(),
+      buildGates(),
+      controller.signal,
+    );
+    await vi.waitFor(() => expect(requeue).toHaveBeenCalledWith("r", expect.any(String)));
+    controller.abort();
+    await promise;
+
+    expect(mocks.runSession).toHaveBeenCalledTimes(1);
+  });
+
   it("pause while idle parks the loop and resume picks up new tasks", async () => {
     const { takeNext, peekNext } = scriptedTakes(
       [undefined, task("after-resume")],
