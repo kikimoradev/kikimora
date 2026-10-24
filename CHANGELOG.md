@@ -15,6 +15,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - The package requires `@modelcontextprotocol/sdk` 1.32.1 or later instead of 1.29.0, so an install can no longer keep an SDK release with its known high advisories. The lockfile moves the SDK's dependencies to fixed releases as well (`proxy-addr` 2.0.8, `fast-uri` 3.1.8, `ip-address` 10.7.4, `hono` 4.13.13, `qs` 6.16.1), and `pnpm audit` reports no known advisory. The memory MCP server behaves as before.
+- The package requires `zod` 4.6.6 or later instead of 4.4.3, which closes a high advisory (GHSA-mrhx-c7xc-m3w5): validating an oversized constrained collection could exhaust memory.
 - A task attempt that ended by its session timeout, or by a shutdown, got no memory entry, because its result lost the session id. The id now comes from the session's start, so the attempt is summarized from its log like any other failure, and `task.finished` carries its `sessionId`.
 
 ## [0.15.1] - 2026-10-22
