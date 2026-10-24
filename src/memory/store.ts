@@ -172,7 +172,8 @@ export class MemoryStore {
     const match = toMatchQuery(query);
     if (match === null) return [];
     const conditions = conditionsOf(options, "s");
-    const order = options.order === "newest" ? "s.id DESC" : "bm25(summaries_fts)";
+    const order =
+      options.order === "newest" ? "s.id DESC" : "bm25(summaries_fts), s.id DESC";
     const rows = this.db
       .prepare(
         `SELECT s.*

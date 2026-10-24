@@ -55,8 +55,20 @@ export function composeResumePrompt(task: Task, resume: TaskResume, now: Date): 
 
 The Claude usage limit stopped this session at ${resume.limitedAt}. Kikimora waited ${formatUptime(waitedMs)} for the limit to reset and resumed the session at ${now.toISOString()}.
 
+The repository, the issue tracker, the pull request, /tmp and other files outside the workspace may have changed during the wait, and subagents the limit stopped did not finish. Re-check the state your next step depends on before you act.
+
 Continue task ${task.id} where you left off.
 `;
+}
+
+export function attemptCostUsd(
+  result: SessionResult,
+  resume: TaskResume | undefined,
+): number | undefined {
+  if (result.costUsd === undefined || resume?.costUsd === undefined) {
+    return result.costUsd;
+  }
+  return Math.max(0, result.costUsd - resume.costUsd);
 }
 
 export async function runExecutorLoop(
@@ -141,49 +153,47 @@ export async function runExecutorLoop(
       try {
         const [prompt, systemPrompt, context, mcpConfigPath] = await sessionInputs;
 
-        const runTaskSession = (resume: TaskResume | undefined): Promise<SessionResult> =>
-          runSession(
-            {
-              command: config.command,
-              launcher: config.launcher,
-              placement: { pool: "executor", lease },
-              model: executor.model,
-              effort: executor.effort,
-              systemPrompt,
-              prompt:
-                resume === undefined
-                  ? composeTaskPrompt(composePrompt(prompt, context), task)
-                  : composeResumePrompt(task, resume, new Date()),
-              resume: resume?.sessionId,
-              sessionTimeoutMs: executor.sessionTimeoutMs,
-              streamPartial: config.streamPartial,
-              mcpConfigPath,
-              cwd: config.cwd,
-              events: reporter.session,
-              meta: { agent: "executor", taskId: task.id },
-              index: sessions,
-            },
-            signal,
-          );
-
-        let result = await runTaskSession(task.resume);
+        const result = await runSession(
+          {
+            command: config.command,
+            launcher: config.launcher,
+            placement: { pool: "executor", lease },
+            model: executor.model,
+            effort: executor.effort,
+            systemPrompt,
+            prompt:
+              task.resume === undefined
+                ? composeTaskPrompt(composePrompt(prompt, context), task)
+                : composeResumePrompt(task, task.resume, new Date()),
+            resume: task.resume?.sessionId,
+            sessionTimeoutMs: executor.sessionTimeoutMs,
+            streamPartial: config.streamPartial,
+            mcpConfigPath,
+            cwd: config.cwd,
+            events: reporter.session,
+            meta: { agent: "executor", taskId: task.id },
+            index: sessions,
+          },
+          signal,
+        );
         if (aborted()) break;
+
         if (result.failureReason === "resumeFailed") {
+          await store.forgetResume(task.id, "session could not be resumed");
           reporter.taskFinished({
             taskId: task.id,
             title: task.title,
             ok: false,
             durationMs: result.durationMs,
-            error: "session could not be resumed — starting a fresh session",
+            error: "session could not be resumed — task requeued for a fresh session",
             failureReason: result.failureReason,
             willRetry: true,
             sessionId: result.sessionId,
           });
-          reporter.taskStarted({ ...task, resume: undefined });
-          result = await runTaskSession(undefined);
-          if (aborted()) break;
+          continue;
         }
 
+        const costUsd = attemptCostUsd(result, task.resume);
         if (result.ok) {
           await store.complete(task.id);
           reporter.taskFinished({
@@ -191,7 +201,7 @@ export async function runExecutorLoop(
             title: task.title,
             ok: true,
             durationMs: result.durationMs,
-            costUsd: result.costUsd,
+            costUsd,
             numTurns: result.numTurns,
             sessionId: result.sessionId,
           });
@@ -224,7 +234,7 @@ export async function runExecutorLoop(
               title: task.title,
               ok: false,
               durationMs: result.durationMs,
-              costUsd: result.costUsd,
+              costUsd,
               numTurns: result.numTurns,
               error: "authentication failed — task requeued",
               failureReason: result.failureReason,
@@ -243,6 +253,7 @@ export async function runExecutorLoop(
               await store.suspend(task.id, "usage limit reached", {
                 sessionId: result.sessionId,
                 limitedAt: new Date(limitedAt).toISOString(),
+                costUsd: result.costUsd,
               });
             }
             reporter.taskFinished({
@@ -250,7 +261,7 @@ export async function runExecutorLoop(
               title: task.title,
               ok: false,
               durationMs: result.durationMs,
-              costUsd: result.costUsd,
+              costUsd,
               numTurns: result.numTurns,
               error:
                 result.sessionId === undefined
@@ -274,7 +285,7 @@ export async function runExecutorLoop(
             title: task.title,
             ok: false,
             durationMs: result.durationMs,
-            costUsd: result.costUsd,
+            costUsd,
             numTurns: result.numTurns,
             error,
             failureReason: result.failureReason,

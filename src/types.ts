@@ -140,6 +140,7 @@ export function isFinalTaskStatus(status: TaskStatus): status is FinalTaskStatus
 export interface TaskResume {
   sessionId: string;
   limitedAt: string;
+  costUsd?: number | undefined;
 }
 
 export interface Task {

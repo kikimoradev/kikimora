@@ -20,7 +20,11 @@ const taskSchema = z.object({
   updatedAt: z.string(),
   error: z.string().optional(),
   resume: z
-    .object({ sessionId: z.string().min(1), limitedAt: z.iso.datetime() })
+    .object({
+      sessionId: z.string().min(1),
+      limitedAt: z.iso.datetime(),
+      costUsd: z.number().nonnegative().optional(),
+    })
     .optional(),
 });
 
@@ -205,6 +209,19 @@ export class TaskStore {
       task.attempts = Math.max(0, task.attempts - 1);
       task.error = error;
       task.resume = { ...resume };
+      task.updatedAt = new Date().toISOString();
+      await this.persist();
+    });
+  }
+
+  forgetResume(id: string, error: string): Promise<void> {
+    return this.run(async () => {
+      const task = this.tasks.find((candidate) => candidate.id === id);
+      if (!task) return;
+      task.status = "pending";
+      task.attempts = Math.max(0, task.attempts - 1);
+      task.error = error;
+      task.resume = undefined;
       task.updatedAt = new Date().toISOString();
       await this.persist();
     });

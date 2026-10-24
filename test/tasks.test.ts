@@ -199,7 +199,11 @@ describe("TaskStore", () => {
     const store = await TaskStore.open(path);
     await store.addTasks([newTask("a")]);
     await store.takeNext();
-    const resume = { sessionId: "sess-1", limitedAt: "2026-10-22T12:33:58.000Z" };
+    const resume = {
+      sessionId: "sess-1",
+      limitedAt: "2026-10-22T12:33:58.000Z",
+      costUsd: 32.37,
+    };
 
     await store.suspend("a", "usage limit reached", resume);
 
@@ -244,6 +248,34 @@ describe("TaskStore", () => {
       false,
       false,
     ]);
+  });
+
+  it("forgetResume gives the attempt back and drops the session that cannot be resumed", async () => {
+    const store = await TaskStore.open(path);
+    await store.addTasks([newTask("a")]);
+    await store.takeNext();
+    await store.suspend("a", "usage limit reached", {
+      sessionId: "sess-gone",
+      limitedAt: "2026-10-22T12:33:58.000Z",
+    });
+    await store.takeNext();
+
+    await store.forgetResume("a", "session could not be resumed");
+    await store.forgetResume("not-there", "session could not be resumed");
+
+    expect(store.list()).toEqual([
+      expect.objectContaining({
+        id: "a",
+        status: "pending",
+        attempts: 0,
+        error: "session could not be resumed",
+        resume: undefined,
+      }),
+    ]);
+    const persisted = JSON.parse(await readFile(path, "utf8")) as {
+      tasks: Record<string, unknown>[];
+    };
+    expect("resume" in (persisted.tasks[0] ?? {})).toBe(false);
   });
 
   it("suspend of an unknown id is ignored", async () => {

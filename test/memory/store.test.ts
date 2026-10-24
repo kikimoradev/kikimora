@@ -187,6 +187,17 @@ describe("MemoryStore", () => {
     ]);
   });
 
+  it("search ranks equally relevant entries newest first", () => {
+    const older = store.add(
+      buildRecord({ taskId: "redmine-1", summary: "deploy failed" }),
+    );
+    const newer = store.add(
+      buildRecord({ taskId: "redmine-2", summary: "deploy failed" }),
+    );
+
+    expect(store.search("deploy", 10).map((r) => r.id)).toEqual([newer.id, older.id]);
+  });
+
   it("recent returns an empty list for an empty store", () => {
     expect(store.recent()).toEqual([]);
   });

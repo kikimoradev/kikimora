@@ -33,8 +33,9 @@ export function createMemoryMcpServer(reader: MemoryReader): McpServer {
       title: "Search task memory",
       description:
         "Full-text search over long-term memory: summaries of previously " +
-        "completed tasks (decisions, dead ends, pitfalls). Results sorted " +
-        "newest first; pass order rank for the best match first.",
+        "completed tasks (decisions, dead ends, pitfalls). Picks the best " +
+        "matches and lists them newest first; pass order rank to list them " +
+        "best match first.",
       inputSchema: {
         query: z
           .string()
@@ -50,14 +51,18 @@ export function createMemoryMcpServer(reader: MemoryReader): McpServer {
         order: z
           .enum(MEMORY_ORDERS)
           .optional()
-          .describe("newest: newest first (default); rank: best match first"),
+          .describe(
+            "newest: the best matches, newest first (default); rank: best match first",
+          ),
       },
     },
-    ({ query, limit, order }) =>
-      textResult(
-        reader.search(query, limit ?? 10, { order: order ?? "newest" }),
+    ({ query, limit, order }) => {
+      const matches = reader.search(query, limit ?? 10, { order: "rank" });
+      return textResult(
+        order === "rank" ? matches : matches.toSorted((a, b) => b.id - a.id),
         "No results in memory.",
-      ),
+      );
+    },
   );
 
   server.registerTool(
