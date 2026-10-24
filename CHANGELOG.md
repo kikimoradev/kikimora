@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.2] - 2026-10-24
+
 ### Fixed
 
 - `memory_search` lost the attempts at an issue when the query mixed the issue number with several common words, such as "how did we fix the test for 53035": the common words together outweighed the one rare number, so entries that shared only them came first, and in a memory where many entries share such a question none of the attempts came back. A query word now counts twice for an entry whose task id or title contains it, so the attempts at the issue come back newest first, ahead of other entries that only mention its number; plain-word queries such as "how did we fix the blog search" still find the entry about the topic, and `order: "rank"` is unchanged.
@@ -318,7 +320,8 @@ Initial release.
 - Non-interactive `kikimora init` for provisioning, plus a first-run wizard in the terminal.
 - Reference `Dockerfile` and `docker-compose.yml`.
 
-[Unreleased]: https://github.com/kikimoradev/kikimora/compare/v0.16.1...HEAD
+[Unreleased]: https://github.com/kikimoradev/kikimora/compare/v0.16.2...HEAD
+[0.16.2]: https://github.com/kikimoradev/kikimora/compare/v0.16.1...v0.16.2
 [0.16.1]: https://github.com/kikimoradev/kikimora/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/kikimoradev/kikimora/compare/v0.15.1...v0.16.0
 [0.15.1]: https://github.com/kikimoradev/kikimora/compare/v0.15.0...v0.15.1
