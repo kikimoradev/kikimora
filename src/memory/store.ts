@@ -99,10 +99,14 @@ function toRecord(row: unknown): TaskSummaryRecord {
   };
 }
 
+function matchPhrases(query: string): string[] {
+  const tokens = query.match(/[\p{L}\p{N}_]+/gu) ?? [];
+  return [...new Set(tokens)].map((token) => `"${token}"`);
+}
+
 export function toMatchQuery(query: string): string | null {
-  const tokens = query.match(/[\p{L}\p{N}_]+/gu);
-  if (!tokens || tokens.length === 0) return null;
-  return tokens.map((token) => `"${token}"`).join(" OR ");
+  const phrases = matchPhrases(query);
+  return phrases.length === 0 ? null : phrases.join(" OR ");
 }
 
 export interface MemoryStoreOptions {
@@ -184,6 +188,30 @@ export class MemoryStore {
          LIMIT ?`,
       )
       .all(match, ...conditions.params, limit);
+    return rows.map(toRecord);
+  }
+
+  latestMatches(query: string, limit = 10): TaskSummaryRecord[] {
+    const phrases = matchPhrases(query);
+    if (phrases.length === 0) return [];
+    const coverage = phrases
+      .map(
+        () => "(s.id IN (SELECT rowid FROM summaries_fts WHERE summaries_fts MATCH ?))",
+      )
+      .join(" + ");
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM (
+           SELECT s.*
+           FROM summaries_fts
+           JOIN summaries s ON s.id = summaries_fts.rowid
+           WHERE summaries_fts MATCH ?
+           ORDER BY ${coverage} DESC, s.id DESC
+           LIMIT ?
+         )
+         ORDER BY id DESC`,
+      )
+      .all(phrases.join(" OR "), ...phrases, limit);
     return rows.map(toRecord);
   }
 

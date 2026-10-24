@@ -3,10 +3,12 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { LOCAL_LEASE, type AdmissionWait } from "../src/admission.js";
 import { AgentController } from "../src/control.js";
 import { DrainController } from "../src/drain.js";
-import type { TaskSummarizer } from "../src/memory/summarizer.js";
+import type { TaskOutcomeContext, TaskSummarizer } from "../src/memory/summarizer.js";
 import type { SessionSpec } from "../src/runner.js";
 import { TaskStore } from "../src/tasks.js";
-import type { SessionResult, Task } from "../src/types.js";
+import type { LoopGates } from "../src/gates.js";
+import type { SessionResult, Task, TaskResume } from "../src/types.js";
+import { UsageLimitGate } from "../src/usage-limit.js";
 import { Waker } from "../src/waker.js";
 import {
   authFailureResult,
@@ -42,6 +44,37 @@ vi.mock("node:fs/promises", async (importOriginal) => ({
 
 const { runExecutorLoop, composeTaskPrompt, isTransientFailure, attemptCostUsd } =
   await import("../src/executor.js");
+
+class OpenLimitGate extends UsageLimitGate {
+  override msRemaining(): number {
+    return 0;
+  }
+}
+
+function limitHit(overrides: Partial<SessionResult> = {}): SessionResult {
+  return {
+    ok: false,
+    durationMs: 10,
+    failureReason: "isError",
+    error: "Session ended with an error (is_error)",
+    sessionId: "sess-long",
+    rateLimit: { status: "rejected", resetsAt: 1_000, rateLimitType: "five_hour" },
+    ...overrides,
+  };
+}
+
+interface ChainRun {
+  result: SessionResult;
+  startsAt?: string;
+  endsAt?: string;
+}
+
+interface ResumeChain {
+  store: TaskStore;
+  specs: SessionSpec[];
+  resumes: (TaskResume | undefined)[];
+  costs: (number | undefined)[];
+}
 
 function task(id: string): Task {
   return {
@@ -1149,6 +1182,153 @@ describe("runExecutorLoop", () => {
     expect(suspend).not.toHaveBeenCalled();
   });
 
+  async function runResumeChain(
+    runs: ChainRun[],
+    harness: { controller: AgentController; gates: LoopGates } = {
+      controller: noopController(),
+      gates: buildGates({ limit: new OpenLimitGate() }),
+    },
+  ): Promise<ResumeChain> {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-22T12:00:00.000Z") });
+    const dir = await createTempDir();
+    mocks.readFile.mockImplementationOnce(() =>
+      Promise.reject(Object.assign(new Error("ENOENT"), { code: "ENOENT" })),
+    );
+    const store = await TaskStore.open(join(dir, "tasks.json"));
+    await store.addTasks([
+      { id: "long", title: "Task long", description: "Description long" },
+    ]);
+    const script = [...runs];
+    const resumes: (TaskResume | undefined)[] = [];
+    let current: ChainRun | undefined;
+    spy.taskStarted.mockImplementation(() => {
+      current = script.shift();
+      if (current?.startsAt !== undefined) vi.setSystemTime(new Date(current.startsAt));
+    });
+    mocks.runSession.mockImplementation((): Promise<SessionResult> => {
+      resumes.push(store.list()[0]?.resume);
+      if (current === undefined) throw new Error("no session left in the script");
+      if (current.endsAt !== undefined) vi.setSystemTime(new Date(current.endsAt));
+      return Promise.resolve(current.result);
+    });
+    const abort = new AbortController();
+
+    const promise = runExecutorLoop(
+      buildConfig(),
+      store,
+      new Waker(),
+      spy.reporter,
+      summarizerSpy.summarizer,
+      harness.controller,
+      harness.gates,
+      abort.signal,
+    );
+    await vi.waitFor(() => expect(store.list()[0]?.status).toBe("done"));
+    abort.abort();
+    await promise;
+    await removeTempDir(dir);
+
+    return {
+      store,
+      specs: mocks.runSession.mock.calls.map(([spec]) => spec as SessionSpec),
+      resumes,
+      costs: spy.taskFinished.mock.calls.map(
+        ([outcome]) => (outcome as { costUsd?: number }).costUsd,
+      ),
+    };
+  }
+
+  it("a resumed session that hits the limit again keeps its running total as the cost baseline", async () => {
+    const { store, resumes, costs } = await runResumeChain([
+      { result: limitHit({ costUsd: 32.37 }) },
+      { result: limitHit({ costUsd: 40 }) },
+      { result: { ...ok(), sessionId: "sess-long", costUsd: 41.5 } },
+    ]);
+
+    expect(resumes.map((resume) => resume?.costUsd)).toEqual([undefined, 32.37, 40]);
+    expect(costs).toHaveLength(3);
+    expect(costs[0]).toBe(32.37);
+    expect(costs[1]).toBeCloseTo(7.63, 10);
+    expect(costs[2]).toBeCloseTo(1.5, 10);
+    expect(store.list()[0]).toEqual(
+      expect.objectContaining({ status: "done", attempts: 1, resume: undefined }),
+    );
+  });
+
+  it("an authentication failure of a resumed run moves the cost baseline to the run's running total", async () => {
+    const harness = authGateHarness();
+    spy.authBlocked.mockImplementation(() => {
+      harness.controller.resume();
+    });
+
+    const { resumes, costs } = await runResumeChain(
+      [
+        { result: limitHit({ costUsd: 32.37 }) },
+        { result: authFailureResult({ sessionId: "sess-long", costUsd: 36 }) },
+        { result: { ...ok(), sessionId: "sess-long", costUsd: 41.5 } },
+      ],
+      {
+        controller: harness.controller,
+        gates: { ...harness.gates, limit: new OpenLimitGate() },
+      },
+    );
+
+    expect(spy.authBlocked).toHaveBeenCalledTimes(1);
+    expect(resumes.map((resume) => resume?.costUsd)).toEqual([undefined, 32.37, 36]);
+    expect(resumes[2]).toEqual({ ...resumes[1], costUsd: 36 });
+    expect(costs[0]).toBe(32.37);
+    expect(costs[1]).toBeCloseTo(3.63, 10);
+    expect(costs[2]).toBeCloseTo(5.5, 10);
+  });
+
+  it("a limit hit that reports no cost keeps the cost baseline of the earlier hit", async () => {
+    const { resumes, costs } = await runResumeChain([
+      { result: limitHit({ costUsd: 32.37 }) },
+      { result: limitHit() },
+      { result: { ...ok(), sessionId: "sess-long", costUsd: 41.5 } },
+    ]);
+
+    expect(resumes.map((resume) => resume?.costUsd)).toEqual([undefined, 32.37, 32.37]);
+    expect(costs[0]).toBe(32.37);
+    expect(costs[1]).toBeUndefined();
+    expect(costs[2]).toBeCloseTo(9.13, 10);
+  });
+
+  it("a resumed run the limit stops again before it does any work keeps the original stop time", async () => {
+    const { specs, resumes, costs } = await runResumeChain([
+      { endsAt: "2026-10-22T12:00:00.000Z", result: limitHit({ costUsd: 32.37 }) },
+      {
+        startsAt: "2026-10-22T17:01:00.000Z",
+        endsAt: "2026-10-22T17:01:05.000Z",
+        result: limitHit({ costUsd: 32.37 }),
+      },
+      {
+        startsAt: "2026-10-22T17:17:00.000Z",
+        endsAt: "2026-10-22T19:00:00.000Z",
+        result: limitHit({ costUsd: 40 }),
+      },
+      {
+        startsAt: "2026-10-22T20:01:00.000Z",
+        result: { ...ok(), sessionId: "sess-long", costUsd: 41.5 },
+      },
+    ]);
+
+    expect(resumes.map((resume) => resume?.limitedAt)).toEqual([
+      undefined,
+      "2026-10-22T12:00:00.000Z",
+      "2026-10-22T12:00:00.000Z",
+      "2026-10-22T19:00:00.000Z",
+    ]);
+    expect(specs[2]?.prompt).toContain(
+      "stopped this session at 2026-10-22T12:00:00.000Z. Kikimora waited 5h 17m",
+    );
+    expect(specs[3]?.prompt).toContain(
+      "stopped this session at 2026-10-22T19:00:00.000Z. Kikimora waited 1h 01m",
+    );
+    expect(costs[1]).toBe(0);
+    expect(costs[2]).toBeCloseTo(7.63, 10);
+  });
+
   it("a session that cannot be resumed requeues the task for a fresh session on a new admission ticket", async () => {
     const dir = await createTempDir();
     mocks.readFile.mockImplementationOnce(() =>
@@ -1169,8 +1349,22 @@ describe("runExecutorLoop", () => {
     spy.admissionWait.mockImplementation((wait: AdmissionWait) => {
       queueMicrotask(() => admission.gate.grant("executor", wait.ticket));
     });
+    let interruptedRunSummarized = false;
+    let finishSummary: () => void = () => undefined;
+    summarizerSpy.summarize.mockReturnValueOnce(
+      new Promise<void>((resolveSummary) => {
+        finishSummary = () => {
+          interruptedRunSummarized = true;
+          resolveSummary();
+        };
+      }),
+    );
+    const freshSessionStarts: boolean[] = [];
     const placed = new Set<string>();
     mocks.runSession.mockImplementation((spec: SessionSpec): Promise<SessionResult> => {
+      if (spec.meta.taskId === "stuck" && spec.resume === undefined) {
+        freshSessionStarts.push(interruptedRunSummarized);
+      }
       const placement = `${spec.meta.agent}/${spec.placement.lease.ticket ?? ""}`;
       if (placed.has(placement)) {
         return Promise.resolve({
@@ -1181,6 +1375,7 @@ describe("runExecutorLoop", () => {
       }
       placed.add(placement);
       if (spec.resume === "sess-gone") {
+        setTimeout(finishSummary, 50);
         return Promise.resolve({
           ok: false,
           durationMs: 5,
@@ -1238,7 +1433,22 @@ describe("runExecutorLoop", () => {
       expect.objectContaining({ taskId: "other", ok: true, sessionId: "fresh-other" }),
     ]);
     expect(spy.retryScheduled).not.toHaveBeenCalled();
-    expect(summarizerSpy.summarize).toHaveBeenCalledTimes(2);
+    expect(summarizerSpy.summarize).toHaveBeenCalledTimes(3);
+    const [interruptedTask, interruptedRun, interruptedOutcome] = summarizerSpy.summarize
+      .mock.calls[0] as [Task, SessionResult, TaskOutcomeContext];
+    expect(interruptedTask).toEqual(
+      expect.objectContaining({ id: "stuck", attempts: 1 }),
+    );
+    expect(interruptedRun).toEqual(
+      expect.objectContaining({
+        ok: false,
+        sessionId: "sess-gone",
+        error: "usage limit reached — session could not be resumed",
+      }),
+    );
+    expect(interruptedOutcome.willRetry).toBe(true);
+    expect(interruptedOutcome.lease.ticket).toBe(tickets[0]);
+    expect(freshSessionStarts).toEqual([true]);
   });
 
   it("an ordinary failure of a resumed session takes the fresh-session retry", async () => {

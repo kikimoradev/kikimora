@@ -7,6 +7,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A resumed session that an authentication failure or a launcher refusal stopped, or that hit the usage limit again without reporting a cost, kept the cost baseline of the earlier limit hit, so the next resumed run reported part of the spend a second time in `task.finished`. The baseline now follows the last running total Claude Code reported for the session, so the costs of a task add up to its spend on these paths too.
+- A session that the usage limit stopped again as soon as it resumed, before it did any work, recorded the new hit as its stop, so the resume note named the last retry and understated the wait. The note now names the original stop and the whole wait; a session that worked between two hits still names its latest stop.
+- After a session that could not be resumed, the fresh session started with no memory entry of the interrupted attempt, because a limit hit skips the summary. The executor now summarizes the interrupted run from its logs before the fresh session starts, and the summarizer finds a session's log files on disk, so the summary of a resumed session also covers the runs logged before a worker restart.
+- `memory_search` picked its matches by relevance before it listed them newest first, so a one-word query such as an issue number with more matches than the limit kept the shortest entries and could drop the latest attempts at a task. It now picks the entries that contain the most of the query's words, the latest among equals, so the latest attempts at a task come first while a query of several words still finds the entries that contain them; `order: "rank"` is unchanged.
+
 ## [0.16.0] - 2026-10-24
 
 ### Changed

@@ -198,6 +198,60 @@ describe("MemoryStore", () => {
     expect(store.search("deploy", 10).map((r) => r.id)).toEqual([newer.id, older.id]);
   });
 
+  it("latestMatches keeps the latest entries of a one-word query with more matches than the limit", () => {
+    for (let attempt = 1; attempt <= 12; attempt += 1) {
+      store.add(
+        buildRecord({
+          taskId: "redmine-53035-cr",
+          attempt,
+          summary: `Review of 53035. ${"Checked the diff again. ".repeat(attempt)}`,
+        }),
+      );
+    }
+
+    expect(store.latestMatches("53035", 3).map((r) => r.attempt)).toEqual([12, 11, 10]);
+    expect(store.search("53035", 3).map((r) => r.attempt)).toEqual([1, 2, 3]);
+  });
+
+  it("latestMatches picks the entries with the most query words and lists them newest first", () => {
+    const relevant = store.add(
+      buildRecord({ taskId: "redmine-1", summary: "deploy failed on a timeout" }),
+    );
+    const partial = store.add(
+      buildRecord({ taskId: "redmine-2", summary: "deploy failed" }),
+    );
+    const newest = store.add(
+      buildRecord({ taskId: "redmine-3", summary: "deploy done" }),
+    );
+
+    expect(store.latestMatches("deploy failed timeout", 2).map((r) => r.id)).toEqual([
+      partial.id,
+      relevant.id,
+    ]);
+    expect(store.latestMatches("deploy failed timeout").map((r) => r.id)).toEqual([
+      newest.id,
+      partial.id,
+      relevant.id,
+    ]);
+  });
+
+  it("latestMatches counts a repeated query word once", () => {
+    store.add(buildRecord({ taskId: "redmine-1", summary: "blog teaser" }));
+    const newer = store.add(
+      buildRecord({ taskId: "redmine-2", summary: "search relevance" }),
+    );
+
+    expect(store.latestMatches("blog blog relevance", 1).map((r) => r.id)).toEqual([
+      newer.id,
+    ]);
+  });
+
+  it("latestMatches returns nothing for a query without words", () => {
+    store.add(buildRecord());
+
+    expect(store.latestMatches('  ()"* ')).toEqual([]);
+  });
+
   it("recent returns an empty list for an empty store", () => {
     expect(store.recent()).toEqual([]);
   });

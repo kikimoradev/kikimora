@@ -126,6 +126,41 @@ describe("SessionLog", () => {
     expect(log.pathsFor("s")?.log).toBe(join(dir, "2026-07-02", "14-00-00-s.log"));
   });
 
+  it("findLogPaths finds the files an earlier worker wrote for a session, oldest first", async () => {
+    const earlier = new SessionLog(
+      dir,
+      vi
+        .fn()
+        .mockReturnValueOnce(new Date(2026, 6, 2, 23, 59, 0))
+        .mockReturnValueOnce(new Date(2026, 6, 3, 0, 1, 0))
+        .mockReturnValue(new Date(2026, 6, 3, 0, 2, 0)),
+    );
+    earlier.sink({ type: "init", model: "opus", sessionId: "s", toolCount: 0 });
+    earlier.sink({ type: "init", model: "opus", sessionId: "x-s", toolCount: 0 });
+    earlier.sink({ type: "init", model: "opus", sessionId: "s/2", toolCount: 0 });
+    await earlier.close();
+    const later = new SessionLog(dir, () => new Date(2026, 6, 3, 9, 0, 0));
+    later.sink({ type: "init", model: "opus", sessionId: "s", toolCount: 0 });
+    await later.flush();
+
+    expect(later.logPathsFor("s")).toEqual([join(dir, "2026-07-03", "09-00-00-s.log")]);
+    expect(await later.findLogPaths("s")).toEqual([
+      join(dir, "2026-07-02", "23-59-00-s.log"),
+      join(dir, "2026-07-03", "09-00-00-s.log"),
+    ]);
+    expect(await later.findLogPaths("s/2")).toEqual([
+      join(dir, "2026-07-03", "00-02-00-s_2.log"),
+    ]);
+    expect(await later.findLogPaths("missing")).toEqual([]);
+    await later.close();
+  });
+
+  it("findLogPaths finds nothing before the first session", async () => {
+    const log = new SessionLog(join(dir, "executor"));
+
+    expect(await log.findLogPaths("s")).toEqual([]);
+  });
+
   it("flush guarantees written lines are in the file without closing the log", async () => {
     const at = new Date(2026, 6, 2, 10, 0, 0);
     const log = new SessionLog(dir, () => at);
