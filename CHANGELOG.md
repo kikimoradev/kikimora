@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.1] - 2026-10-24
+
 ### Fixed
 
 - A resumed session that an authentication failure stopped, or that hit the usage limit again without reporting a cost, kept the cost baseline of the earlier limit hit, so the next resumed run reported part of the spend a second time in `task.finished`. The baseline now follows the last running total Claude Code reported for the session, and every path that moves it reports the difference, so the costs of a task add up to its spend on these paths too.
@@ -312,7 +314,8 @@ Initial release.
 - Non-interactive `kikimora init` for provisioning, plus a first-run wizard in the terminal.
 - Reference `Dockerfile` and `docker-compose.yml`.
 
-[Unreleased]: https://github.com/kikimoradev/kikimora/compare/v0.16.0...HEAD
+[Unreleased]: https://github.com/kikimoradev/kikimora/compare/v0.16.1...HEAD
+[0.16.1]: https://github.com/kikimoradev/kikimora/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/kikimoradev/kikimora/compare/v0.15.1...v0.16.0
 [0.15.1]: https://github.com/kikimoradev/kikimora/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/kikimoradev/kikimora/compare/v0.14.0...v0.15.0
