@@ -10,6 +10,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 
 - `memory_search` slowed down on a query word found in most of memory, such as "the", because picking the latest among many equally matching entries scanned all the kept matches for each one; at a limit of 50 over 20 000 entries the search took more than twice as long as needed. The pick now drops an entry that cannot make the list after one comparison and finds the place of the others by a binary search, so such a search takes less than half the time, with the same matches in the same order.
+- The lockfile moves two dependencies of `@modelcontextprotocol/sdk` to fixed releases, `body-parser` 2.4.0 (a high denial-of-service advisory on compressed request bodies) and `fast-uri` 3.1.9 (four advisories on URI parsing and normalization), within the ranges the SDK already allows, so `pnpm audit` reports no known advisory again. The memory MCP server behaves as before.
 
 ## [0.16.2] - 2026-10-24
 
