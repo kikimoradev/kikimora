@@ -51,6 +51,12 @@ class OpenLimitGate extends UsageLimitGate {
   }
 }
 
+class NoBackoffController extends AgentController {
+  override sleep(): Promise<void> {
+    return Promise.resolve();
+  }
+}
+
 function limitHit(overrides: Partial<SessionResult> = {}): SessionResult {
   return {
     ok: false,
@@ -1327,6 +1333,104 @@ describe("runExecutorLoop", () => {
     );
     expect(costs[1]).toBe(0);
     expect(costs[2]).toBeCloseTo(7.63, 10);
+  });
+
+  it("a re-hit right after a limit hit that reported no cost keeps the original stop time", async () => {
+    const { specs, resumes } = await runResumeChain([
+      { endsAt: "2026-10-22T12:00:00.000Z", result: limitHit() },
+      {
+        startsAt: "2026-10-22T17:01:00.000Z",
+        endsAt: "2026-10-22T17:01:05.000Z",
+        result: limitHit({ costUsd: 32.37 }),
+      },
+      {
+        startsAt: "2026-10-22T17:17:00.000Z",
+        result: { ...ok(), sessionId: "sess-long", costUsd: 41.5 },
+      },
+    ]);
+
+    expect(resumes.map((resume) => resume?.limitedAt)).toEqual([
+      undefined,
+      "2026-10-22T12:00:00.000Z",
+      "2026-10-22T12:00:00.000Z",
+    ]);
+    expect(specs[2]?.prompt).toContain(
+      "stopped this session at 2026-10-22T12:00:00.000Z. Kikimora waited 5h 17m",
+    );
+  });
+
+  it("a resumed run that called tools before the limit stopped it again names its own stop, even without a cost", async () => {
+    const { specs, resumes } = await runResumeChain([
+      { endsAt: "2026-10-22T12:00:00.000Z", result: limitHit({ costUsd: 32.37 }) },
+      {
+        startsAt: "2026-10-22T17:17:00.000Z",
+        endsAt: "2026-10-22T18:30:00.000Z",
+        result: limitHit({ toolUses: 14 }),
+      },
+      {
+        startsAt: "2026-10-22T23:31:00.000Z",
+        result: { ...ok(), sessionId: "sess-long", costUsd: 41.5 },
+      },
+    ]);
+
+    expect(resumes.map((resume) => resume?.limitedAt)).toEqual([
+      undefined,
+      "2026-10-22T12:00:00.000Z",
+      "2026-10-22T18:30:00.000Z",
+    ]);
+    expect(specs[2]?.prompt).toContain(
+      "stopped this session at 2026-10-22T18:30:00.000Z. Kikimora waited 5h 01m",
+    );
+  });
+
+  it("a launcher refusal of a resumed run reports the cost it moved into the baseline", async () => {
+    const { resumes, costs } = await runResumeChain(
+      [
+        { result: limitHit({ costUsd: 32.37 }) },
+        {
+          result: {
+            ok: false,
+            durationMs: 1,
+            failureReason: "launcherRefused",
+            costUsd: 33,
+          },
+        },
+        { result: { ...ok(), sessionId: "sess-long", costUsd: 41.5 } },
+      ],
+      {
+        controller: new NoBackoffController(() => undefined),
+        gates: buildGates({ limit: new OpenLimitGate() }),
+      },
+    );
+
+    expect(resumes.map((resume) => resume?.costUsd)).toEqual([undefined, 32.37, 33]);
+    expect(costs[0]).toBe(32.37);
+    expect(costs[1]).toBeCloseTo(0.63, 10);
+    expect(costs[2]).toBeCloseTo(8.5, 10);
+  });
+
+  it("a summary that fails after a session could not be resumed still leaves the task to a fresh session", async () => {
+    summarizerSpy.summarize.mockRejectedValueOnce(new Error("summarizer crashed"));
+
+    const { store, specs } = await runResumeChain([
+      { result: limitHit({ costUsd: 32.37 }) },
+      {
+        result: {
+          ok: false,
+          durationMs: 5,
+          error: "Session could not be resumed",
+          failureReason: "resumeFailed",
+          sessionId: "sess-long",
+        },
+      },
+      { result: { ...ok(), sessionId: "fresh-long", costUsd: 5 } },
+    ]);
+
+    expect(specs.map((spec) => spec.resume)).toEqual([undefined, "sess-long", undefined]);
+    expect(summarizerSpy.summarize).toHaveBeenCalledTimes(2);
+    expect(store.list()[0]).toEqual(
+      expect.objectContaining({ status: "done", attempts: 1, resume: undefined }),
+    );
   });
 
   it("a session that cannot be resumed requeues the task for a fresh session on a new admission ticket", async () => {

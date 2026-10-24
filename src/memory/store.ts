@@ -101,7 +101,9 @@ function toRecord(row: unknown): TaskSummaryRecord {
 
 function matchPhrases(query: string): string[] {
   const tokens = query.match(/[\p{L}\p{N}_]+/gu) ?? [];
-  return [...new Set(tokens)].map((token) => `"${token}"`);
+  return [...new Set(tokens.map((token) => token.toLowerCase()))].map(
+    (token) => `"${token}"`,
+  );
 }
 
 export function toMatchQuery(query: string): string | null {
@@ -194,24 +196,29 @@ export class MemoryStore {
   latestMatches(query: string, limit = 10): TaskSummaryRecord[] {
     const phrases = matchPhrases(query);
     if (phrases.length === 0) return [];
-    const coverage = phrases
-      .map(
-        () => "(s.id IN (SELECT rowid FROM summaries_fts WHERE summaries_fts MATCH ?))",
-      )
-      .join(" + ");
+    const entries = Number(
+      this.db.prepare("SELECT count(*) AS entries FROM summaries").get()?.entries,
+    );
+    const matching = this.db.prepare(
+      "SELECT rowid AS id FROM summaries_fts WHERE summaries_fts MATCH ?",
+    );
+    const weights = new Map<number, number>();
+    for (const phrase of phrases) {
+      const ids = matching.all(phrase).map((row) => Number(row.id));
+      const rarity = Math.log(1 + entries / ids.length);
+      for (const id of ids) weights.set(id, (weights.get(id) ?? 0) + rarity);
+    }
+    const picked = [...weights]
+      .sort(([idA, weightA], [idB, weightB]) => weightB - weightA || idB - idA)
+      .slice(0, limit)
+      .map(([id]) => id);
+    if (picked.length === 0) return [];
     const rows = this.db
       .prepare(
-        `SELECT * FROM (
-           SELECT s.*
-           FROM summaries_fts
-           JOIN summaries s ON s.id = summaries_fts.rowid
-           WHERE summaries_fts MATCH ?
-           ORDER BY ${coverage} DESC, s.id DESC
-           LIMIT ?
-         )
+        `SELECT * FROM summaries WHERE id IN (${picked.map(() => "?").join(", ")})
          ORDER BY id DESC`,
       )
-      .all(phrases.join(" OR "), ...phrases, limit);
+      .all(...picked);
     return rows.map(toRecord);
   }
 

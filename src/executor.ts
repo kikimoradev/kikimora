@@ -79,6 +79,15 @@ function withRunBaseline(
   return { ...resume, costUsd: result.costUsd ?? resume.costUsd };
 }
 
+function workedSince(result: SessionResult, previous: TaskResume): boolean {
+  if ((result.toolUses ?? 0) > 0) return true;
+  return (
+    result.costUsd !== undefined &&
+    previous.costUsd !== undefined &&
+    result.costUsd > previous.costUsd
+  );
+}
+
 function resumeAfterLimit(
   previous: TaskResume | undefined,
   sessionId: string,
@@ -86,8 +95,7 @@ function resumeAfterLimit(
   limitedAt: Date,
 ): TaskResume {
   const sameSession = previous?.sessionId === sessionId ? previous : undefined;
-  const progressed =
-    sameSession === undefined || (attemptCostUsd(result, sameSession) ?? 0) > 0;
+  const progressed = sameSession === undefined || workedSince(result, sameSession);
   return {
     sessionId,
     limitedAt: progressed ? limitedAt.toISOString() : sameSession.limitedAt,
@@ -259,6 +267,7 @@ export async function runExecutorLoop(
             title: task.title,
             ok: false,
             durationMs: result.durationMs,
+            costUsd,
             error: "session launcher refused the session, task requeued",
             failureReason: result.failureReason,
             willRetry: true,
