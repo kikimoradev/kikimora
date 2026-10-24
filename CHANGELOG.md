@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.3] - 2026-10-24
+
 ### Fixed
 
 - `memory_search` slowed down on a query word found in most of memory, such as "the", because picking the latest among many equally matching entries scanned all the kept matches for each one; at a limit of 50 over 20 000 entries the search took more than twice as long as needed. The pick now drops an entry that cannot make the list after one comparison and finds the place of the others by a binary search, so such a search takes less than half the time, with the same matches in the same order.
@@ -325,7 +327,8 @@ Initial release.
 - Non-interactive `kikimora init` for provisioning, plus a first-run wizard in the terminal.
 - Reference `Dockerfile` and `docker-compose.yml`.
 
-[Unreleased]: https://github.com/kikimoradev/kikimora/compare/v0.16.2...HEAD
+[Unreleased]: https://github.com/kikimoradev/kikimora/compare/v0.16.3...HEAD
+[0.16.3]: https://github.com/kikimoradev/kikimora/compare/v0.16.2...v0.16.3
 [0.16.2]: https://github.com/kikimoradev/kikimora/compare/v0.16.1...v0.16.2
 [0.16.1]: https://github.com/kikimoradev/kikimora/compare/v0.16.0...v0.16.1
 [0.16.0]: https://github.com/kikimoradev/kikimora/compare/v0.15.1...v0.16.0
