@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.16.0] - 2026-10-24
+
 ### Changed
 
 - A task attempt that the Claude usage limit stops now resumes its Claude Code session after the reset (`claude --resume`), with a note on when the limit hit and how long the worker waited, instead of starting the task over in a fresh session; the work and the cost of the interrupted attempt are no longer lost. The resumed session is told that the repository, the pull request, `/tmp` and subagents may have changed during the wait, so it re-checks the state before it continues, and its `task.finished` reports only the cost of the resumed run, so the costs of one task add up to the real spend. A session that cannot be resumed (`failureReason` `resumeFailed`) returns the task to the queue without spending the attempt, and the next pass runs a fresh session under a new admission ticket; every other failure still retries in a fresh session. `tasks.list` shows the session to resume as `resume`, `task.started` as `resumedSessionId`, and the memory summary of a resumed session reads all of its log files.
@@ -303,7 +305,8 @@ Initial release.
 - Non-interactive `kikimora init` for provisioning, plus a first-run wizard in the terminal.
 - Reference `Dockerfile` and `docker-compose.yml`.
 
-[Unreleased]: https://github.com/kikimoradev/kikimora/compare/v0.15.1...HEAD
+[Unreleased]: https://github.com/kikimoradev/kikimora/compare/v0.16.0...HEAD
+[0.16.0]: https://github.com/kikimoradev/kikimora/compare/v0.15.1...v0.16.0
 [0.15.1]: https://github.com/kikimoradev/kikimora/compare/v0.15.0...v0.15.1
 [0.15.0]: https://github.com/kikimoradev/kikimora/compare/v0.14.0...v0.15.0
 [0.14.0]: https://github.com/kikimoradev/kikimora/compare/v0.13.0...v0.14.0
