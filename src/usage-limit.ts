@@ -4,7 +4,7 @@ export const RESET_BUFFER_MS = 60_000;
 export const FALLBACK_WAIT_MS = 15 * 60_000;
 
 const LIMIT_TEXT_PATTERN =
-  /usage limit reached|(?:5-hour|five.hour|weekly|session) limit reached|reached your (?:usage|weekly|session|5-hour|five.hour) limit/i;
+  /usage limit reached|(?:5-hour|five.hour|weekly|session) limit reached|(?:reached|hit) your (?:usage|weekly|session|5-hour|five.hour) limit/i;
 const PIPE_TIMESTAMP_PATTERN = /limit reached\|\s*(\d{10,13})/;
 
 export interface UsageLimitHit {

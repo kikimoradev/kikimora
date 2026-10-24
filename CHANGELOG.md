@@ -7,9 +7,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Changed
+
+- A task attempt that the Claude usage limit stops now resumes its Claude Code session after the reset (`claude --resume`), with a note on when the limit hit and how long the worker waited, instead of starting the task over in a fresh session; the work and the cost of the interrupted attempt are no longer lost. The resumed session is told that the repository, the pull request, `/tmp` and subagents may have changed during the wait, so it re-checks the state before it continues, and its `task.finished` reports only the cost of the resumed run, so the costs of one task add up to the real spend. A session that cannot be resumed (`failureReason` `resumeFailed`) returns the task to the queue without spending the attempt, and the next pass runs a fresh session under a new admission ticket; every other failure still retries in a fresh session. `tasks.list` shows the session to resume as `resume`, `task.started` as `resumedSessionId`, and the memory summary of a resumed session reads all of its log files.
+- The agents' `memory_search` tool picks its best matches and lists them newest first, so the latest attempts at a task come before older ones while a query of several words still finds the relevant entry; it takes `order: "rank"` to list them best match first. Equally relevant entries rank newest first in every search.
+
 ### Fixed
 
 - The package requires `@modelcontextprotocol/sdk` 1.32.1 or later instead of 1.29.0, so an install can no longer keep an SDK release with its known high advisories. The lockfile moves the SDK's dependencies to fixed releases as well (`proxy-addr` 2.0.8, `fast-uri` 3.1.8, `ip-address` 10.7.4, `hono` 4.13.13, `qs` 6.16.1), and `pnpm audit` reports no known advisory. The memory MCP server behaves as before.
+- The package requires `zod` 4.6.6 or later instead of 4.4.3, which closes a high advisory (GHSA-mrhx-c7xc-m3w5): validating an oversized constrained collection could exhaust memory.
+- A task attempt that ended by its session timeout got no memory entry, because its result lost the session id. The id now comes from the session's start, so the attempt is summarized from its log like any other failure, and `task.finished` carries its `sessionId`.
 
 ## [0.15.1] - 2026-10-22
 

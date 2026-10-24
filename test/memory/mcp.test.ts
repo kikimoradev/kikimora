@@ -78,6 +78,91 @@ describe("memory MCP server", () => {
     expect(text).toContain("missing Content-Type header");
   });
 
+  it("memory_search returns the newest entries first by default", async () => {
+    const result = await client.callTool({
+      name: "memory_search",
+      arguments: { query: "export content type header" },
+    });
+
+    const text = firstText(result);
+    expect(text.indexOf("Export regression")).toBeLessThan(
+      text.indexOf("Fixed CSV export"),
+    );
+  });
+
+  it("memory_search returns the best match first when asked for rank order", async () => {
+    const result = await client.callTool({
+      name: "memory_search",
+      arguments: { query: "export content type header", order: "rank" },
+    });
+
+    const text = firstText(result);
+    expect(text.indexOf("Fixed CSV export")).toBeLessThan(
+      text.indexOf("Export regression"),
+    );
+  });
+
+  it("memory_search picks the best matches of a multi-word query before it lists them newest first", async () => {
+    const add = (taskId: string, headline: string, summary: string): void => {
+      store.add({
+        taskId,
+        attempt: 1,
+        ok: true,
+        title: "Code review",
+        headline,
+        summary,
+        error: undefined,
+        sessionId: `session-${taskId}`,
+        createdAt: "2026-10-22T12:00:00.000Z",
+      });
+    };
+    add(
+      "redmine-53035-cr",
+      "Blog search relevance defect",
+      "53035: the blog search ranks drafts above published posts; relevance weights were inverted.",
+    );
+    add(
+      "redmine-53036-cr",
+      "Blog teaser",
+      "Blog search relevance looks fine on the teaser.",
+    );
+    for (let issue = 60_000; issue < 60_010; issue += 1) {
+      add(
+        `redmine-${String(issue)}-cr`,
+        `Review ${String(issue)}`,
+        "Redmine review of the blog.",
+      );
+    }
+
+    const search = async (order?: string): Promise<string[]> => {
+      const result = await client.callTool({
+        name: "memory_search",
+        arguments: {
+          query: "53035 blog search relevance",
+          limit: 3,
+          ...(order === undefined ? {} : { order }),
+        },
+      });
+      return [...firstText(result).matchAll(/^### (\S+)/gm)].map(
+        (match) => match[1] ?? "",
+      );
+    };
+
+    const newest = await search();
+    const rank = await search("rank");
+    expect(rank.slice(0, 2)).toEqual(["redmine-53035-cr", "redmine-53036-cr"]);
+    expect(newest).toEqual([rank[2], "redmine-53036-cr", "redmine-53035-cr"]);
+  });
+
+  it("memory_search rejects an unknown order", async () => {
+    const result = await client.callTool({
+      name: "memory_search",
+      arguments: { query: "export", order: "oldest" },
+    });
+
+    expect(result.isError).toBe(true);
+  });
+
   it("memory_search with no hits returns a readable message", async () => {
     const result = await client.callTool({
       name: "memory_search",

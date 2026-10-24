@@ -78,6 +78,7 @@ export const SESSION_FAILURE_REASONS = [
   "spawn",
   "launcherRefused",
   "poolMemoryLimit",
+  "resumeFailed",
 ] as const;
 
 export type SessionFailureReason = (typeof SESSION_FAILURE_REASONS)[number];
@@ -136,6 +137,12 @@ export function isFinalTaskStatus(status: TaskStatus): status is FinalTaskStatus
   return (FINAL_TASK_STATUSES as readonly TaskStatus[]).includes(status);
 }
 
+export interface TaskResume {
+  sessionId: string;
+  limitedAt: string;
+  costUsd?: number | undefined;
+}
+
 export interface Task {
   id: string;
   title: string;
@@ -145,6 +152,7 @@ export interface Task {
   createdAt: string;
   updatedAt: string;
   error?: string | undefined;
+  resume?: TaskResume | undefined;
 }
 
 export type NewTask = Pick<Task, "id" | "title" | "description">;

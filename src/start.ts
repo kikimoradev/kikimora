@@ -285,9 +285,9 @@ export async function startWorker(options: StartWorkerOptions = {}): Promise<voi
     dataDir: config.dataDir,
     playwrightOutputDir: config.playwrightOutputDir,
     store: memory,
-    resolveLogPath: async (sessionId) => {
+    resolveLogPaths: async (sessionId) => {
       await executorLog.flush();
-      return executorLog.pathFor(sessionId);
+      return executorLog.logPathsFor(sessionId);
     },
     reporter: teeSession(summaryReporter, summarizerLog.sink),
     gates,

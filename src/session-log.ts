@@ -39,7 +39,7 @@ function flushStream(stream: WriteStream): Promise<void> {
 export class SessionLog {
   private streams: SessionStreams | null = null;
   private readonly closing: Promise<void>[] = [];
-  private readonly sessionPaths = new Map<string, SessionLogPaths>();
+  private readonly sessionPaths = new Map<string, SessionLogPaths[]>();
 
   constructor(
     private readonly dir: string,
@@ -70,12 +70,12 @@ export class SessionLog {
     }
   };
 
-  pathFor(sessionId: string): string | undefined {
-    return this.sessionPaths.get(sessionId)?.log;
+  logPathsFor(sessionId: string): string[] {
+    return (this.sessionPaths.get(sessionId) ?? []).map((paths) => paths.log);
   }
 
   pathsFor(sessionId: string): SessionLogPaths | undefined {
-    return this.sessionPaths.get(sessionId);
+    return this.sessionPaths.get(sessionId)?.at(-1);
   }
 
   async flush(): Promise<void> {
@@ -96,7 +96,10 @@ export class SessionLog {
     mkdirSync(dayDir, { recursive: true });
     const base = join(dayDir, `${clockStamp(at)}-${safeName(sessionId)}`);
     const paths: SessionLogPaths = { log: `${base}.log`, jsonl: `${base}.jsonl` };
-    this.sessionPaths.set(sessionId, paths);
+    this.sessionPaths.set(sessionId, [
+      ...(this.sessionPaths.get(sessionId) ?? []),
+      paths,
+    ]);
     this.streams = {
       log: createWriteStream(paths.log, { flags: "a" }),
       jsonl: createWriteStream(paths.jsonl, { flags: "a" }),

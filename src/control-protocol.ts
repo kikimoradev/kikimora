@@ -10,7 +10,7 @@ import type { Settings } from "./config.js";
 import type { AgentControlState } from "./control.js";
 import { DRAIN_TIMEOUT_MAX_MS, type DrainReason, type DrainSnapshot } from "./drain.js";
 import type { MemoryExport } from "./memory/export.js";
-import type { MemoryOrder, TaskSummaryRecord } from "./memory/store.js";
+import { MEMORY_ORDERS, type TaskSummaryRecord } from "./memory/store.js";
 import { PROMPT_AGENTS, type PromptAgent } from "./prompt-files.js";
 import {
   SESSION_AGENTS,
@@ -40,7 +40,6 @@ export type ControlTarget = (typeof CONTROL_TARGETS)[number];
 
 export const MEMORY_LIMIT_DEFAULT = 10;
 export const MEMORY_LIMIT_MAX = 100;
-export const MEMORY_ORDERS = ["rank", "newest"] as const satisfies readonly MemoryOrder[];
 export const UNRECOGNIZED_REQUEST = "Unrecognized control request.";
 export const TASKS_DELETE_SELECTOR = "give either id or status";
 

@@ -44,11 +44,11 @@ export interface SummaryContext {
   task: Task;
   result: SessionResult;
   willRetry: boolean;
-  logPath: string;
+  logPaths: string[];
 }
 
 export function composeSummaryPrompt(context: SummaryContext): string {
-  const { task, result, willRetry, logPath } = context;
+  const { task, result, willRetry, logPaths } = context;
   const lines = [
     "## Task",
     "",
@@ -68,14 +68,21 @@ export function composeSummaryPrompt(context: SummaryContext): string {
       `Retry scheduled: ${willRetry ? "yes" : "no"}`,
     );
   }
-  lines.push(
-    "",
-    "## Session log",
-    "",
-    "The full executor session log is in file:",
-    logPath,
-    "",
-    "Read it and prepare a summary.",
-  );
+  lines.push("", "## Session log", "");
+  if (logPaths.length === 1) {
+    lines.push(
+      "The full executor session log is in file:",
+      ...logPaths,
+      "",
+      "Read it and prepare a summary.",
+    );
+  } else {
+    lines.push(
+      "The executor session was resumed, so its log is split across these files, oldest first:",
+      ...logPaths,
+      "",
+      "Read them all and prepare a summary of the whole session.",
+    );
+  }
   return lines.join("\n");
 }

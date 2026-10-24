@@ -6,6 +6,7 @@ import {
   type FinalTaskStatus,
   type NewTask,
   type Task,
+  type TaskResume,
   type TaskStatus,
 } from "./types.js";
 
@@ -18,6 +19,13 @@ const taskSchema = z.object({
   createdAt: z.string(),
   updatedAt: z.string(),
   error: z.string().optional(),
+  resume: z
+    .object({
+      sessionId: z.string().min(1),
+      limitedAt: z.iso.datetime(),
+      costUsd: z.number().nonnegative().optional(),
+    })
+    .optional(),
 });
 
 const storeFileSchema = z.object({
@@ -193,12 +201,39 @@ export class TaskStore {
     });
   }
 
+  suspend(id: string, error: string, resume: TaskResume): Promise<void> {
+    return this.run(async () => {
+      const task = this.tasks.find((candidate) => candidate.id === id);
+      if (!task) return;
+      task.status = "pending";
+      task.attempts = Math.max(0, task.attempts - 1);
+      task.error = error;
+      task.resume = { ...resume };
+      task.updatedAt = new Date().toISOString();
+      await this.persist();
+    });
+  }
+
+  forgetResume(id: string, error: string): Promise<void> {
+    return this.run(async () => {
+      const task = this.tasks.find((candidate) => candidate.id === id);
+      if (!task) return;
+      task.status = "pending";
+      task.attempts = Math.max(0, task.attempts - 1);
+      task.error = error;
+      task.resume = undefined;
+      task.updatedAt = new Date().toISOString();
+      await this.persist();
+    });
+  }
+
   requeue(id: string, error: string): Promise<void> {
     return this.run(async () => {
       const task = this.tasks.find((candidate) => candidate.id === id);
       if (!task) return;
       task.status = "pending";
       task.error = error;
+      task.resume = undefined;
       task.updatedAt = new Date().toISOString();
       await this.persist();
     });
@@ -259,6 +294,7 @@ export class TaskStore {
       task.status = status;
       task.updatedAt = new Date().toISOString();
       task.error = error;
+      task.resume = undefined;
       await this.persist();
     });
   }

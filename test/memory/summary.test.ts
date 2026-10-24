@@ -85,7 +85,7 @@ describe("composeSummaryPrompt", () => {
       task: buildTask(),
       result: buildResult(),
       willRetry: false,
-      logPath,
+      logPaths: [logPath],
       ...overrides,
     };
   }
@@ -113,6 +113,17 @@ describe("composeSummaryPrompt", () => {
     expect(prompt).toContain("Status: failure");
     expect(prompt).toContain("Error: session timeout");
     expect(prompt).toContain("Retry scheduled: yes");
+  });
+
+  it("lists every log file of a resumed session, oldest first", () => {
+    const resumedPath = "/tmp/logs/executor/2026-07-02/14-00-00-abc.log";
+    const prompt = composeSummaryPrompt(
+      buildContext({ logPaths: [logPath, resumedPath] }),
+    );
+
+    expect(prompt).toContain("session was resumed");
+    expect(prompt.indexOf(logPath)).toBeLessThan(prompt.indexOf(resumedPath));
+    expect(prompt).toContain("Read them all");
   });
 
   it("describes the error as unknown when there is no error message on failure", () => {

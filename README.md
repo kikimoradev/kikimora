@@ -81,7 +81,7 @@ Full examples and prompt-writing tips: [docs/prompts.md](https://github.com/kiki
 - **Interactive TUI**: an Ink/React shell with live agent status, switchable views and slash commands.
 - **Working hours**: a time window and days of the week (`08:00-18:00`, `mon-fri`) limit when the monitor runs.
 - **Retries**: transient failures are retried up to `maxTaskAttempts`, other failures mark the task `failed`. Tasks left `in_progress` by a crash return to `pending` on the next start.
-- **Usage limits**: when Claude Code reports its 5-hour or weekly limit, both agents wait with a countdown until the reset plus 60 s. The interrupted task returns to the queue and the attempt is not counted.
+- **Usage limits**: when Claude Code reports its 5-hour or weekly limit, both agents wait with a countdown until the reset plus 60 s. The interrupted task returns to the queue and the attempt is not counted; after the reset the executor resumes the interrupted Claude Code session, told how long it waited, instead of starting over, and starts a fresh session only when that one cannot be resumed.
 - **Prompts in files**: agent prompts are markdown files; the code contains no prompt text.
 
 ## Quick start

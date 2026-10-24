@@ -11,7 +11,14 @@ import { LAUNCHER_REFUSAL_BACKOFF_MS } from "./session-launcher.js";
 import type { SessionRecorder } from "./sessions/index.js";
 import type { ExecutorReporter } from "./status.js";
 import type { TaskStore } from "./tasks.js";
-import type { SessionFailureReason, SessionResult, Task, WorkerConfig } from "./types.js";
+import type {
+  SessionFailureReason,
+  SessionResult,
+  Task,
+  TaskResume,
+  WorkerConfig,
+} from "./types.js";
+import { formatUptime } from "./units.js";
 import { detectUsageLimit } from "./usage-limit.js";
 import type { Waker } from "./waker.js";
 
@@ -40,6 +47,28 @@ Title: ${task.title}
 Description:
 ${task.description}
 `;
+}
+
+export function composeResumePrompt(task: Task, resume: TaskResume, now: Date): string {
+  const waitedMs = now.getTime() - Date.parse(resume.limitedAt);
+  return `## Session resumed
+
+The Claude usage limit stopped this session at ${resume.limitedAt}. Kikimora waited ${formatUptime(waitedMs)} for the limit to reset and resumed the session at ${now.toISOString()}.
+
+The repository, the issue tracker, the pull request, /tmp and other files outside the workspace may have changed during the wait, and subagents the limit stopped did not finish. Re-check the state your next step depends on before you act.
+
+Continue task ${task.id} where you left off.
+`;
+}
+
+export function attemptCostUsd(
+  result: SessionResult,
+  resume: TaskResume | undefined,
+): number | undefined {
+  if (result.costUsd === undefined || resume?.costUsd === undefined) {
+    return result.costUsd;
+  }
+  return Math.max(0, result.costUsd - resume.costUsd);
 }
 
 export async function runExecutorLoop(
@@ -132,7 +161,11 @@ export async function runExecutorLoop(
             model: executor.model,
             effort: executor.effort,
             systemPrompt,
-            prompt: composeTaskPrompt(composePrompt(prompt, context), task),
+            prompt:
+              task.resume === undefined
+                ? composeTaskPrompt(composePrompt(prompt, context), task)
+                : composeResumePrompt(task, task.resume, new Date()),
+            resume: task.resume?.sessionId,
             sessionTimeoutMs: executor.sessionTimeoutMs,
             streamPartial: config.streamPartial,
             mcpConfigPath,
@@ -143,9 +176,24 @@ export async function runExecutorLoop(
           },
           signal,
         );
-
         if (aborted()) break;
 
+        if (result.failureReason === "resumeFailed") {
+          await store.forgetResume(task.id, "session could not be resumed");
+          reporter.taskFinished({
+            taskId: task.id,
+            title: task.title,
+            ok: false,
+            durationMs: result.durationMs,
+            error: "session could not be resumed — task requeued for a fresh session",
+            failureReason: result.failureReason,
+            willRetry: true,
+            sessionId: result.sessionId,
+          });
+          continue;
+        }
+
+        const costUsd = attemptCostUsd(result, task.resume);
         if (result.ok) {
           await store.complete(task.id);
           reporter.taskFinished({
@@ -153,7 +201,7 @@ export async function runExecutorLoop(
             title: task.title,
             ok: true,
             durationMs: result.durationMs,
-            costUsd: result.costUsd,
+            costUsd,
             numTurns: result.numTurns,
             sessionId: result.sessionId,
           });
@@ -186,7 +234,7 @@ export async function runExecutorLoop(
               title: task.title,
               ok: false,
               durationMs: result.durationMs,
-              costUsd: result.costUsd,
+              costUsd,
               numTurns: result.numTurns,
               error: "authentication failed — task requeued",
               failureReason: result.failureReason,
@@ -197,16 +245,28 @@ export async function runExecutorLoop(
           }
           const limit = detectUsageLimit(result);
           if (limit) {
-            gates.limit.engage(limit, Date.now());
-            await store.release(task.id, "usage limit reached");
+            const limitedAt = Date.now();
+            gates.limit.engage(limit, limitedAt);
+            if (result.sessionId === undefined) {
+              await store.release(task.id, "usage limit reached");
+            } else {
+              await store.suspend(task.id, "usage limit reached", {
+                sessionId: result.sessionId,
+                limitedAt: new Date(limitedAt).toISOString(),
+                costUsd: result.costUsd,
+              });
+            }
             reporter.taskFinished({
               taskId: task.id,
               title: task.title,
               ok: false,
               durationMs: result.durationMs,
-              costUsd: result.costUsd,
+              costUsd,
               numTurns: result.numTurns,
-              error: "usage limit reached — task requeued",
+              error:
+                result.sessionId === undefined
+                  ? "usage limit reached — task requeued"
+                  : "usage limit reached — session resumes after the reset",
               failureReason: result.failureReason,
               willRetry: true,
               sessionId: result.sessionId,
@@ -225,7 +285,7 @@ export async function runExecutorLoop(
             title: task.title,
             ok: false,
             durationMs: result.durationMs,
-            costUsd: result.costUsd,
+            costUsd,
             numTurns: result.numTurns,
             error,
             failureReason: result.failureReason,
