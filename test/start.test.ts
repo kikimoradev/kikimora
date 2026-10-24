@@ -1,5 +1,7 @@
-import { join } from "node:path";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { dirname, join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { LOCAL_LEASE } from "../src/admission.js";
 import type { SignalPolicy } from "../src/shutdown.js";
 import type { StartWorkerOptions } from "../src/start.js";
 import { packageVersion } from "../src/paths.js";
@@ -338,6 +340,47 @@ describe("startWorker", () => {
       ...serverDeps.identity,
       headless: true,
     });
+  });
+
+  it("the summarizer reads the executor logs a session wrote before the worker restarted", async () => {
+    const logsDir = join(dir, "logs");
+    const earlierLog = join(
+      logsDir,
+      "executor",
+      "2026-10-21",
+      "09-00-00-sess-before.log",
+    );
+    await mkdir(dirname(earlierLog), { recursive: true });
+    await writeFile(earlierLog, "[09:00:00] earlier run\n", "utf8");
+    const promptOut = join(dir, "summary-prompt.md");
+    stubHappyPath(buildConfig({ cwd: dir, logsDir, dataDir: join(dir, "data") }));
+    mocks.runExecutorLoop.mockImplementation(async (...args: unknown[]) => {
+      const summarizer = args[4] as InstanceType<typeof SessionSummarizer>;
+      await summarizer.summarize(
+        {
+          id: "long",
+          title: "Task long",
+          description: "Description long",
+          status: "in_progress",
+          attempts: 1,
+          createdAt: "2026-10-21T09:00:00.000Z",
+          updatedAt: "2026-10-21T09:00:00.000Z",
+        },
+        { ok: false, durationMs: 1, sessionId: "sess-before" },
+        { willRetry: true, lease: LOCAL_LEASE },
+        args[7] as AbortSignal,
+      );
+    });
+    const restoreEnv = snapshotEnv();
+    process.env.FAKE_CLAUDE_PROMPT_OUT = promptOut;
+
+    try {
+      await runStart({ stdout: jsonSink() });
+    } finally {
+      restoreEnv();
+    }
+
+    expect(await readFile(promptOut, "utf8")).toContain(earlierLog);
   });
 
   it("an auth failure pauses both controllers and resume clears the gate", async () => {

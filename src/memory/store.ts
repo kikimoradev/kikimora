@@ -99,10 +99,16 @@ function toRecord(row: unknown): TaskSummaryRecord {
   };
 }
 
+function matchPhrases(query: string): string[] {
+  const tokens = query.match(/[\p{L}\p{N}_]+/gu) ?? [];
+  return [...new Set(tokens.map((token) => token.toLowerCase()))].map(
+    (token) => `"${token}"`,
+  );
+}
+
 export function toMatchQuery(query: string): string | null {
-  const tokens = query.match(/[\p{L}\p{N}_]+/gu);
-  if (!tokens || tokens.length === 0) return null;
-  return tokens.map((token) => `"${token}"`).join(" OR ");
+  const phrases = matchPhrases(query);
+  return phrases.length === 0 ? null : phrases.join(" OR ");
 }
 
 export interface MemoryStoreOptions {
@@ -184,6 +190,35 @@ export class MemoryStore {
          LIMIT ?`,
       )
       .all(match, ...conditions.params, limit);
+    return rows.map(toRecord);
+  }
+
+  latestMatches(query: string, limit = 10): TaskSummaryRecord[] {
+    const phrases = matchPhrases(query);
+    if (phrases.length === 0) return [];
+    const entries = Number(
+      this.db.prepare("SELECT count(*) AS entries FROM summaries").get()?.entries,
+    );
+    const matching = this.db.prepare(
+      "SELECT rowid AS id FROM summaries_fts WHERE summaries_fts MATCH ?",
+    );
+    const weights = new Map<number, number>();
+    for (const phrase of phrases) {
+      const ids = matching.all(phrase).map((row) => Number(row.id));
+      const rarity = Math.log(1 + entries / ids.length);
+      for (const id of ids) weights.set(id, (weights.get(id) ?? 0) + rarity);
+    }
+    const picked = [...weights]
+      .sort(([idA, weightA], [idB, weightB]) => weightB - weightA || idB - idA)
+      .slice(0, limit)
+      .map(([id]) => id);
+    if (picked.length === 0) return [];
+    const rows = this.db
+      .prepare(
+        `SELECT * FROM summaries WHERE id IN (${picked.map(() => "?").join(", ")})
+         ORDER BY id DESC`,
+      )
+      .all(...picked);
     return rows.map(toRecord);
   }
 

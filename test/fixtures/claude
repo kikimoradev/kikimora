@@ -175,6 +175,20 @@ function run() {
       emitOk(false);
       process.exit(0);
       break;
+    case "tool_calls":
+      emitInit();
+      emit({
+        type: "assistant",
+        message: {
+          content: [
+            { type: "tool_use", name: "Read", input: { file_path: "README.md" } },
+            { type: "tool_use", name: "Bash", input: { command: "ls" } },
+          ],
+        },
+      });
+      emitOutcome(false);
+      process.exit(0);
+      break;
     case "error_result":
       emitOk(true);
       process.exit(0);

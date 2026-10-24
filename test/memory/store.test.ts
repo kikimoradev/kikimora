@@ -33,8 +33,12 @@ describe("toMatchQuery", () => {
 
   it("neutralizes FTS5 syntax", () => {
     expect(toMatchQuery('redmine AND "export" (NOT x*)')).toBe(
-      '"redmine" OR "AND" OR "export" OR "NOT" OR "x"',
+      '"redmine" OR "and" OR "export" OR "not" OR "x"',
     );
+  });
+
+  it("lists a word once whatever its case", () => {
+    expect(toMatchQuery("Blog blog BLOG relevance")).toBe('"blog" OR "relevance"');
   });
 
   it("returns null for empty queries", () => {
@@ -196,6 +200,110 @@ describe("MemoryStore", () => {
     );
 
     expect(store.search("deploy", 10).map((r) => r.id)).toEqual([newer.id, older.id]);
+  });
+
+  it("latestMatches keeps the latest entries of a one-word query with more matches than the limit", () => {
+    for (let attempt = 1; attempt <= 12; attempt += 1) {
+      store.add(
+        buildRecord({
+          taskId: "redmine-53035-cr",
+          attempt,
+          summary: `Review of 53035. ${"Checked the diff again. ".repeat(attempt)}`,
+        }),
+      );
+    }
+
+    expect(store.latestMatches("53035", 3).map((r) => r.attempt)).toEqual([12, 11, 10]);
+    expect(store.search("53035", 3).map((r) => r.attempt)).toEqual([1, 2, 3]);
+  });
+
+  it("latestMatches picks the entries with the most query words and lists them newest first", () => {
+    const relevant = store.add(
+      buildRecord({ taskId: "redmine-1", summary: "deploy failed on a timeout" }),
+    );
+    const partial = store.add(
+      buildRecord({ taskId: "redmine-2", summary: "deploy failed" }),
+    );
+    const newest = store.add(
+      buildRecord({ taskId: "redmine-3", summary: "deploy done" }),
+    );
+
+    expect(store.latestMatches("deploy failed timeout", 2).map((r) => r.id)).toEqual([
+      partial.id,
+      relevant.id,
+    ]);
+    expect(store.latestMatches("deploy failed timeout").map((r) => r.id)).toEqual([
+      newest.id,
+      partial.id,
+      relevant.id,
+    ]);
+  });
+
+  it("latestMatches counts a repeated query word once", () => {
+    store.add(buildRecord({ taskId: "redmine-1", summary: "blog teaser" }));
+    const newer = store.add(
+      buildRecord({ taskId: "redmine-2", summary: "search relevance" }),
+    );
+
+    expect(store.latestMatches("blog blog relevance", 1).map((r) => r.id)).toEqual([
+      newer.id,
+    ]);
+    expect(store.latestMatches("Blog blog relevance", 1).map((r) => r.id)).toEqual([
+      newer.id,
+    ]);
+  });
+
+  it("latestMatches weighs a query word by its rarity, so common words do not push out the topic", () => {
+    const relevant = store.add(
+      buildRecord({
+        taskId: "redmine-blog",
+        title: "Blog search",
+        headline: "Fixed blog search relevance",
+        summary:
+          "Blog search relevance was poor; fixed the Elasticsearch analyzer for the blog index.",
+      }),
+    );
+    for (let attempt = 1; attempt <= 12; attempt += 1) {
+      store.add(
+        buildRecord({
+          taskId: `redmine-flaky-${String(attempt)}`,
+          title: "Flaky test",
+          headline: "Stabilized a flaky test",
+          summary: "How did we fix the flaky test? We retried the request in the test.",
+        }),
+      );
+    }
+
+    expect(
+      store.latestMatches("how did we fix the blog search relevance", 5).map((r) => r.id),
+    ).toContain(relevant.id);
+  });
+
+  it("latestMatches keeps the latest attempts at a task when every attempt has all query words", () => {
+    for (let attempt = 1; attempt <= 12; attempt += 1) {
+      store.add(
+        buildRecord({
+          taskId: "redmine-70000-cr",
+          attempt,
+          title: "Code review",
+          summary: `Code review of 70000. ${"Checked the diff again. ".repeat(attempt)}`,
+        }),
+      );
+    }
+    store.add(
+      buildRecord({ taskId: "redmine-70001-cr", summary: "Code review of 70001." }),
+    );
+
+    expect(store.latestMatches("70000 code review", 3).map((r) => r.attempt)).toEqual([
+      12, 11, 10,
+    ]);
+    expect(store.latestMatches("70000", 3).map((r) => r.attempt)).toEqual([12, 11, 10]);
+  });
+
+  it("latestMatches returns nothing for a query without words", () => {
+    store.add(buildRecord());
+
+    expect(store.latestMatches('  ()"* ')).toEqual([]);
   });
 
   it("recent returns an empty list for an empty store", () => {

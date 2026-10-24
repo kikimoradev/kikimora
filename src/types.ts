@@ -99,6 +99,7 @@ export interface SessionResult {
   durationMs: number;
   costUsd?: number | undefined;
   numTurns?: number | undefined;
+  toolUses?: number | undefined;
   sessionId?: string | undefined;
   resultText?: string | undefined;
   error?: string | undefined;
@@ -111,6 +112,7 @@ export interface SessionResult {
 export interface SessionSummary {
   costUsd?: number | undefined;
   numTurns?: number | undefined;
+  toolUses?: number | undefined;
   sessionId?: string | undefined;
   isError?: boolean | undefined;
   resultText?: string | undefined;

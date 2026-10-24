@@ -4,7 +4,7 @@ import { defineCommand } from "citty";
 import { z } from "zod";
 import { MEMORY_ORDERS, MemoryStore, type TaskSummaryRecord } from "./store.js";
 
-export type MemoryReader = Pick<MemoryStore, "search" | "get">;
+export type MemoryReader = Pick<MemoryStore, "search" | "latestMatches" | "get">;
 
 function formatRecord(record: TaskSummaryRecord): string {
   const status = record.ok ? "success" : "failure";
@@ -33,9 +33,11 @@ export function createMemoryMcpServer(reader: MemoryReader): McpServer {
       title: "Search task memory",
       description:
         "Full-text search over long-term memory: summaries of previously " +
-        "completed tasks (decisions, dead ends, pitfalls). Picks the best " +
-        "matches and lists them newest first; pass order rank to list them " +
-        "best match first.",
+        "completed tasks (decisions, dead ends, pitfalls). Picks the entries " +
+        "that contain the most query words, a rare word counting more than " +
+        "a common one and the latest entry winning among equals, and lists " +
+        "them newest first; pass order rank to pick and list them by " +
+        "relevance instead.",
       inputSchema: {
         query: z
           .string()
@@ -52,16 +54,16 @@ export function createMemoryMcpServer(reader: MemoryReader): McpServer {
           .enum(MEMORY_ORDERS)
           .optional()
           .describe(
-            "newest: the best matches, newest first (default); rank: best match first",
+            "newest: the entries with the most query words, rare words counting more, newest first (default); rank: best match first",
           ),
       },
     },
     ({ query, limit, order }) => {
-      const matches = reader.search(query, limit ?? 10, { order: "rank" });
-      return textResult(
-        order === "rank" ? matches : matches.toSorted((a, b) => b.id - a.id),
-        "No results in memory.",
-      );
+      const matches =
+        order === "rank"
+          ? reader.search(query, limit ?? 10)
+          : reader.latestMatches(query, limit ?? 10);
+      return textResult(matches, "No results in memory.");
     },
   );
 

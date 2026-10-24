@@ -71,6 +71,38 @@ export function attemptCostUsd(
   return Math.max(0, result.costUsd - resume.costUsd);
 }
 
+function withRunBaseline(
+  resume: TaskResume | undefined,
+  result: SessionResult,
+): TaskResume | undefined {
+  if (resume === undefined) return undefined;
+  return { ...resume, costUsd: result.costUsd ?? resume.costUsd };
+}
+
+function workedSince(result: SessionResult, previous: TaskResume): boolean {
+  if ((result.toolUses ?? 0) > 0) return true;
+  return (
+    result.costUsd !== undefined &&
+    previous.costUsd !== undefined &&
+    result.costUsd > previous.costUsd
+  );
+}
+
+function resumeAfterLimit(
+  previous: TaskResume | undefined,
+  sessionId: string,
+  result: SessionResult,
+  limitedAt: Date,
+): TaskResume {
+  const sameSession = previous?.sessionId === sessionId ? previous : undefined;
+  const progressed = sameSession === undefined || workedSince(result, sameSession);
+  return {
+    sessionId,
+    limitedAt: progressed ? limitedAt.toISOString() : sameSession.limitedAt,
+    costUsd: result.costUsd ?? sameSession?.costUsd,
+  };
+}
+
 export async function runExecutorLoop(
   config: WorkerConfig,
   store: TaskStore,
@@ -89,6 +121,13 @@ export async function runExecutorLoop(
     controller.state === "running" &&
     gates.auth.blocked === null &&
     gates.limit.msRemaining(Date.now()) === 0;
+
+  const handBack = (task: Task, result: SessionResult, error: string): Promise<void> => {
+    const resume = withRunBaseline(task.resume, result);
+    return resume === undefined
+      ? store.release(task.id, error)
+      : store.suspend(task.id, error, resume);
+  };
 
   while (!aborted()) {
     const authBlock = gates.auth.blocked;
@@ -178,7 +217,7 @@ export async function runExecutorLoop(
         );
         if (aborted()) break;
 
-        if (result.failureReason === "resumeFailed") {
+        if (task.resume !== undefined && result.failureReason === "resumeFailed") {
           await store.forgetResume(task.id, "session could not be resumed");
           reporter.taskFinished({
             taskId: task.id,
@@ -190,6 +229,19 @@ export async function runExecutorLoop(
             willRetry: true,
             sessionId: result.sessionId,
           });
+          await summarizer
+            .summarize(
+              task,
+              {
+                ok: false,
+                durationMs: result.durationMs,
+                sessionId: task.resume.sessionId,
+                error: "usage limit reached — session could not be resumed",
+              },
+              { willRetry: true, lease },
+              signal,
+            )
+            .catch(() => undefined);
           continue;
         }
 
@@ -209,12 +261,13 @@ export async function runExecutorLoop(
             .summarize(task, result, { willRetry: false, lease }, signal)
             .catch(() => undefined);
         } else if (result.failureReason === "launcherRefused") {
-          await store.release(task.id, "session launcher refused the session");
+          await handBack(task, result, "session launcher refused the session");
           reporter.taskFinished({
             taskId: task.id,
             title: task.title,
             ok: false,
             durationMs: result.durationMs,
+            costUsd,
             error: "session launcher refused the session, task requeued",
             failureReason: result.failureReason,
             willRetry: true,
@@ -228,7 +281,7 @@ export async function runExecutorLoop(
           const auth = detectAuthFailure(result);
           if (auth) {
             gates.auth.engage(auth);
-            await store.release(task.id, "authentication failed");
+            await handBack(task, result, "authentication failed");
             reporter.taskFinished({
               taskId: task.id,
               title: task.title,
@@ -248,13 +301,18 @@ export async function runExecutorLoop(
             const limitedAt = Date.now();
             gates.limit.engage(limit, limitedAt);
             if (result.sessionId === undefined) {
-              await store.release(task.id, "usage limit reached");
+              await handBack(task, result, "usage limit reached");
             } else {
-              await store.suspend(task.id, "usage limit reached", {
-                sessionId: result.sessionId,
-                limitedAt: new Date(limitedAt).toISOString(),
-                costUsd: result.costUsd,
-              });
+              await store.suspend(
+                task.id,
+                "usage limit reached",
+                resumeAfterLimit(
+                  task.resume,
+                  result.sessionId,
+                  result,
+                  new Date(limitedAt),
+                ),
+              );
             }
             reporter.taskFinished({
               taskId: task.id,

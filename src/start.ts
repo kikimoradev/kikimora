@@ -287,7 +287,7 @@ export async function startWorker(options: StartWorkerOptions = {}): Promise<voi
     store: memory,
     resolveLogPaths: async (sessionId) => {
       await executorLog.flush();
-      return executorLog.logPathsFor(sessionId);
+      return executorLog.findLogPaths(sessionId);
     },
     reporter: teeSession(summaryReporter, summarizerLog.sink),
     gates,

@@ -72,6 +72,38 @@ describe("StreamRenderer", () => {
     ]);
   });
 
+  it("counts the tool calls of the run and keeps the count past the result", () => {
+    const { renderer } = createRenderer();
+    const toolUse = (name: string) => ({ type: "tool_use", name, input: {} });
+    renderer.handleLine(
+      line({
+        type: "assistant",
+        message: { content: [{ type: "text", text: "Looking" }, toolUse("Read")] },
+      }),
+    );
+    expect(renderer.getSummary().toolUses).toBe(1);
+    renderer.handleLine(
+      line({
+        type: "assistant",
+        message: { content: [toolUse("Bash"), toolUse("Edit")] },
+      }),
+    );
+    renderer.handleLine(line({ type: "result", is_error: true, session_id: "sess-4" }));
+    expect(renderer.getSummary()).toMatchObject({ isError: true, toolUses: 3 });
+  });
+
+  it("a run without tool calls reports no tool uses", () => {
+    const { renderer } = createRenderer();
+    renderer.handleLine(
+      line({
+        type: "assistant",
+        message: { content: [{ type: "text", text: "You've hit your limit" }] },
+      }),
+    );
+    renderer.handleLine(line({ type: "result", is_error: true, session_id: "sess-5" }));
+    expect(renderer.getSummary().toolUses).toBeUndefined();
+  });
+
   it("assistant: empty text is skipped", () => {
     const { events, renderer } = createRenderer();
     renderer.handleLine(

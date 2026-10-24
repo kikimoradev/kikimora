@@ -188,6 +188,7 @@ export async function runSession(
       durationMs: Date.now() - startedAt,
       costUsd: summary.costUsd,
       numTurns: summary.numTurns,
+      toolUses: summary.toolUses,
       sessionId: summary.sessionId ?? indexed.sessionId ?? undefined,
       resultText: summary.resultText,
       error: ok ? undefined : describeFailure(failureReason, code, exitSignal),

@@ -125,6 +125,7 @@ export class StreamRenderer {
           if (block.type === "text" && block.text?.trim()) {
             this.emit({ type: "text", text: block.text.trim() });
           } else if (block.type === "tool_use") {
+            this.summary.toolUses = (this.summary.toolUses ?? 0) + 1;
             this.emit({
               type: "toolUse",
               name: block.name ?? "?",
@@ -175,6 +176,7 @@ export class StreamRenderer {
         this.summary = {
           rateLimit: this.summary.rateLimit,
           apiError: this.summary.apiError,
+          toolUses: this.summary.toolUses,
           isError: event.is_error,
           costUsd: event.total_cost_usd,
           numTurns: event.num_turns,

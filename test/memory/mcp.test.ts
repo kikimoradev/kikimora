@@ -154,6 +154,31 @@ describe("memory MCP server", () => {
     expect(newest).toEqual([rank[2], "redmine-53036-cr", "redmine-53035-cr"]);
   });
 
+  it("memory_search keeps the latest attempts at a task when one word matches more entries than the limit", async () => {
+    for (let attempt = 1; attempt <= 12; attempt += 1) {
+      store.add({
+        taskId: "redmine-53035-cr",
+        attempt,
+        ok: attempt === 12,
+        title: "Code review",
+        headline: `Review attempt ${String(attempt)}`,
+        summary: `Review of 53035. ${"Checked the diff again. ".repeat(attempt)}`,
+        error: undefined,
+        sessionId: `session-${String(attempt)}`,
+        createdAt: "2026-10-22T12:00:00.000Z",
+      });
+    }
+
+    const result = await client.callTool({
+      name: "memory_search",
+      arguments: { query: "53035", limit: 3 },
+    });
+
+    expect(
+      [...firstText(result).matchAll(/^Attempt: (\d+)/gm)].map((match) => match[1]),
+    ).toEqual(["12", "11", "10"]);
+  });
+
   it("memory_search rejects an unknown order", async () => {
     const result = await client.callTool({
       name: "memory_search",

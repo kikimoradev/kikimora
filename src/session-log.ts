@@ -1,4 +1,5 @@
 import { createWriteStream, mkdirSync, type WriteStream } from "node:fs";
+import { readdir } from "node:fs/promises";
 import { join } from "node:path";
 import { formatSessionEvent, type SessionEventSink } from "./session-events.js";
 
@@ -20,6 +21,19 @@ function timeStamp(now: Date): string {
 
 function safeName(value: string): string {
   return value.replace(/[^\w.-]+/g, "_");
+}
+
+const DAY_DIR_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+const CLOCK_PREFIX_PATTERN = /^\d{2}-\d{2}-\d{2}$/;
+const CLOCK_PREFIX_LENGTH = 8;
+
+async function entriesOf(dir: string): Promise<string[]> {
+  try {
+    return await readdir(dir);
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === "ENOENT") return [];
+    throw err;
+  }
 }
 
 export interface SessionLogPaths {
@@ -72,6 +86,22 @@ export class SessionLog {
 
   logPathsFor(sessionId: string): string[] {
     return (this.sessionPaths.get(sessionId) ?? []).map((paths) => paths.log);
+  }
+
+  async findLogPaths(sessionId: string): Promise<string[]> {
+    const suffix = `-${safeName(sessionId)}.log`;
+    const isSessionLog = (name: string): boolean =>
+      CLOCK_PREFIX_PATTERN.test(name.slice(0, CLOCK_PREFIX_LENGTH)) &&
+      name.slice(CLOCK_PREFIX_LENGTH) === suffix;
+    const days = (await entriesOf(this.dir)).filter((day) => DAY_DIR_PATTERN.test(day));
+    const found = await Promise.all(
+      days.map(async (day) =>
+        (await entriesOf(join(this.dir, day)))
+          .filter(isSessionLog)
+          .map((name) => join(this.dir, day, name)),
+      ),
+    );
+    return [...new Set([...found.flat(), ...this.logPathsFor(sessionId)])].sort();
   }
 
   pathsFor(sessionId: string): SessionLogPaths | undefined {

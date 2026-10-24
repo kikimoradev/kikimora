@@ -97,6 +97,20 @@ describe("runSession (integration with fake claude)", () => {
     expect(result.durationMs).toBeGreaterThanOrEqual(0);
   }, 15_000);
 
+  it("counts the tool calls of the session", async () => {
+    const plain = await runSession(
+      buildSessionSpec(collector.sink, { childEnv: fakeClaudeEnv("ok") }),
+      new AbortController().signal,
+    );
+    const working = await runSession(
+      buildSessionSpec(collector.sink, { childEnv: fakeClaudeEnv("tool_calls") }),
+      new AbortController().signal,
+    );
+
+    expect(plain.toolUses).toBeUndefined();
+    expect(working).toMatchObject({ ok: true, toolUses: 2 });
+  }, 15_000);
+
   it("passes resultText from the result event", async () => {
     const spec = buildSessionSpec(collector.sink, {
       childEnv: fakeClaudeEnv("ok", {
