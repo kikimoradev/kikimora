@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
+  heaviest,
   MemoryStore,
   toMatchQuery,
   type NewTaskSummaryRecord,
@@ -52,6 +53,59 @@ describe("toMatchQuery", () => {
   it("returns null for empty queries", () => {
     expect(toMatchQuery("")).toBeNull();
     expect(toMatchQuery('   ()"* ')).toBeNull();
+  });
+});
+
+function shuffled<T>(values: T[], random: () => number): T[] {
+  const result = [...values];
+  for (let index = result.length - 1; index > 0; index -= 1) {
+    const other = Math.floor(random() * (index + 1));
+    [result[index], result[other]] = [result[other] as T, result[index] as T];
+  }
+  return result;
+}
+
+function heaviestBySort(weights: Map<number, number>, limit: number): number[] {
+  return [...weights]
+    .sort(([idA, weightA], [idB, weightB]) => weightB - weightA || idB - idA)
+    .slice(0, limit)
+    .map(([id]) => id);
+}
+
+describe("heaviest", () => {
+  it("picks the same entries in the same order as a full sort, ties included", () => {
+    const random = seededRandom(49);
+    for (let round = 0; round < 2000; round += 1) {
+      const levels = 1 + Math.floor(random() * 5);
+      const size = Math.floor(random() * 81);
+      const ids = shuffled(
+        Array.from({ length: size }, (_, index) => index + 1),
+        random,
+      );
+      const weights = new Map(
+        ids.map((id) => [id, Math.floor(random() * levels)] as const),
+      );
+      const limit = 1 + Math.floor(random() * 100);
+
+      expect(heaviest(weights, limit)).toEqual(heaviestBySort(weights, limit));
+    }
+  });
+
+  it("keeps the newest entries when every entry has the same weight", () => {
+    const ascending = new Map(
+      Array.from({ length: 20_000 }, (_, index) => [index + 1, 1] as const),
+    );
+    const descending = new Map([...ascending].reverse());
+    const newest = Array.from({ length: 50 }, (_, index) => 20_000 - index);
+
+    expect(heaviest(ascending, 50)).toEqual(newest);
+    expect(heaviest(descending, 50)).toEqual(newest);
+    expect(heaviest(ascending, 1)).toEqual([20_000]);
+  });
+
+  it("returns nothing for an empty map or a limit of zero", () => {
+    expect(heaviest(new Map(), 10)).toEqual([]);
+    expect(heaviest(new Map([[1, 1]]), 0)).toEqual([]);
   });
 });
 
@@ -259,6 +313,28 @@ describe("MemoryStore", () => {
     expect(store.latestMatches("Blog blog relevance", 1).map((r) => r.id)).toEqual([
       newer.id,
     ]);
+  });
+
+  it("latestMatches keeps the latest among entries of equal weight whatever the word order", () => {
+    store.add(
+      buildRecord({
+        taskId: "redmine-1",
+        title: "Note",
+        headline: "Note",
+        summary: "beta",
+      }),
+    );
+    const newer = store.add(
+      buildRecord({
+        taskId: "redmine-2",
+        title: "Note",
+        headline: "Note",
+        summary: "alpha",
+      }),
+    );
+
+    expect(store.latestMatches("alpha beta", 1).map((r) => r.id)).toEqual([newer.id]);
+    expect(store.latestMatches("beta alpha", 1).map((r) => r.id)).toEqual([newer.id]);
   });
 
   it("latestMatches weighs a query word by its rarity, so common words do not push out the topic", () => {

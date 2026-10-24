@@ -120,14 +120,30 @@ function outweighs(
   return weightA > weightB || (weightA === weightB && idA > idB);
 }
 
-function heaviest(weights: Map<number, number>, limit: number): number[] {
+function insertionPoint(top: WeightedEntry[], entry: WeightedEntry): number {
+  let low = 0;
+  let high = top.length;
+  while (low < high) {
+    const middle = (low + high) >>> 1;
+    const other = top[middle];
+    if (other === undefined || outweighs(entry, other)) {
+      high = middle;
+    } else {
+      low = middle + 1;
+    }
+  }
+  return low;
+}
+
+export function heaviest(weights: Map<number, number>, limit: number): number[] {
   const top: WeightedEntry[] = [];
   for (const entry of weights) {
-    const at = top.findLastIndex((other) => !outweighs(entry, other)) + 1;
-    if (at < limit) {
-      top.splice(at, 0, entry);
-      top.length = Math.min(top.length, limit);
+    if (top.length >= limit) {
+      const lightest = top.at(-1);
+      if (lightest === undefined || !outweighs(entry, lightest)) continue;
+      top.pop();
     }
+    top.splice(insertionPoint(top, entry), 0, entry);
   }
   return top.map(([id]) => id);
 }
