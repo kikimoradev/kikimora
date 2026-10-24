@@ -111,6 +111,27 @@ export function toMatchQuery(query: string): string | null {
   return phrases.length === 0 ? null : phrases.join(" OR ");
 }
 
+type WeightedEntry = [id: number, weight: number];
+
+function outweighs(
+  [idA, weightA]: WeightedEntry,
+  [idB, weightB]: WeightedEntry,
+): boolean {
+  return weightA > weightB || (weightA === weightB && idA > idB);
+}
+
+function heaviest(weights: Map<number, number>, limit: number): number[] {
+  const top: WeightedEntry[] = [];
+  for (const entry of weights) {
+    const at = top.findLastIndex((other) => !outweighs(entry, other)) + 1;
+    if (at < limit) {
+      top.splice(at, 0, entry);
+      top.length = Math.min(top.length, limit);
+    }
+  }
+  return top.map(([id]) => id);
+}
+
 export interface MemoryStoreOptions {
   readOnly?: boolean;
 }
@@ -200,18 +221,22 @@ export class MemoryStore {
       this.db.prepare("SELECT count(*) AS entries FROM summaries").get()?.entries,
     );
     const matching = this.db.prepare(
-      "SELECT rowid AS id FROM summaries_fts WHERE summaries_fts MATCH ?",
+      "SELECT rowid FROM summaries_fts WHERE summaries_fts MATCH ?",
     );
+    matching.setReturnArrays(true);
+    const idsMatching = (match: string): number[] =>
+      matching.all(match).map((row) => Number(row[0]));
     const weights = new Map<number, number>();
+    const addWeight = (ids: number[], weight: number): void => {
+      for (const id of ids) weights.set(id, (weights.get(id) ?? 0) + weight);
+    };
     for (const phrase of phrases) {
-      const ids = matching.all(phrase).map((row) => Number(row.id));
+      const ids = idsMatching(phrase);
       const rarity = Math.log(1 + entries / ids.length);
-      for (const id of ids) weights.set(id, (weights.get(id) ?? 0) + rarity);
+      addWeight(ids, rarity);
+      addWeight(idsMatching(`{task_id title} : ${phrase}`), rarity);
     }
-    const picked = [...weights]
-      .sort(([idA, weightA], [idB, weightB]) => weightB - weightA || idB - idA)
-      .slice(0, limit)
-      .map(([id]) => id);
+    const picked = heaviest(weights, limit);
     if (picked.length === 0) return [];
     const rows = this.db
       .prepare(
