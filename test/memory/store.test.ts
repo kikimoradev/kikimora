@@ -24,6 +24,14 @@ function buildRecord(
   };
 }
 
+function seededRandom(seed: number): () => number {
+  let state = seed;
+  return () => {
+    state = (state * 48271) % 2147483647;
+    return state / 2147483647;
+  };
+}
+
 describe("toMatchQuery", () => {
   it("joins tokens into an alternative of quoted phrases", () => {
     expect(toMatchQuery("connection error redmine")).toBe(
@@ -298,6 +306,132 @@ describe("MemoryStore", () => {
       12, 11, 10,
     ]);
     expect(store.latestMatches("70000", 3).map((r) => r.attempt)).toEqual([12, 11, 10]);
+  });
+
+  it("latestMatches keeps the attempts at an issue when its number comes with common words", () => {
+    const random = seededRandom(17);
+    const frequencies: [string, number][] = [
+      ["the", 0.97],
+      ["we", 0.75],
+      ["for", 0.7],
+      ["fix", 0.4],
+      ["test", 0.45],
+      ["how", 0.05],
+      ["did", 0.08],
+      ["review", 0.3],
+      ["code", 0.35],
+      ["what", 0.1],
+      ["happened", 0.02],
+      ["in", 0.95],
+      ["of", 0.95],
+      ["issue", 0.4],
+    ];
+    const vocabulary = Array.from({ length: 2000 }, (_, i) => `v${i.toString(36)}`);
+    const summaryWith = (extra: string): string => {
+      const words = frequencies.filter(([, p]) => random() < p).map(([word]) => word);
+      for (let i = 0; i < 100; i += 1) {
+        words.push(vocabulary[Math.floor(random() ** 2 * vocabulary.length)] ?? "");
+      }
+      return `${words.join(" ")} ${extra}`;
+    };
+    for (let i = 0; i < 600; i += 1) {
+      const issue = i >= 300 && i % 30 === 0 ? "53035" : String(60000 + i);
+      store.add(
+        buildRecord({
+          taskId: `redmine-${issue}-cr`,
+          title: `Code review ${issue}`,
+          headline: "Reviewed",
+          summary: summaryWith(issue === "53035" ? issue : ""),
+        }),
+      );
+    }
+
+    for (const query of [
+      "how did we fix the test for 53035",
+      "what happened in the code review of issue 53035",
+    ]) {
+      const matches = store.latestMatches(query, 5);
+      expect(matches.map((r) => r.taskId)).toEqual(Array(5).fill("redmine-53035-cr"));
+      expect(matches.map((r) => r.id)).toEqual(
+        matches.map((r) => r.id).toSorted((a, b) => b - a),
+      );
+    }
+  });
+
+  it("latestMatches keeps the attempts at an issue when half of memory shares the other query words", () => {
+    const chores = [
+      "We checked the diff and ran the tests before pushing the branch.",
+      "The review found a missing null check in the handler; we fixed it.",
+      "Updated the migration and the seed data for the new column.",
+    ];
+    for (let i = 1; i <= 100; i += 1) {
+      store.add(
+        buildRecord({
+          taskId: `redmine-${String(i)}`,
+          title: `Task ${String(i)}`,
+          summary: `How did we fix the test? ${chores[i % chores.length] ?? ""}`,
+        }),
+      );
+    }
+    for (let attempt = 1; attempt <= 15; attempt += 1) {
+      store.add(
+        buildRecord({
+          taskId: "redmine-53035-cr",
+          attempt,
+          title: "Code review 53035",
+          summary: `Code review of issue 53035. ${attempt <= 5 ? "We could not fix the failing test yet." : "Waiting for the reviewer."}`,
+        }),
+      );
+    }
+    for (let i = 101; i <= 200; i += 1) {
+      store.add(
+        buildRecord({
+          taskId: `redmine-${String(i)}`,
+          title: `Task ${String(i)}`,
+          summary: `Code review done. ${chores[i % chores.length] ?? ""}`,
+        }),
+      );
+    }
+
+    expect(
+      store.latestMatches("how did we fix the test for 53035", 3).map((r) => r.attempt),
+    ).toEqual([5, 4, 3]);
+    expect(
+      store.latestMatches("how did we fix the test for 53035", 5).map((r) => r.attempt),
+    ).toEqual([5, 4, 3, 2, 1]);
+  });
+
+  it("latestMatches counts a word found in the task id or the title once more", () => {
+    const inTaskId = store.add(
+      buildRecord({
+        taskId: "redmine-53035-cr",
+        title: "Code review",
+        summary: "Reviewed.",
+      }),
+    );
+    const inTitle = store.add(
+      buildRecord({
+        taskId: "redmine-9-cr",
+        title: "Backport of 53035",
+        summary: "Done.",
+      }),
+    );
+    store.add(
+      buildRecord({
+        taskId: "redmine-10",
+        title: "Docs",
+        headline: "Linked 53035",
+        summary: "Done.",
+      }),
+    );
+    store.add(
+      buildRecord({ taskId: "redmine-11", title: "Docs", summary: "Mentions 53035." }),
+    );
+
+    expect(store.latestMatches("53035", 2).map((r) => r.id)).toEqual([
+      inTitle.id,
+      inTaskId.id,
+    ]);
   });
 
   it("latestMatches returns nothing for a query without words", () => {

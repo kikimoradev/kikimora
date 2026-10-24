@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- `memory_search` lost the attempts at an issue when the query mixed the issue number with several common words, such as "how did we fix the test for 53035": the common words together outweighed the one rare number, so entries that shared only them came first, and in a memory where many entries share such a question none of the attempts came back. A query word now counts twice for an entry whose task id or title contains it, so the attempts at the issue come back newest first, ahead of other entries that only mention its number; plain-word queries such as "how did we fix the blog search" still find the entry about the topic, and `order: "rank"` is unchanged.
+
 ## [0.16.1] - 2026-10-24
 
 ### Fixed

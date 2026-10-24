@@ -35,7 +35,8 @@ export function createMemoryMcpServer(reader: MemoryReader): McpServer {
         "Full-text search over long-term memory: summaries of previously " +
         "completed tasks (decisions, dead ends, pitfalls). Picks the entries " +
         "that contain the most query words, a rare word counting more than " +
-        "a common one and the latest entry winning among equals, and lists " +
+        "a common one, a word in the task id or title counting twice and " +
+        "the latest entry winning among equals, and lists " +
         "them newest first; pass order rank to pick and list them by " +
         "relevance instead.",
       inputSchema: {
@@ -54,7 +55,7 @@ export function createMemoryMcpServer(reader: MemoryReader): McpServer {
           .enum(MEMORY_ORDERS)
           .optional()
           .describe(
-            "newest: the entries with the most query words, rare words counting more, newest first (default); rank: best match first",
+            "newest: the entries with the most query words, rare words and words in the task id or title counting more, newest first (default); rank: best match first",
           ),
       },
     },
