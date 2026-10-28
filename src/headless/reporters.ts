@@ -69,7 +69,12 @@ function sessionSink(
           level: "warn",
           agent,
           event: "session.killed",
-          fields: { reason: event.reason },
+          fields: compactFields({
+            reason: event.reason,
+            sessionId: event.sessionId,
+            taskId: event.taskId,
+            cycle: event.cycle,
+          }),
         });
         return;
       case "text":

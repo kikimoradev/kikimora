@@ -204,6 +204,33 @@ describe("runSession (integration with fake claude)", () => {
     expect(result.costUsd).toBeUndefined();
   }, 15_000);
 
+  it("names the session and the task in the killing event of a session killed after init", async () => {
+    const spec = buildSessionSpec(collector.sink, {
+      meta: { agent: "executor", taskId: "ci-42" },
+      childEnv: fakeClaudeEnv("hang_after_init", { FAKE_CLAUDE_SESSION_ID: "sess-late" }),
+      sessionTimeoutMs: 2_000,
+    });
+    await runSession(spec, new AbortController().signal);
+
+    const killing = collector.events.filter((event) => event.type === "killing");
+    expect(killing).toStrictEqual([
+      { type: "killing", reason: "timeout", sessionId: "sess-late", taskId: "ci-42" },
+    ]);
+  }, 15_000);
+
+  it("names only the cycle in the killing event of a session killed before init", async () => {
+    const spec = buildSessionSpec(collector.sink, {
+      meta: { agent: "monitor", cycle: 7 },
+      childEnv: fakeClaudeEnv("hang"),
+      sessionTimeoutMs: 200,
+    });
+    await runSession(spec, new AbortController().signal);
+
+    const killing = collector.events.filter((event) => event.type === "killing");
+    expect(killing).toStrictEqual([{ type: "killing", reason: "timeout", cycle: 7 }]);
+    expect(killing[0]).not.toHaveProperty("sessionId");
+  }, 15_000);
+
   it("resumes the given session with --resume", async () => {
     const argsOut = join(dir, "args.json");
     const spec = buildSessionSpec(collector.sink, {

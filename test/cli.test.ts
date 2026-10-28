@@ -172,6 +172,25 @@ function indexOfEvent(
 const executorSessionStarted = (event: LogEvent): boolean =>
   event.event === "session.init" && event.agent === "executor";
 
+function expectExecutorKilled(events: LogEvent[], taskId: string, reason: string): void {
+  const init = events.find(executorSessionStarted);
+  expect(init).toMatchObject({ taskId, sessionId: expect.any(String) as unknown });
+  const killed = events.filter(
+    (event) => event.event === "session.killed" && event.agent === "executor",
+  );
+  expect(killed).toEqual([
+    {
+      ts: expect.any(String) as unknown,
+      level: "warn",
+      agent: "executor",
+      event: "session.killed",
+      reason,
+      sessionId: init?.sessionId,
+      taskId,
+    },
+  ]);
+}
+
 function drainProjectEnv(
   taskId: string,
   extra: NodeJS.ProcessEnv = {},
@@ -805,13 +824,7 @@ describe("CLI start (smoke E2E)", () => {
           timeoutMs: 500,
         }),
       );
-      expect(events).toContainEqual(
-        expect.objectContaining({
-          agent: "executor",
-          event: "session.killed",
-          reason: "abort",
-        }),
-      );
+      expectExecutorKilled(events, "drain-2", "abort");
       expect(events).not.toContainEqual(
         expect.objectContaining({ event: "task.finished", taskId: "drain-2" }),
       );
@@ -898,13 +911,7 @@ describe("CLI start (smoke E2E)", () => {
       expect(events).not.toContainEqual(
         expect.objectContaining({ event: "worker.draining" }),
       );
-      expect(events).toContainEqual(
-        expect.objectContaining({
-          agent: "executor",
-          event: "session.killed",
-          reason: "abort",
-        }),
-      );
+      expectExecutorKilled(events, "ungraced-1", "abort");
       expect(events.at(-1)).toEqual({
         ts: expect.any(String) as unknown,
         level: "info",
@@ -935,13 +942,7 @@ describe("CLI start (smoke E2E)", () => {
 
       expect(await worker.exited).toBe(0);
       const events = await worker.events();
-      expect(events).toContainEqual(
-        expect.objectContaining({
-          agent: "executor",
-          event: "session.killed",
-          reason: "abort",
-        }),
-      );
+      expectExecutorKilled(events, "graced-2", "abort");
       expect(events.at(-1)).toEqual({
         ts: expect.any(String) as unknown,
         level: "info",
@@ -949,6 +950,34 @@ describe("CLI start (smoke E2E)", () => {
         signal: "SIGTERM",
         drained: true,
         forced: true,
+      });
+    } finally {
+      await stopWorker(worker);
+    }
+  }, 40_000);
+
+  it("a session timeout names the killed executor session and its task", async () => {
+    await seedProject(dir, {
+      settings: {
+        monitor: { model: "haiku", intervalMinutes: 1 },
+        executor: { model: "opus", sessionTimeoutMs: 1_000, maxTaskAttempts: 1 },
+        summarizer: { model: "sonnet" },
+      },
+    });
+    const env = drainProjectEnv("timed-1", { FAKE_CLAUDE_DELAY_MS_OPUS: "20000" });
+    const worker = spawnJsonWorker(dir, env);
+
+    try {
+      const finished = await worker.waitFor(
+        (event) => event.event === "task.finished" && event.taskId === "timed-1",
+      );
+      const events = await worker.events();
+      expectExecutorKilled(events, "timed-1", "timeout");
+      const init = events.find(executorSessionStarted);
+      expect(finished).toMatchObject({
+        ok: false,
+        failureReason: "timeout",
+        sessionId: init?.sessionId,
       });
     } finally {
       await stopWorker(worker);
