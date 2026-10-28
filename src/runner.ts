@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { createInterface } from "node:readline";
 import { leadsOwnProcessGroup, terminateProcessTree } from "./process-tree.js";
-import type { SessionEventSink } from "./session-events.js";
+import type { SessionEvent, SessionEventSink } from "./session-events.js";
 import {
   LAUNCHER_REFUSED_EXIT_CODE,
   launcherFailureReason,
@@ -104,7 +104,7 @@ export async function runSession(
   const kill = (reason: KillReason): void => {
     if (killState.termination !== null || hasExited(child)) return;
     killState.reason = reason;
-    spec.events({ type: "killing", reason });
+    spec.events(killingEvent(reason, indexed.sessionId, spec.meta));
     killState.termination = terminateProcessTree(child, KILL_GRACE_MS);
   };
 
@@ -215,6 +215,18 @@ function announceSpawn(
   if (pid === undefined) return;
   const seq = spec.placement.lease.spawned(pid);
   spec.events({ type: "spawned", pid, ...placed, seq });
+}
+
+function killingEvent(
+  reason: KillReason,
+  sessionId: string | null,
+  meta: SessionMeta,
+): SessionEvent {
+  const event: Extract<SessionEvent, { type: "killing" }> = { type: "killing", reason };
+  if (sessionId !== null) event.sessionId = sessionId;
+  if (meta.taskId !== undefined) event.taskId = meta.taskId;
+  if (meta.cycle !== undefined) event.cycle = meta.cycle;
+  return event;
 }
 
 function classifyFailure(

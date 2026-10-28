@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- `session.killed` in the headless log now names the session it stopped: `sessionId` once Claude Code reported `init`, and the `taskId` (executor, summarizer) or `cycle` (monitor) of the session, the same ids as its `session.init`, so with sessions running in parallel the log tells which session a timeout, a drain deadline or a signal killed and which task it lost. Unknown ids are left out, never `null`.
+
 ## [0.16.3] - 2026-10-24
 
 ### Fixed

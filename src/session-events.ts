@@ -25,7 +25,13 @@ export type SessionEvent =
   | { type: "stream"; event: Record<string, unknown> }
   | { type: "raw"; line: string }
   | { type: "stderr"; line: string }
-  | { type: "killing"; reason: "timeout" | "abort" }
+  | {
+      type: "killing";
+      reason: "timeout" | "abort";
+      sessionId?: string | undefined;
+      taskId?: string | undefined;
+      cycle?: number | undefined;
+    }
   | { type: "procError"; message: string };
 
 export type SessionEventSink = (event: SessionEvent) => void;

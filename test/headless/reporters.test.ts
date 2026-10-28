@@ -398,6 +398,33 @@ describe("createHeadlessReporters", () => {
     ]);
   });
 
+  it("logs the ids of the killed session when the event carries them", () => {
+    const { events, executor, monitor } = collect();
+
+    executor.session({
+      type: "killing",
+      reason: "abort",
+      sessionId: "s-2",
+      taskId: "ci-9",
+    });
+    monitor.session({ type: "killing", reason: "timeout", sessionId: "s-3", cycle: 4 });
+
+    expect(events).toStrictEqual([
+      {
+        level: "warn",
+        agent: "executor",
+        event: "session.killed",
+        fields: { reason: "abort", sessionId: "s-2", taskId: "ci-9" },
+      },
+      {
+        level: "warn",
+        agent: "monitor",
+        event: "session.killed",
+        fields: { reason: "timeout", sessionId: "s-3", cycle: 4 },
+      },
+    ]);
+  });
+
   it("carries taskId and cycle into session.init when the session has them", () => {
     const { events, executor, monitor } = collect();
 
