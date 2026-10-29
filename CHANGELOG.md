@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.18.0] - 2026-10-29
+
 ### Added
 
 - The Docker image now ships the OpenSSH client (`ssh`, `scp`, `ssh-keygen`) and `ps` from procps, in both the default and the `-browser` variant, so an agent can use git over SSH and inspect its processes without installing anything, and the `ssh-keygen` step of the credentials setup works in the container as documented. The image carries no SSH server.
@@ -337,7 +339,8 @@ Initial release.
 - Non-interactive `kikimora init` for provisioning, plus a first-run wizard in the terminal.
 - Reference `Dockerfile` and `docker-compose.yml`.
 
-[Unreleased]: https://github.com/kikimoradev/kikimora/compare/v0.17.0...HEAD
+[Unreleased]: https://github.com/kikimoradev/kikimora/compare/v0.18.0...HEAD
+[0.18.0]: https://github.com/kikimoradev/kikimora/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/kikimoradev/kikimora/compare/v0.16.3...v0.17.0
 [0.16.3]: https://github.com/kikimoradev/kikimora/compare/v0.16.2...v0.16.3
 [0.16.2]: https://github.com/kikimoradev/kikimora/compare/v0.16.1...v0.16.2
