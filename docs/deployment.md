@@ -370,7 +370,7 @@ docker compose exec kikimora kikimora version   # the claude line shows the vers
 ### What the image contains
 
 - Node, Python 3 with `pip` and `venv`, and the Docker CLI with the compose and buildx plugins;
-- a developer baseline: `git`, `gh`, `jq`, `ripgrep`, `make`, `build-essential`, `curl`.
+- a developer baseline: `git`, `gh`, `jq`, `ripgrep`, `make`, `build-essential`, `curl`, the OpenSSH client (`ssh`, `scp`, `ssh-keygen`) and `ps` from procps.
 
 For other runtimes, databases or services, the agent starts its own containers through Docker. Adding a toolchain does not require rebuilding the image.
 
