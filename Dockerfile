@@ -31,6 +31,8 @@ RUN apt-get update \
     python3-venv \
     gh \
     jq \
+    openssh-client \
+    procps \
     ripgrep \
     make \
     build-essential \

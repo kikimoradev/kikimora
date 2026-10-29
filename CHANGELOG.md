@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- The Docker image now ships the OpenSSH client (`ssh`, `scp`, `ssh-keygen`) and `ps` from procps, in both the default and the `-browser` variant, so an agent can use git over SSH and inspect its processes without installing anything, and the `ssh-keygen` step of the credentials setup works in the container as documented. The image carries no SSH server.
+
 ## [0.17.0] - 2026-10-28
 
 ### Added
