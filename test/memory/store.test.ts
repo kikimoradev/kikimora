@@ -1,4 +1,6 @@
+import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   heaviest,
@@ -559,5 +561,117 @@ describe("MemoryStore", () => {
     expect(() =>
       MemoryStore.open(join(dir, "missing", "memory.db"), { readOnly: true }),
     ).toThrow();
+  });
+
+  it("keeps a handoff to a human with the record and leaves it out of an unmarked one", () => {
+    const marked = store.add(
+      buildRecord({ handedOff: true, handoffReason: "Needs the owner's approval" }),
+    );
+    const plain = store.add(buildRecord({ attempt: 2 }));
+
+    const [first, second] = store.get("redmine-1");
+    expect(first).toEqual(marked);
+    expect(first).toMatchObject({
+      handedOff: true,
+      handoffReason: "Needs the owner's approval",
+    });
+    expect(second).toEqual(plain);
+    expect(second).not.toHaveProperty("handedOff");
+    expect(second).not.toHaveProperty("handoffReason");
+    expect(store.recent(1)[0]).toEqual(plain);
+    expect(store.search("approval")).toEqual([]);
+    expect(store.search("export", 10, { order: "newest" })).toEqual([plain, marked]);
+    expect(JSON.parse(JSON.stringify(store.latestMatches("export")))).toEqual(
+      JSON.parse(JSON.stringify([plain, marked])),
+    );
+  });
+});
+
+const PREVIOUS_SCHEMA = `
+CREATE TABLE summaries (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  task_id TEXT NOT NULL,
+  attempt INTEGER NOT NULL,
+  ok INTEGER NOT NULL,
+  title TEXT NOT NULL,
+  headline TEXT NOT NULL,
+  summary TEXT NOT NULL,
+  error TEXT,
+  session_id TEXT,
+  created_at TEXT NOT NULL
+);
+CREATE INDEX summaries_task_id ON summaries (task_id);
+CREATE VIRTUAL TABLE summaries_fts USING fts5(
+  task_id, title, headline, summary,
+  content='summaries', content_rowid='id'
+);
+INSERT INTO summaries (task_id, attempt, ok, title, headline, summary, error, session_id, created_at)
+  VALUES ('old-1', 1, 1, 'Old task', 'Old headline', 'Written before handoffs.', NULL, 's-1', '2026-07-01T10:00:00.000Z');
+INSERT INTO summaries_fts (rowid, task_id, title, headline, summary)
+  VALUES (1, 'old-1', 'Old task', 'Old headline', 'Written before handoffs.');
+`;
+
+describe("MemoryStore on a database of an earlier version", () => {
+  let dir: string;
+  let dbPath: string;
+
+  beforeEach(async () => {
+    dir = await createTempDir();
+    await mkdir(join(dir, "data"));
+    dbPath = join(dir, "data", "memory.db");
+    const db = new DatabaseSync(dbPath);
+    db.exec(PREVIOUS_SCHEMA);
+    db.close();
+  });
+
+  afterEach(() => removeTempDir(dir));
+
+  const columns = (): string[] => {
+    const db = new DatabaseSync(dbPath, { readOnly: true });
+    try {
+      return db
+        .prepare("PRAGMA table_info(summaries)")
+        .all()
+        .map((row) => String(row.name));
+    } finally {
+      db.close();
+    }
+  };
+
+  it("a read-only reader reads the old entries without the handoff columns", () => {
+    const reader = MemoryStore.open(dbPath, { readOnly: true });
+    try {
+      const [old] = reader.get("old-1");
+      expect(old).toMatchObject({ taskId: "old-1", headline: "Old headline" });
+      expect(old).not.toHaveProperty("handedOff");
+    } finally {
+      reader.close();
+    }
+    expect(columns()).not.toContain("handed_off");
+  });
+
+  it("adds the handoff columns once, keeps the old entries unmarked and stores new marks", () => {
+    const store = MemoryStore.open(dbPath);
+    try {
+      expect(columns()).toEqual(expect.arrayContaining(["handed_off", "handoff_reason"]));
+      const [old] = store.get("old-1");
+      expect(old).toMatchObject({ taskId: "old-1", ok: true });
+      expect(old).not.toHaveProperty("handedOff");
+      store.add(buildRecord({ taskId: "new-1", handedOff: true, handoffReason: "why" }));
+    } finally {
+      store.close();
+    }
+
+    const reopened = MemoryStore.open(dbPath);
+    try {
+      expect(columns().filter((name) => name === "handed_off")).toHaveLength(1);
+      expect(reopened.get("new-1")[0]).toMatchObject({
+        handedOff: true,
+        handoffReason: "why",
+      });
+      expect(reopened.search("handoffs")).toHaveLength(1);
+    } finally {
+      reopened.close();
+    }
   });
 });

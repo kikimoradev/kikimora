@@ -4,6 +4,12 @@ import { createContextFileAccess } from "./context-file.js";
 import type { AgentController } from "./control.js";
 import type { LoopGates } from "./gates.js";
 import { writeMcpConfig } from "./mcp-config.js";
+import {
+  clearHandoffMark,
+  handoffFields,
+  readHandoffMark,
+  type HandoffTarget,
+} from "./memory/handoff.js";
 import type { TaskSummarizer } from "./memory/summarizer.js";
 import { composePrompt } from "./prompt-compose.js";
 import { runSession } from "./runner.js";
@@ -15,6 +21,7 @@ import type {
   SessionFailureReason,
   SessionResult,
   Task,
+  TaskHandoff,
   TaskResume,
   WorkerConfig,
 } from "./types.js";
@@ -167,6 +174,10 @@ export async function runExecutorLoop(
       if (!task) continue;
 
       const start = Date.now();
+      const handoffTarget: HandoffTarget = { taskId: task.id, file: config.handoffFile };
+      const settleHandoff = (): Promise<void> =>
+        clearHandoffMark(config.handoffFile).catch(() => undefined);
+      let handoff: TaskHandoff | undefined;
       const sessionInputs = Promise.all([
         readFile(executor.promptPath, "utf8"),
         readFile(executor.systemPromptPath, "utf8"),
@@ -177,8 +188,10 @@ export async function runExecutorLoop(
           selected: executor.mcpServers,
           browser: config.browser,
           memoryDbPath: config.memoryDbPath,
+          handoff: handoffTarget,
           playwrightOutputDir: config.playwrightOutputDir,
         }),
+        task.resume === undefined ? settleHandoff() : undefined,
       ]);
       await sessionInputs.catch(() => undefined);
       if (aborted()) break;
@@ -216,9 +229,12 @@ export async function runExecutorLoop(
           signal,
         );
         if (aborted()) break;
+        handoff = await readHandoffMark(handoffTarget);
+        const marked = handoffFields(handoff);
 
         if (task.resume !== undefined && result.failureReason === "resumeFailed") {
           await store.forgetResume(task.id, "session could not be resumed");
+          await settleHandoff();
           reporter.taskFinished({
             taskId: task.id,
             title: task.title,
@@ -228,6 +244,7 @@ export async function runExecutorLoop(
             failureReason: result.failureReason,
             willRetry: true,
             sessionId: result.sessionId,
+            ...marked,
           });
           await summarizer
             .summarize(
@@ -238,7 +255,7 @@ export async function runExecutorLoop(
                 sessionId: task.resume.sessionId,
                 error: "usage limit reached — session could not be resumed",
               },
-              { willRetry: true, lease },
+              { willRetry: true, lease, handoff },
               signal,
             )
             .catch(() => undefined);
@@ -247,7 +264,8 @@ export async function runExecutorLoop(
 
         const costUsd = attemptCostUsd(result, task.resume);
         if (result.ok) {
-          await store.complete(task.id);
+          await store.complete(task.id, handoff);
+          await settleHandoff();
           reporter.taskFinished({
             taskId: task.id,
             title: task.title,
@@ -256,9 +274,10 @@ export async function runExecutorLoop(
             costUsd,
             numTurns: result.numTurns,
             sessionId: result.sessionId,
+            ...marked,
           });
           await summarizer
-            .summarize(task, result, { willRetry: false, lease }, signal)
+            .summarize(task, result, { willRetry: false, lease, handoff }, signal)
             .catch(() => undefined);
         } else if (result.failureReason === "launcherRefused") {
           await handBack(task, result, "session launcher refused the session");
@@ -271,6 +290,7 @@ export async function runExecutorLoop(
             error: "session launcher refused the session, task requeued",
             failureReason: result.failureReason,
             willRetry: true,
+            ...marked,
           });
           backoff = {
             task,
@@ -293,6 +313,7 @@ export async function runExecutorLoop(
               failureReason: result.failureReason,
               willRetry: true,
               sessionId: result.sessionId,
+              ...marked,
             });
             continue;
           }
@@ -328,16 +349,18 @@ export async function runExecutorLoop(
               failureReason: result.failureReason,
               willRetry: true,
               sessionId: result.sessionId,
+              ...marked,
             });
             continue;
           }
           const willRetry =
             isTransientFailure(result) && task.attempts < executor.maxTaskAttempts;
           if (willRetry) {
-            await store.requeue(task.id, error);
+            await store.requeue(task.id, error, handoff);
           } else {
-            await store.fail(task.id, error);
+            await store.fail(task.id, error, handoff);
           }
+          await settleHandoff();
           reporter.taskFinished({
             taskId: task.id,
             title: task.title,
@@ -351,9 +374,10 @@ export async function runExecutorLoop(
             attempt: task.attempts,
             maxAttempts: executor.maxTaskAttempts,
             sessionId: result.sessionId,
+            ...marked,
           });
           await summarizer
-            .summarize(task, result, { willRetry, lease }, signal)
+            .summarize(task, result, { willRetry, lease, handoff }, signal)
             .catch(() => undefined);
           if (willRetry && executor.retryDelayMs > 0) {
             backoff = { task, resumeAt: new Date(Date.now() + executor.retryDelayMs) };
@@ -361,13 +385,15 @@ export async function runExecutorLoop(
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
-        await store.fail(task.id, message);
+        await store.fail(task.id, message, handoff);
+        await settleHandoff();
         reporter.taskFinished({
           taskId: task.id,
           title: task.title,
           ok: false,
           durationMs: Date.now() - start,
           error: message,
+          ...handoffFields(handoff),
         });
       }
     } finally {

@@ -14,6 +14,8 @@ export interface TaskSummaryRecord {
   error: string | undefined;
   sessionId: string | undefined;
   createdAt: string;
+  handedOff?: boolean | undefined;
+  handoffReason?: string | undefined;
 }
 
 export type NewTaskSummaryRecord = Omit<TaskSummaryRecord, "id">;
@@ -70,6 +72,35 @@ CREATE VIRTUAL TABLE IF NOT EXISTS summaries_fts USING fts5(
 );
 `;
 
+const HANDOFF_COLUMNS = [
+  ["handed_off", "INTEGER NOT NULL DEFAULT 0"],
+  ["handoff_reason", "TEXT"],
+] as const;
+
+const columnSchema = z.object({ name: z.string() });
+
+function migrate(db: DatabaseSync): void {
+  db.exec("BEGIN");
+  try {
+    db.exec(SCHEMA);
+    const present = new Set(
+      db
+        .prepare("PRAGMA table_info(summaries)")
+        .all()
+        .map((row) => columnSchema.parse(row).name),
+    );
+    for (const [name, definition] of HANDOFF_COLUMNS) {
+      if (!present.has(name)) {
+        db.exec(`ALTER TABLE summaries ADD COLUMN ${name} ${definition}`);
+      }
+    }
+    db.exec("COMMIT");
+  } catch (err) {
+    db.exec("ROLLBACK");
+    throw err;
+  }
+}
+
 const rowSchema = z.object({
   id: z.number().int(),
   task_id: z.string(),
@@ -81,6 +112,8 @@ const rowSchema = z.object({
   error: z.string().nullable(),
   session_id: z.string().nullable(),
   created_at: z.string(),
+  handed_off: z.number().optional(),
+  handoff_reason: z.string().nullable().optional(),
 });
 
 function toRecord(row: unknown): TaskSummaryRecord {
@@ -96,6 +129,9 @@ function toRecord(row: unknown): TaskSummaryRecord {
     error: parsed.error ?? undefined,
     sessionId: parsed.session_id ?? undefined,
     createdAt: parsed.created_at,
+    ...(parsed.handed_off === 1
+      ? { handedOff: true, handoffReason: parsed.handoff_reason ?? undefined }
+      : {}),
   };
 }
 
@@ -163,7 +199,7 @@ export class MemoryStore {
     const db = new DatabaseSync(path, { readOnly });
     if (!readOnly) {
       db.exec("PRAGMA journal_mode = WAL;");
-      db.exec(SCHEMA);
+      migrate(db);
     }
     return new MemoryStore(db);
   }
@@ -178,8 +214,9 @@ export class MemoryStore {
       const inserted = this.db
         .prepare(
           `INSERT INTO summaries
-             (task_id, attempt, ok, title, headline, summary, error, session_id, created_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+             (task_id, attempt, ok, title, headline, summary, error, session_id, created_at,
+              handed_off, handoff_reason)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           record.taskId,
@@ -191,6 +228,8 @@ export class MemoryStore {
           record.error ?? null,
           record.sessionId ?? null,
           record.createdAt,
+          record.handedOff === true ? 1 : 0,
+          record.handedOff === true ? (record.handoffReason ?? null) : null,
         );
       const id = Number(inserted.lastInsertRowid);
       this.db

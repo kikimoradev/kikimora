@@ -29,6 +29,7 @@ import {
 const mocks = vi.hoisted(() => ({
   runSession: vi.fn(),
   readFile: vi.fn(),
+  rm: vi.fn<(path: string) => Promise<void>>(() => Promise.resolve()),
   writeMcpConfig: vi.fn(),
 }));
 
@@ -40,6 +41,7 @@ vi.mock("../src/mcp-config.js", async (importOriginal) => ({
 vi.mock("node:fs/promises", async (importOriginal) => ({
   ...(await importOriginal<typeof import("node:fs/promises")>()),
   readFile: mocks.readFile,
+  rm: mocks.rm,
 }));
 
 const { runExecutorLoop, composeTaskPrompt, isTransientFailure, attemptCostUsd } =
@@ -237,8 +239,8 @@ describe("runExecutorLoop", () => {
     );
     await vi.waitFor(() => expect(complete).toHaveBeenCalledTimes(2));
 
-    expect(complete).toHaveBeenNthCalledWith(1, "a");
-    expect(complete).toHaveBeenNthCalledWith(2, "b");
+    expect(complete).toHaveBeenNthCalledWith(1, "a", undefined);
+    expect(complete).toHaveBeenNthCalledWith(2, "b", undefined);
     expect(maxConcurrent).toBe(1);
     expect(spy.taskStarted).toHaveBeenCalledTimes(2);
     expect(spy.taskFinished).toHaveBeenCalledWith(
@@ -362,6 +364,7 @@ describe("runExecutorLoop", () => {
       selected: ["linter"],
       browser: true,
       memoryDbPath: config.memoryDbPath,
+      handoff: { taskId: "x", file: config.handoffFile },
       playwrightOutputDir: config.playwrightOutputDir,
     });
   });
@@ -386,7 +389,7 @@ describe("runExecutorLoop", () => {
     controller.abort();
     await promise;
 
-    expect(complete).toHaveBeenCalledWith("a");
+    expect(complete).toHaveBeenCalledWith("a", undefined);
     expect(summarizerSpy.summarize).toHaveBeenCalledWith(
       expect.objectContaining({ id: "a", attempts: 1 }),
       result,
@@ -447,8 +450,8 @@ describe("runExecutorLoop", () => {
     controller.abort();
     await promise;
 
-    expect(complete).toHaveBeenNthCalledWith(1, "a");
-    expect(complete).toHaveBeenNthCalledWith(2, "b");
+    expect(complete).toHaveBeenNthCalledWith(1, "a", undefined);
+    expect(complete).toHaveBeenNthCalledWith(2, "b", undefined);
     expect(fail).not.toHaveBeenCalled();
   });
 
@@ -472,7 +475,7 @@ describe("runExecutorLoop", () => {
       controller.signal,
     );
     await vi.waitFor(() =>
-      expect(fail).toHaveBeenCalledWith("bad", "Process exited with code 2"),
+      expect(fail).toHaveBeenCalledWith("bad", "Process exited with code 2", undefined),
     );
     expect(complete).not.toHaveBeenCalled();
     expect(spy.taskFinished).toHaveBeenCalledWith(
@@ -502,9 +505,9 @@ describe("runExecutorLoop", () => {
       buildGates(),
       controller.signal,
     );
-    await vi.waitFor(() => expect(complete).toHaveBeenCalledWith("good"));
+    await vi.waitFor(() => expect(complete).toHaveBeenCalledWith("good", undefined));
 
-    expect(fail).toHaveBeenCalledWith("crash", "boom");
+    expect(fail).toHaveBeenCalledWith("crash", "boom", undefined);
     expect(spy.taskFinished).toHaveBeenCalledWith(
       expect.objectContaining({ taskId: "crash", ok: false, error: "boom" }),
     );
@@ -535,7 +538,7 @@ describe("runExecutorLoop", () => {
 
     enqueue(task("new"));
     waker.notify();
-    await vi.waitFor(() => expect(complete).toHaveBeenCalledWith("new"));
+    await vi.waitFor(() => expect(complete).toHaveBeenCalledWith("new", undefined));
 
     controller.abort();
     await promise;
@@ -620,11 +623,12 @@ describe("runExecutorLoop", () => {
       buildGates(),
       controller.signal,
     );
-    await vi.waitFor(() => expect(complete).toHaveBeenCalledWith("flaky"));
+    await vi.waitFor(() => expect(complete).toHaveBeenCalledWith("flaky", undefined));
 
     expect(requeue).toHaveBeenCalledWith(
       "flaky",
       "Session ended with an error (is_error)",
+      undefined,
     );
     expect(fail).not.toHaveBeenCalled();
     expect(spy.taskFinished).toHaveBeenNthCalledWith(
@@ -665,6 +669,7 @@ describe("runExecutorLoop", () => {
       expect(fail).toHaveBeenCalledWith(
         "stubborn",
         "Session ended with an error (is_error)",
+        undefined,
       ),
     );
 
@@ -698,7 +703,11 @@ describe("runExecutorLoop", () => {
       controller.signal,
     );
     await vi.waitFor(() =>
-      expect(fail).toHaveBeenCalledWith("permanently-bad", "Process exited with code 2"),
+      expect(fail).toHaveBeenCalledWith(
+        "permanently-bad",
+        "Process exited with code 2",
+        undefined,
+      ),
     );
 
     expect(requeue).not.toHaveBeenCalled();
@@ -821,7 +830,7 @@ describe("runExecutorLoop", () => {
 
     await vi.advanceTimersByTimeAsync(1_000);
     expect(takeNext).toHaveBeenCalledTimes(2);
-    expect(complete).toHaveBeenCalledWith("unplaced");
+    expect(complete).toHaveBeenCalledWith("unplaced", undefined);
 
     controller.abort();
     await promise;
@@ -860,11 +869,12 @@ describe("runExecutorLoop", () => {
       buildGates(),
       controller.signal,
     );
-    await vi.waitFor(() => expect(complete).toHaveBeenCalledWith("hungry"));
+    await vi.waitFor(() => expect(complete).toHaveBeenCalledWith("hungry", undefined));
 
     expect(requeue).toHaveBeenCalledWith(
       "hungry",
       "Session killed by the pool memory limit",
+      undefined,
     );
     expect(fail).not.toHaveBeenCalled();
     expect(spy.taskFinished).toHaveBeenNthCalledWith(
@@ -966,7 +976,7 @@ describe("runExecutorLoop", () => {
     await vi.advanceTimersByTimeAsync(1);
     expect(gates.auth.blocked).toBeNull();
     expect(takeNext).toHaveBeenCalledTimes(2);
-    expect(complete).toHaveBeenCalledWith("locked");
+    expect(complete).toHaveBeenCalledWith("locked", undefined);
 
     controller.abort();
     await promise;
@@ -1037,7 +1047,7 @@ describe("runExecutorLoop", () => {
     expect(takeNext).toHaveBeenCalledTimes(1);
 
     await vi.advanceTimersByTimeAsync(33_000);
-    expect(complete).toHaveBeenCalledWith("limited");
+    expect(complete).toHaveBeenCalledWith("limited", undefined);
 
     controller.abort();
     await promise;
@@ -1117,7 +1127,7 @@ describe("runExecutorLoop", () => {
     );
 
     await vi.advanceTimersByTimeAsync(63_000);
-    expect(complete).toHaveBeenCalledWith("limited");
+    expect(complete).toHaveBeenCalledWith("limited", undefined);
 
     const first = mocks.runSession.mock.calls[0]?.[0] as SessionSpec;
     const resumed = mocks.runSession.mock.calls[1]?.[0] as SessionSpec;
@@ -1574,7 +1584,9 @@ describe("runExecutorLoop", () => {
       buildGates(),
       controller.signal,
     );
-    await vi.waitFor(() => expect(requeue).toHaveBeenCalledWith("r", expect.any(String)));
+    await vi.waitFor(() =>
+      expect(requeue).toHaveBeenCalledWith("r", expect.any(String), undefined),
+    );
     controller.abort();
     await promise;
 
@@ -1615,7 +1627,9 @@ describe("runExecutorLoop", () => {
     expect(takeNext).not.toHaveBeenCalled();
 
     control.resume();
-    await vi.waitFor(() => expect(complete).toHaveBeenCalledWith("after-resume"));
+    await vi.waitFor(() =>
+      expect(complete).toHaveBeenCalledWith("after-resume", undefined),
+    );
     expect(takeNext).toHaveBeenCalledTimes(1);
 
     abort.abort();
@@ -1658,7 +1672,7 @@ describe("runExecutorLoop", () => {
     expect(control.state).toBe("pausing");
     finishSession(ok());
 
-    await vi.waitFor(() => expect(complete).toHaveBeenCalledWith("current"));
+    await vi.waitFor(() => expect(complete).toHaveBeenCalledWith("current", undefined));
     await vi.waitFor(() => expect(control.state).toBe("paused"));
     expect(takeNext).toHaveBeenCalledTimes(1);
 
@@ -1704,7 +1718,7 @@ describe("runExecutorLoop", () => {
       admission.gate.grant("executor", ticket);
       await vi.waitFor(() => expect(spy.waiting).toHaveBeenCalled());
 
-      expect(complete).toHaveBeenCalledWith("a");
+      expect(complete).toHaveBeenCalledWith("a", undefined);
       const spec = mocks.runSession.mock.calls[0]?.[0] as SessionSpec;
       expect(spec.placement.pool).toBe("executor");
       expect(spec.placement.lease.ticket).toBe(ticket);
@@ -1966,7 +1980,7 @@ describe("runExecutorLoop under a drain", () => {
     await vi.waitFor(() => expect(summarize).toHaveBeenCalledTimes(1));
     await new Promise((resolvePromise) => setTimeout(resolvePromise, 20));
 
-    expect(complete).toHaveBeenCalledWith("current");
+    expect(complete).toHaveBeenCalledWith("current", undefined);
     expect(executorControl.state).toBe("pausing");
     expect(drainFinished).not.toHaveBeenCalled();
 
@@ -2099,7 +2113,11 @@ describe("runExecutorLoop while a session is being prepared", () => {
       shutdown.signal,
     );
     await vi.waitFor(() =>
-      expect(fail).toHaveBeenCalledWith("claimed", "ENOENT: executor.prompt.md"),
+      expect(fail).toHaveBeenCalledWith(
+        "claimed",
+        "ENOENT: executor.prompt.md",
+        undefined,
+      ),
     );
 
     expect(reporter.taskStarted).toHaveBeenCalledWith(
@@ -2162,5 +2180,273 @@ describe("isTransientFailure", () => {
     for (const failureReason of ["exit", "spawn", "abort"] as const) {
       expect(isTransientFailure({ ok: false, durationMs: 1, failureReason })).toBe(false);
     }
+  });
+});
+
+describe("runExecutorLoop with a handoff to a human", () => {
+  let spy: ExecutorReporterSpy;
+  let summarizerSpy: TaskSummarizerSpy;
+  let files: Map<string, string>;
+  const config = buildConfig();
+  const handoffFile = config.handoffFile;
+  const markedAt = "2026-10-30T12:00:00.000Z";
+
+  const mark = (taskId: string, reason: string): void => {
+    files.set(handoffFile, JSON.stringify({ taskId, reason, markedAt }));
+  };
+
+  const enoent = (): Promise<never> =>
+    Promise.reject(Object.assign(new Error("ENOENT"), { code: "ENOENT" }));
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    spy = createExecutorReporterSpy();
+    summarizerSpy = createTaskSummarizerSpy();
+    files = new Map();
+    mocks.readFile.mockImplementation((path: string) => {
+      if (path === handoffFile) {
+        const content = files.get(path);
+        return content === undefined ? enoent() : Promise.resolve(content);
+      }
+      if (path.endsWith("context.md")) return enoent();
+      return Promise.resolve("identity\n");
+    });
+    mocks.rm.mockImplementation((path: string) => {
+      files.delete(path);
+      return Promise.resolve();
+    });
+    mocks.writeMcpConfig.mockImplementation((dataDir: string, input: { role: string }) =>
+      Promise.resolve(join(dataDir, "mcp", `${input.role}.json`)),
+    );
+  });
+
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  const start = (store: TaskStore, signal: AbortSignal): Promise<void> =>
+    runExecutorLoop(
+      config,
+      store,
+      new Waker(),
+      spy.reporter,
+      summarizerSpy.summarizer,
+      noopController(),
+      buildGates(),
+      signal,
+    );
+
+  it("carries the mark of a successful session into the store, task.finished and the summary, then removes it", async () => {
+    const { store, complete } = fakeStore([task("handoff-1")]);
+    const controller = new AbortController();
+    let markSeenAtStart = true;
+    mocks.runSession.mockImplementation(() => {
+      markSeenAtStart = files.has(handoffFile);
+      mark("handoff-1", "Needs the owner's approval of the budget");
+      return Promise.resolve({ ...ok(), sessionId: "sess-1", costUsd: 0.5, numTurns: 4 });
+    });
+
+    const promise = start(store, controller.signal);
+    await vi.waitFor(() => expect(summarizerSpy.summarize).toHaveBeenCalled());
+    controller.abort();
+    await promise;
+
+    const handoff = { reason: "Needs the owner's approval of the budget", markedAt };
+    expect(markSeenAtStart).toBe(false);
+    expect(mocks.writeMcpConfig).toHaveBeenCalledWith(
+      config.dataDir,
+      expect.objectContaining({ handoff: { taskId: "handoff-1", file: handoffFile } }),
+    );
+    expect(complete).toHaveBeenCalledWith("handoff-1", handoff);
+    expect(spy.taskFinished).toHaveBeenCalledWith({
+      taskId: "handoff-1",
+      title: "Task handoff-1",
+      ok: true,
+      durationMs: 0,
+      costUsd: 0.5,
+      numTurns: 4,
+      sessionId: "sess-1",
+      handedOff: true,
+      handoffReason: handoff.reason,
+    });
+    expect(summarizerSpy.summarize).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "handoff-1" }),
+      expect.anything(),
+      expect.objectContaining({ willRetry: false, handoff }),
+      expect.anything(),
+    );
+    expect(files.has(handoffFile)).toBe(false);
+  });
+
+  it("clears a stale mark before a fresh session, so an unmarked task looks as before", async () => {
+    mark("stale-1", "stale");
+    const { store, complete } = fakeStore([task("stale-1")]);
+    const controller = new AbortController();
+    mocks.runSession.mockResolvedValue({ ...ok(), sessionId: "sess-1" });
+
+    const promise = start(store, controller.signal);
+    await vi.waitFor(() => expect(summarizerSpy.summarize).toHaveBeenCalled());
+    controller.abort();
+    await promise;
+
+    expect(complete).toHaveBeenCalledWith("stale-1", undefined);
+    const outcome = spy.taskFinished.mock.calls[0]?.[0] as object;
+    expect(outcome).not.toHaveProperty("handedOff");
+    expect(outcome).not.toHaveProperty("handoffReason");
+    expect(summarizerSpy.summarize).toHaveBeenCalledWith(
+      expect.anything(),
+      expect.anything(),
+      expect.objectContaining({ handoff: undefined }),
+      expect.anything(),
+    );
+    expect(files.has(handoffFile)).toBe(false);
+  });
+
+  it("a failed session keeps its mark and its retry without one drops it", async () => {
+    const { takeNext, peekNext } = scriptedTakes(
+      [
+        { ...task("handoff-3"), attempts: 1 },
+        { ...task("handoff-3"), attempts: 2 },
+      ],
+      undefined,
+    );
+    const requeue = vi.fn().mockResolvedValue(undefined);
+    const complete = vi.fn().mockResolvedValue(undefined);
+    const store = {
+      takeNext,
+      peekNext,
+      requeue,
+      complete,
+      fail: vi.fn(),
+    } as unknown as TaskStore;
+    const controller = new AbortController();
+    mocks.runSession
+      .mockImplementationOnce(() => {
+        mark("handoff-3", "left for a human");
+        return Promise.resolve(transientFailure());
+      })
+      .mockResolvedValue({ ...ok(), sessionId: "sess-2" });
+
+    const promise = start(store, controller.signal);
+    await vi.waitFor(() => expect(complete).toHaveBeenCalled());
+    controller.abort();
+    await promise;
+
+    expect(requeue).toHaveBeenCalledWith(
+      "handoff-3",
+      "Session ended with an error (is_error)",
+      { reason: "left for a human", markedAt },
+    );
+    expect(spy.taskFinished).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({
+        ok: false,
+        willRetry: true,
+        failureReason: "isError",
+        handedOff: true,
+        handoffReason: "left for a human",
+      }),
+    );
+    expect(complete).toHaveBeenCalledWith("handoff-3", undefined);
+    expect(spy.taskFinished.mock.calls[1]?.[0]).not.toHaveProperty("handedOff");
+    expect(files.has(handoffFile)).toBe(false);
+  });
+
+  it("an exception after a marked session fails the task with its mark", async () => {
+    const { store, fail } = fakeStore([task("crash")]);
+    const controller = new AbortController();
+    mocks.runSession.mockImplementation(() => {
+      mark("crash", "left for a human");
+      return Promise.resolve({ ...ok(), sessionId: "sess-1" });
+    });
+    (store as unknown as { complete: ReturnType<typeof vi.fn> }).complete = vi
+      .fn()
+      .mockRejectedValue(new Error("disk full"));
+
+    const promise = start(store, controller.signal);
+    await vi.waitFor(() => expect(fail).toHaveBeenCalled());
+    controller.abort();
+    await promise;
+
+    expect(fail).toHaveBeenCalledWith("crash", "disk full", {
+      reason: "left for a human",
+      markedAt,
+    });
+    expect(spy.taskFinished).toHaveBeenCalledWith(
+      expect.objectContaining({ ok: false, error: "disk full", handedOff: true }),
+    );
+    expect(files.has(handoffFile)).toBe(false);
+  });
+
+  it("a mark made before a usage limit survives the wait and travels with the resumed result", async () => {
+    vi.useFakeTimers({ now: new Date("2026-10-22T12:33:58.000Z") });
+    const resume = { sessionId: "sess-limited", limitedAt: "2026-10-22T12:33:58.000Z" };
+    const { takeNext, peekNext } = scriptedTakes(
+      [
+        { ...task("limited"), attempts: 1 },
+        { ...task("limited"), attempts: 1, resume },
+      ],
+      undefined,
+    );
+    const suspend = vi.fn().mockResolvedValue(undefined);
+    const complete = vi.fn().mockResolvedValue(undefined);
+    const store = {
+      takeNext,
+      peekNext,
+      suspend,
+      complete,
+      release: vi.fn(),
+      fail: vi.fn(),
+      requeue: vi.fn(),
+    } as unknown as TaskStore;
+    const controller = new AbortController();
+    let markSeenOnResume = false;
+    mocks.runSession
+      .mockImplementationOnce(() => {
+        mark("limited", "Needs the owner's approval of the budget");
+        return Promise.resolve(
+          limitHit({
+            sessionId: "sess-limited",
+            rateLimit: {
+              status: "rejected",
+              resetsAt: Math.floor(Date.now() / 1000) + 2,
+              rateLimitType: "five_hour",
+            },
+          }),
+        );
+      })
+      .mockImplementation(() => {
+        markSeenOnResume = files.has(handoffFile);
+        return Promise.resolve({ ...ok(), sessionId: "sess-limited" });
+      });
+
+    const promise = start(store, controller.signal);
+    await vi.advanceTimersByTimeAsync(1);
+
+    expect(suspend).toHaveBeenCalled();
+    expect(spy.taskFinished).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ ok: false, willRetry: true, handedOff: true }),
+    );
+    expect(files.has(handoffFile)).toBe(true);
+
+    await vi.advanceTimersByTimeAsync(63_000);
+    expect(complete).toHaveBeenCalledWith("limited", {
+      reason: "Needs the owner's approval of the budget",
+      markedAt,
+    });
+    expect(markSeenOnResume).toBe(true);
+    expect(spy.taskFinished).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({
+        ok: true,
+        handedOff: true,
+        handoffReason: "Needs the owner's approval of the budget",
+      }),
+    );
+    expect(files.has(handoffFile)).toBe(false);
+
+    controller.abort();
+    await promise;
   });
 });

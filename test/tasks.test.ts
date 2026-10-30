@@ -278,6 +278,96 @@ describe("TaskStore", () => {
     expect("resume" in (persisted.tasks[0] ?? {})).toBe(false);
   });
 
+  it("complete, fail and requeue record a handoff to a human and drop one the attempt lacks", async () => {
+    const handoff = { reason: "Needs the owner", markedAt: "2026-10-30T12:00:00.000Z" };
+    const store = await TaskStore.open(path);
+    await store.addTasks([newTask("done"), newTask("failed"), newTask("again")]);
+    for (let i = 0; i < 3; i += 1) await store.takeNext();
+
+    await store.complete("done", handoff);
+    await store.fail("failed", "exit 1", handoff);
+    await store.requeue("again", "timeout", handoff);
+
+    const raw = JSON.parse(await readFile(path, "utf8")) as { tasks: unknown[] };
+    for (const task of raw.tasks) {
+      expect(task).toMatchObject({ handedOff: true, handoffReason: "Needs the owner" });
+      expect(task).not.toHaveProperty("markedAt");
+    }
+
+    await store.takeNext();
+    await store.complete("again");
+    const again = store.list().find((task) => task.id === "again");
+    expect(again).toMatchObject({ status: "done" });
+    expect(again).not.toHaveProperty("handedOff");
+    expect(again).not.toHaveProperty("handoffReason");
+  });
+
+  it("release, suspend, forgetResume and cancel keep a handoff, retry clears it", async () => {
+    const handoff = { reason: "left for a human", markedAt: "2026-10-30T12:00:00.000Z" };
+    const resume = { sessionId: "sess", limitedAt: "2026-10-30T12:00:00.000Z" };
+    const store = await TaskStore.open(path);
+    await store.addTasks([newTask("a"), newTask("b")]);
+    await store.takeNext();
+    await store.requeue("a", "timeout", handoff);
+    await store.takeNext();
+    await store.release("a", "launcher refused");
+    await store.takeNext();
+    await store.suspend("a", "usage limit reached", resume);
+    await store.takeNext();
+    await store.forgetResume("a", "session could not be resumed");
+    await store.takeNext();
+    await store.fail("a", "exit 1", handoff);
+
+    expect(store.list().find((task) => task.id === "a")).toMatchObject({
+      status: "failed",
+      handedOff: true,
+      handoffReason: "left for a human",
+    });
+
+    await store.takeNext();
+    await store.requeue("b", "timeout", handoff);
+    await store.cancel("b");
+    expect(store.list().find((task) => task.id === "b")).toMatchObject({
+      status: "cancelled",
+      handedOff: true,
+    });
+
+    await store.retry("a");
+    const retried = store.list().find((task) => task.id === "a");
+    expect(retried).toMatchObject({ status: "pending", attempts: 0 });
+    expect(retried).not.toHaveProperty("handedOff");
+    expect(retried).not.toHaveProperty("handoffReason");
+  });
+
+  it("writes an unmarked task with the same keys as before and loads a marked one", async () => {
+    const store = await TaskStore.open(path);
+    await store.addTasks([newTask("plain")]);
+    await store.takeNext();
+    await store.complete("plain");
+
+    const raw = JSON.parse(await readFile(path, "utf8")) as {
+      tasks: Record<string, unknown>[];
+    };
+    expect(Object.keys(raw.tasks[0] ?? {}).sort()).toEqual([
+      "attempts",
+      "createdAt",
+      "description",
+      "id",
+      "status",
+      "title",
+      "updatedAt",
+    ]);
+
+    await store.addTasks([newTask("marked")]);
+    await store.takeNext();
+    await store.complete("marked", { reason: "why", markedAt: "2026-10-30T12:00:00Z" });
+    const reopened = await TaskStore.open(path);
+    expect(reopened.list().find((task) => task.id === "marked")).toMatchObject({
+      handedOff: true,
+      handoffReason: "why",
+    });
+  });
+
   it("suspend of an unknown id is ignored", async () => {
     const store = await TaskStore.open(path);
     await store.addTasks([newTask("a")]);

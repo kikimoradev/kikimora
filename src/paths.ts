@@ -24,6 +24,7 @@ export interface ProjectPaths {
   dataDir: string;
   tasksFile: string;
   memoryDbFile: string;
+  handoffFile: string;
   mcpDir: string;
   playwrightOutputDir: string;
   logsDir: string;
@@ -45,6 +46,7 @@ export function projectPaths(projectDir: string = process.cwd()): ProjectPaths {
     dataDir,
     tasksFile: join(dataDir, "tasks.json"),
     memoryDbFile: join(dataDir, "memory.db"),
+    handoffFile: join(dataDir, "handoff.json"),
     mcpDir: join(dataDir, MCP_DIR_NAME),
     playwrightOutputDir: join(dataDir, PLAYWRIGHT_DIR_NAME),
     logsDir: join(kikimoraDir, "logs"),

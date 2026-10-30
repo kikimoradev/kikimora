@@ -466,6 +466,7 @@ export function buildConfig(overrides: Partial<WorkerConfig> = {}): WorkerConfig
     contextFilePath: join(process.cwd(), ".kikimora", "prompts", "context.md"),
     tasksFilePath: join(process.cwd(), ".kikimora", "data", "tasks.json"),
     memoryDbPath: join(process.cwd(), ".kikimora", "data", "memory.db"),
+    handoffFile: join(testDataDir, "handoff.json"),
     dataDir: testDataDir,
     playwrightOutputDir: join(testDataDir, "playwright"),
     logsDir: join(process.cwd(), ".kikimora", "logs"),

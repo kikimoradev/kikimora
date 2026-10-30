@@ -8,14 +8,16 @@ import type { SessionEventSink } from "../session-events.js";
 import type { SessionLauncher } from "../session-launcher.js";
 import type { SessionRecorder } from "../sessions/index.js";
 import type { SummaryOutcome } from "../status.js";
-import type { SessionResult, SummarizerConfig, Task } from "../types.js";
+import type { SessionResult, SummarizerConfig, Task, TaskHandoff } from "../types.js";
 import { detectUsageLimit } from "../usage-limit.js";
+import { handoffFields } from "./handoff.js";
 import type { MemoryStore } from "./store.js";
 import { composeSummaryPrompt, parseSummary, SUMMARY_JSON_SCHEMA } from "./summary.js";
 
 export interface TaskOutcomeContext {
   willRetry: boolean;
   lease: AdmissionLease;
+  handoff?: TaskHandoff | undefined;
 }
 
 export interface TaskSummarizer {
@@ -113,6 +115,7 @@ export class SessionSummarizer implements TaskSummarizer {
             result,
             willRetry: outcome.willRetry,
             logPaths,
+            handoff: outcome.handoff,
           }),
           sessionTimeoutMs: summarizer.sessionTimeoutMs,
           streamPartial: this.deps.streamPartial,
@@ -175,6 +178,7 @@ export class SessionSummarizer implements TaskSummarizer {
         error: result.error,
         sessionId,
         createdAt: new Date().toISOString(),
+        ...handoffFields(outcome.handoff),
       });
       finished(true, {
         costUsd: sessionResult.costUsd,
