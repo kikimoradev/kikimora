@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.19.0] - 2026-10-31
+
 ### Added
 
 - An executor session can mark its task as handed off to a human with the new `task_handoff` tool of its memory server (`mcp__memory__task_handoff`), giving a one-line reason. The mark shows as `handedOff: true` and `handoffReason` in `task.finished`, in the task of `kikimora tasks list --json`, in the recent outcomes of `kikimora status --json` and in the task's memory entry (`kikimora memory recent|search --json`, `memory_search`, `memory_get`), also when the session failed or was stopped by the usage limit and resumed later, while other tasks ran; the task's status, `ok` and retries keep their meaning. A task without the mark, and every task, event and memory entry from before, looks as before; the memory database gains two columns on the first start.
@@ -343,7 +345,8 @@ Initial release.
 - Non-interactive `kikimora init` for provisioning, plus a first-run wizard in the terminal.
 - Reference `Dockerfile` and `docker-compose.yml`.
 
-[Unreleased]: https://github.com/kikimoradev/kikimora/compare/v0.18.0...HEAD
+[Unreleased]: https://github.com/kikimoradev/kikimora/compare/v0.19.0...HEAD
+[0.19.0]: https://github.com/kikimoradev/kikimora/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/kikimoradev/kikimora/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/kikimoradev/kikimora/compare/v0.16.3...v0.17.0
 [0.16.3]: https://github.com/kikimoradev/kikimora/compare/v0.16.2...v0.16.3
