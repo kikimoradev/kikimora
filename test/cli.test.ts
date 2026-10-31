@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
@@ -321,7 +321,9 @@ describe("CLI start (smoke E2E)", () => {
         summary: "The executor left the task for the owner.",
       }),
     });
-    const dataDir = join(dir, ".kikimora", "data");
+    // The worker derives its paths from process.cwd(), which resolves symlinks, so
+    // compare against the real path (the macOS temp directory is a symlink).
+    const dataDir = join(await realpath(dir), ".kikimora", "data");
     const memoryDbPath = join(dataDir, "memory.db");
 
     const result = await runCli(dir, env, () =>
