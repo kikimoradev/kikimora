@@ -321,8 +321,6 @@ describe("CLI start (smoke E2E)", () => {
         summary: "The executor left the task for the owner.",
       }),
     });
-    // The worker derives its paths from process.cwd(), which resolves symlinks, so
-    // compare against the real path (the macOS temp directory is a symlink).
     const dataDir = join(await realpath(dir), ".kikimora", "data");
     const memoryDbPath = join(dataDir, "memory.db");
 
