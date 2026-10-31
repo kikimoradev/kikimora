@@ -80,6 +80,25 @@ describe("handoff mark file", () => {
     });
   });
 
+  it("lets parallel marks of one session all succeed, leaving one of them and no temporary file", async () => {
+    const reasons = ["first", "second", "third", "fourth"];
+
+    await Promise.all(
+      reasons.map((reason) => writeHandoffMark({ taskId: "t-1", file }, reason)),
+    );
+
+    const mark = await readHandoffMark({ taskId: "t-1", file });
+    expect(reasons).toContain(mark?.reason);
+    expect(await readdir(join(dir, "data"))).toEqual(["handoff.json"]);
+  });
+
+  it("removes its temporary file when the mark cannot be put in place", async () => {
+    await mkdir(join(file, "occupied"), { recursive: true });
+
+    await expect(writeHandoffMark({ taskId: "t-1", file }, "why")).rejects.toThrow();
+    expect(await readdir(join(dir, "data"))).toEqual(["handoff.json"]);
+  });
+
   it("reads nothing when there is no mark", async () => {
     await expect(readHandoffMark({ taskId: "t-1", file })).resolves.toBeUndefined();
   });

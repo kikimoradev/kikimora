@@ -2378,13 +2378,42 @@ describe("runExecutorLoop with a handoff to a human", () => {
     expect(files.has(handoffFile)).toBe(false);
   });
 
-  it("a mark made before a usage limit survives the wait and travels with the resumed result", async () => {
+  it("a session that throws after marking its task fails it with the mark", async () => {
+    const { store, fail } = fakeStore([task("crash")]);
+    const controller = new AbortController();
+    mocks.runSession.mockImplementation(() => {
+      mark("crash", "left for a human");
+      return Promise.reject(new Error("spawn exploded"));
+    });
+
+    const promise = start(store, controller.signal);
+    await vi.waitFor(() => expect(fail).toHaveBeenCalled());
+    controller.abort();
+    await promise;
+
+    expect(fail).toHaveBeenCalledWith("crash", "spawn exploded", {
+      reason: "left for a human",
+      markedAt,
+    });
+    expect(spy.taskFinished).toHaveBeenCalledWith(
+      expect.objectContaining({
+        ok: false,
+        error: "spawn exploded",
+        handedOff: true,
+        handoffReason: "left for a human",
+      }),
+    );
+    expect(files.has(handoffFile)).toBe(false);
+  });
+
+  it("a mark made before a usage limit is kept on the resume record and travels with the resumed result", async () => {
     vi.useFakeTimers({ now: new Date("2026-10-22T12:33:58.000Z") });
+    const handoff = { reason: "Needs the owner's approval of the budget", markedAt };
     const resume = { sessionId: "sess-limited", limitedAt: "2026-10-22T12:33:58.000Z" };
     const { takeNext, peekNext } = scriptedTakes(
       [
         { ...task("limited"), attempts: 1 },
-        { ...task("limited"), attempts: 1, resume },
+        { ...task("limited"), attempts: 1, resume: { ...resume, handoff } },
       ],
       undefined,
     );
@@ -2400,10 +2429,10 @@ describe("runExecutorLoop with a handoff to a human", () => {
       requeue: vi.fn(),
     } as unknown as TaskStore;
     const controller = new AbortController();
-    let markSeenOnResume = false;
+    let markSeenOnResume = true;
     mocks.runSession
       .mockImplementationOnce(() => {
-        mark("limited", "Needs the owner's approval of the budget");
+        mark("limited", handoff.reason);
         return Promise.resolve(
           limitHit({
             sessionId: "sess-limited",
@@ -2423,30 +2452,168 @@ describe("runExecutorLoop with a handoff to a human", () => {
     const promise = start(store, controller.signal);
     await vi.advanceTimersByTimeAsync(1);
 
-    expect(suspend).toHaveBeenCalled();
+    expect(suspend).toHaveBeenCalledWith(
+      "limited",
+      "usage limit reached",
+      expect.objectContaining({ sessionId: "sess-limited", handoff }),
+    );
     expect(spy.taskFinished).toHaveBeenNthCalledWith(
       1,
       expect.objectContaining({ ok: false, willRetry: true, handedOff: true }),
     );
-    expect(files.has(handoffFile)).toBe(true);
 
     await vi.advanceTimersByTimeAsync(63_000);
-    expect(complete).toHaveBeenCalledWith("limited", {
-      reason: "Needs the owner's approval of the budget",
-      markedAt,
-    });
-    expect(markSeenOnResume).toBe(true);
+    expect(markSeenOnResume).toBe(false);
+    expect(complete).toHaveBeenCalledWith("limited", handoff);
     expect(spy.taskFinished).toHaveBeenNthCalledWith(
       2,
       expect.objectContaining({
+        ok: true,
+        handedOff: true,
+        handoffReason: handoff.reason,
+      }),
+    );
+    expect(summarizerSpy.summarize).toHaveBeenCalledWith(
+      expect.objectContaining({ id: "limited" }),
+      expect.anything(),
+      expect.objectContaining({ handoff }),
+      expect.anything(),
+    );
+    expect(files.has(handoffFile)).toBe(false);
+
+    controller.abort();
+    await promise;
+  });
+
+  it("a later mark of the resumed session wins over the one kept on the resume record", async () => {
+    const kept = { reason: "first", markedAt: "2026-10-30T11:00:00.000Z" };
+    const resume = { sessionId: "sess-limited", limitedAt: "2026-10-22T12:33:58.000Z" };
+    const { store, complete } = fakeStore([
+      { ...task("limited"), resume: { ...resume, handoff: kept } },
+    ]);
+    const controller = new AbortController();
+    mocks.runSession.mockImplementation(() => {
+      mark("limited", "second");
+      return Promise.resolve({ ...ok(), sessionId: "sess-limited" });
+    });
+
+    const promise = start(store, controller.signal);
+    await vi.waitFor(() => expect(summarizerSpy.summarize).toHaveBeenCalled());
+    controller.abort();
+    await promise;
+
+    expect(complete).toHaveBeenCalledWith("limited", { reason: "second", markedAt });
+    expect(spy.taskFinished).toHaveBeenCalledWith(
+      expect.objectContaining({ handedOff: true, handoffReason: "second" }),
+    );
+  });
+
+  it("an authentication failure of a resumed run keeps the mark on its resume record", async () => {
+    const kept = { reason: "left for a human", markedAt };
+    const resume = { sessionId: "sess-limited", limitedAt: "2026-10-22T12:33:58.000Z" };
+    const { takeNext, peekNext } = scriptedTakes(
+      [{ ...task("limited"), attempts: 1, resume: { ...resume, handoff: kept } }],
+      undefined,
+    );
+    const suspend = vi.fn().mockResolvedValue(undefined);
+    const store = { takeNext, peekNext, suspend } as unknown as TaskStore;
+    const { gates, controller: agent } = authGateHarness();
+    const controller = new AbortController();
+    mocks.runSession.mockResolvedValue({
+      ...authFailureResult(),
+      sessionId: "sess-limited",
+    });
+
+    const promise = runExecutorLoop(
+      config,
+      store,
+      new Waker(),
+      spy.reporter,
+      summarizerSpy.summarizer,
+      agent,
+      gates,
+      controller.signal,
+    );
+    await vi.waitFor(() => expect(suspend).toHaveBeenCalled());
+    controller.abort();
+    await promise;
+
+    expect(suspend).toHaveBeenCalledWith(
+      "limited",
+      "authentication failed",
+      expect.objectContaining({ sessionId: "sess-limited", handoff: kept }),
+    );
+    expect(spy.taskFinished).toHaveBeenCalledWith(
+      expect.objectContaining({ ok: false, handedOff: true, handoffReason: kept.reason }),
+    );
+  });
+
+  it("keeps the mark of a suspended task when another task runs before its resume", async () => {
+    vi.useFakeTimers({ toFake: ["Date"], now: new Date("2026-10-22T12:00:00.000Z") });
+    const dir = await createTempDir();
+    const tasksPath = join(dir, "tasks.json");
+    const fallback = mocks.readFile.getMockImplementation();
+    mocks.readFile.mockImplementation((path: string, ...rest: unknown[]) =>
+      path === tasksPath ? enoent() : (fallback?.(path, ...rest) as Promise<string>),
+    );
+    const store = await TaskStore.open(tasksPath);
+    await store.addTasks([
+      { id: "retried", title: "Task retried", description: "Description retried" },
+      { id: "limited", title: "Task limited", description: "Description limited" },
+    ]);
+    await store.fail("retried", "boom");
+    const controller = new AbortController();
+    const sessions: string[] = [];
+    mocks.runSession.mockImplementation(
+      async (spec: SessionSpec): Promise<SessionResult> => {
+        const taskId = spec.meta.taskId ?? "";
+        sessions.push(spec.resume === undefined ? taskId : `${taskId} (resumed)`);
+        if (sessions.length === 1) {
+          mark("limited", "Needs the owner's approval of the budget");
+          await store.retry("retried");
+          return limitHit({ sessionId: "sess-limited", costUsd: 1 });
+        }
+        if (taskId === "retried") mark("retried", "Waits for a reply from the customer");
+        return { ...ok(), sessionId: `sess-${taskId}` };
+      },
+    );
+
+    const promise = runExecutorLoop(
+      config,
+      store,
+      new Waker(),
+      spy.reporter,
+      summarizerSpy.summarizer,
+      noopController(),
+      buildGates({ limit: new OpenLimitGate() }),
+      controller.signal,
+    );
+    await vi.waitFor(() =>
+      expect(store.list().map((queued) => queued.status)).toEqual(["done", "done"]),
+    );
+    controller.abort();
+    await promise;
+    await removeTempDir(dir);
+
+    expect(sessions).toEqual(["limited", "retried", "limited (resumed)"]);
+    const [retried, limited] = store.list();
+    expect(retried).toMatchObject({
+      handedOff: true,
+      handoffReason: "Waits for a reply from the customer",
+    });
+    expect(limited).toMatchObject({
+      handedOff: true,
+      handoffReason: "Needs the owner's approval of the budget",
+    });
+    expect(limited?.resume).toBeUndefined();
+    expect(spy.taskFinished).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        taskId: "limited",
         ok: true,
         handedOff: true,
         handoffReason: "Needs the owner's approval of the budget",
       }),
     );
     expect(files.has(handoffFile)).toBe(false);
-
-    controller.abort();
-    await promise;
   });
 });

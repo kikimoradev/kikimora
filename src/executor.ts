@@ -129,11 +129,16 @@ export async function runExecutorLoop(
     gates.auth.blocked === null &&
     gates.limit.msRemaining(Date.now()) === 0;
 
-  const handBack = (task: Task, result: SessionResult, error: string): Promise<void> => {
+  const handBack = (
+    task: Task,
+    result: SessionResult,
+    error: string,
+    handoff: TaskHandoff | undefined,
+  ): Promise<void> => {
     const resume = withRunBaseline(task.resume, result);
     return resume === undefined
       ? store.release(task.id, error)
-      : store.suspend(task.id, error, resume);
+      : store.suspend(task.id, error, { ...resume, handoff });
   };
 
   while (!aborted()) {
@@ -191,7 +196,7 @@ export async function runExecutorLoop(
           handoff: handoffTarget,
           playwrightOutputDir: config.playwrightOutputDir,
         }),
-        task.resume === undefined ? settleHandoff() : undefined,
+        settleHandoff(),
       ]);
       await sessionInputs.catch(() => undefined);
       if (aborted()) break;
@@ -229,7 +234,7 @@ export async function runExecutorLoop(
           signal,
         );
         if (aborted()) break;
-        handoff = await readHandoffMark(handoffTarget);
+        handoff = (await readHandoffMark(handoffTarget)) ?? task.resume?.handoff;
         const marked = handoffFields(handoff);
 
         if (task.resume !== undefined && result.failureReason === "resumeFailed") {
@@ -280,7 +285,7 @@ export async function runExecutorLoop(
             .summarize(task, result, { willRetry: false, lease, handoff }, signal)
             .catch(() => undefined);
         } else if (result.failureReason === "launcherRefused") {
-          await handBack(task, result, "session launcher refused the session");
+          await handBack(task, result, "session launcher refused the session", handoff);
           reporter.taskFinished({
             taskId: task.id,
             title: task.title,
@@ -301,7 +306,7 @@ export async function runExecutorLoop(
           const auth = detectAuthFailure(result);
           if (auth) {
             gates.auth.engage(auth);
-            await handBack(task, result, "authentication failed");
+            await handBack(task, result, "authentication failed", handoff);
             reporter.taskFinished({
               taskId: task.id,
               title: task.title,
@@ -322,18 +327,17 @@ export async function runExecutorLoop(
             const limitedAt = Date.now();
             gates.limit.engage(limit, limitedAt);
             if (result.sessionId === undefined) {
-              await handBack(task, result, "usage limit reached");
+              await handBack(task, result, "usage limit reached", handoff);
             } else {
-              await store.suspend(
-                task.id,
-                "usage limit reached",
-                resumeAfterLimit(
+              await store.suspend(task.id, "usage limit reached", {
+                ...resumeAfterLimit(
                   task.resume,
                   result.sessionId,
                   result,
                   new Date(limitedAt),
                 ),
-              );
+                handoff,
+              });
             }
             reporter.taskFinished({
               taskId: task.id,
@@ -385,6 +389,9 @@ export async function runExecutorLoop(
         }
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err);
+        handoff ??=
+          (await readHandoffMark(handoffTarget).catch(() => undefined)) ??
+          task.resume?.handoff;
         await store.fail(task.id, message, handoff);
         await settleHandoff();
         reporter.taskFinished({

@@ -25,6 +25,12 @@ const taskSchema = z.object({
       sessionId: z.string().min(1),
       limitedAt: z.iso.datetime(),
       costUsd: z.number().nonnegative().optional(),
+      handoff: z
+        .object({
+          reason: z.string().min(1),
+          markedAt: z.iso.datetime(),
+        })
+        .optional(),
     })
     .optional(),
   handedOff: z.boolean().optional(),
@@ -221,7 +227,10 @@ export class TaskStore {
       task.status = "pending";
       task.attempts = Math.max(0, task.attempts - 1);
       task.error = error;
-      task.resume = { ...resume };
+      task.resume =
+        resume.handoff === undefined
+          ? { ...resume }
+          : { ...resume, handoff: { ...resume.handoff } };
       task.updatedAt = new Date().toISOString();
       await this.persist();
     });

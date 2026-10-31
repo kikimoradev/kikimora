@@ -144,6 +144,7 @@ export interface TaskResume {
   sessionId: string;
   limitedAt: string;
   costUsd?: number | undefined;
+  handoff?: TaskHandoff | undefined;
 }
 
 export interface Task {

@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";
@@ -48,9 +49,14 @@ export async function writeHandoffMark(
     markedAt: now.toISOString(),
   };
   await mkdir(dirname(target.file), { recursive: true });
-  const tmpPath = `${target.file}.tmp`;
-  await writeFile(tmpPath, `${JSON.stringify(mark, null, 2)}\n`, "utf8");
-  await rename(tmpPath, target.file);
+  const tmpPath = `${target.file}.${String(process.pid)}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(tmpPath, `${JSON.stringify(mark, null, 2)}\n`, "utf8");
+    await rename(tmpPath, target.file);
+  } catch (err) {
+    await rm(tmpPath, { force: true });
+    throw err;
+  }
   return mark;
 }
 

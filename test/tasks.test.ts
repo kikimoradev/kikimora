@@ -339,6 +339,40 @@ describe("TaskStore", () => {
     expect(retried).not.toHaveProperty("handoffReason");
   });
 
+  it("suspend keeps the handoff on the resume record across a restart; complete, fail and requeue drop it with resume", async () => {
+    const handoff = { reason: "left for a human", markedAt: "2026-10-30T12:00:00.000Z" };
+    const resume = { sessionId: "sess", limitedAt: "2026-10-30T12:00:00.000Z", handoff };
+    const store = await TaskStore.open(path);
+    await store.addTasks([newTask("done"), newTask("failed"), newTask("again")]);
+    for (const id of ["done", "failed", "again"]) {
+      await store.takeNext();
+      await store.suspend(id, "usage limit reached", resume);
+    }
+    resume.handoff.reason = "changed by the caller";
+
+    const reopened = await TaskStore.open(path);
+    for (const task of reopened.list()) {
+      expect(task.resume).toEqual({
+        sessionId: "sess",
+        limitedAt: "2026-10-30T12:00:00.000Z",
+        handoff: { reason: "left for a human", markedAt: "2026-10-30T12:00:00.000Z" },
+      });
+      expect(task).not.toHaveProperty("handedOff");
+    }
+
+    for (let i = 0; i < 3; i += 1) await reopened.takeNext();
+    await reopened.complete("done");
+    await reopened.fail("failed", "exit 1");
+    await reopened.requeue("again", "timeout");
+    const raw = JSON.parse(await readFile(path, "utf8")) as {
+      tasks: Record<string, unknown>[];
+    };
+    for (const task of raw.tasks) {
+      expect(task).not.toHaveProperty("resume");
+      expect(task).not.toHaveProperty("handedOff");
+    }
+  });
+
   it("writes an unmarked task with the same keys as before and loads a marked one", async () => {
     const store = await TaskStore.open(path);
     await store.addTasks([newTask("plain")]);
