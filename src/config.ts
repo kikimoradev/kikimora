@@ -269,6 +269,7 @@ export async function loadWorkerConfig(
     contextFilePath: paths.contextPath,
     tasksFilePath: project.tasksFile,
     memoryDbPath: project.memoryDbFile,
+    handoffFile: project.handoffFile,
     dataDir: project.dataDir,
     playwrightOutputDir: project.playwrightOutputDir,
     logsDir: project.logsDir,

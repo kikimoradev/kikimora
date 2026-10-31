@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { lastJsonBlock, parseLenient } from "../report.js";
-import type { SessionResult, Task } from "../types.js";
+import type { SessionResult, Task, TaskHandoff } from "../types.js";
 
 export const SUMMARY_JSON_SCHEMA = JSON.stringify({
   type: "object",
@@ -45,10 +45,11 @@ export interface SummaryContext {
   result: SessionResult;
   willRetry: boolean;
   logPaths: string[];
+  handoff?: TaskHandoff | undefined;
 }
 
 export function composeSummaryPrompt(context: SummaryContext): string {
-  const { task, result, willRetry, logPaths } = context;
+  const { task, result, willRetry, logPaths, handoff } = context;
   const lines = [
     "## Task",
     "",
@@ -68,6 +69,7 @@ export function composeSummaryPrompt(context: SummaryContext): string {
       `Retry scheduled: ${willRetry ? "yes" : "no"}`,
     );
   }
+  if (handoff !== undefined) lines.push(`Handed off to a human: ${handoff.reason}`);
   lines.push("", "## Session log", "");
   if (logPaths.length === 1) {
     lines.push(

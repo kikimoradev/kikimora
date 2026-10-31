@@ -231,6 +231,8 @@ export function createHeadlessReporters(
           error: outcome.error,
           failureReason: outcome.failureReason,
           sessionId: outcome.sessionId,
+          handedOff: outcome.handedOff,
+          handoffReason: outcome.handoffReason,
         }),
       });
     },

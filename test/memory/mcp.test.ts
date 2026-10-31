@@ -1,8 +1,9 @@
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { InMemoryTransport } from "@modelcontextprotocol/sdk/inMemory.js";
+import { readdir, readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { createMemoryMcpServer } from "../../src/memory/mcp.js";
+import { createMemoryMcpServer, handoffTargetOf } from "../../src/memory/mcp.js";
 import { MemoryStore } from "../../src/memory/store.js";
 import { createTempDir, removeTempDir } from "../helpers.js";
 
@@ -226,5 +227,121 @@ describe("memory MCP server", () => {
     });
 
     expect(firstText(result)).toBe("No summaries for this task.");
+  });
+
+  it("memory_get and memory_search show a handoff to a human after the attempt line", async () => {
+    store.add({
+      taskId: "redmine-1",
+      attempt: 3,
+      ok: true,
+      title: "Fix export",
+      headline: "Left the export for the owner",
+      summary: "The fix needs a decision on the CSV dialect.",
+      error: undefined,
+      sessionId: "session-3",
+      createdAt: "2026-07-02T12:00:00.000Z",
+      handedOff: true,
+      handoffReason: "Needs the owner's approval of the budget",
+    });
+
+    const history = firstText(
+      await client.callTool({ name: "memory_get", arguments: { taskId: "redmine-1" } }),
+    );
+    const search = firstText(
+      await client.callTool({ name: "memory_search", arguments: { query: "dialect" } }),
+    );
+
+    for (const text of [history, search]) {
+      expect(text).toContain(
+        "Attempt: 3, result: success, date: 2026-07-02T12:00:00.000Z\n" +
+          "Handed off to a human: Needs the owner's approval of the budget\n",
+      );
+    }
+    expect(history.match(/Handed off to a human/g)).toHaveLength(1);
+  });
+});
+
+describe("memory MCP server with a handoff target", () => {
+  let dir: string;
+  let file: string;
+  let store: MemoryStore;
+  let client: Client;
+
+  beforeEach(async () => {
+    dir = await createTempDir();
+    file = join(dir, "data", "handoff.json");
+    store = MemoryStore.open(join(dir, "memory.db"));
+    const server = createMemoryMcpServer(store, { handoff: { taskId: "t-1", file } });
+    const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
+    client = new Client({ name: "test", version: "1.0.0" });
+    await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
+  });
+
+  afterEach(async () => {
+    await client.close();
+    store.close();
+    await removeTempDir(dir);
+  });
+
+  const handoff = (reason: string) =>
+    client.callTool({ name: "task_handoff", arguments: { reason } });
+
+  const markOnDisk = async (): Promise<unknown> =>
+    JSON.parse(await readFile(file, "utf8")) as unknown;
+
+  it("exposes task_handoff next to the memory tools", async () => {
+    const { tools } = await client.listTools();
+
+    expect(tools.map((t) => t.name).sort()).toEqual([
+      "memory_get",
+      "memory_search",
+      "task_handoff",
+    ]);
+  });
+
+  it("writes the mark of the session's task and confirms it", async () => {
+    const result = await handoff("line one\n\n  line two");
+
+    expect(result.isError).not.toBe(true);
+    expect(firstText(result)).toBe(
+      "Task t-1 marked as handed off to a human: line one line two. " +
+        "Finish the task as usual; the mark travels with its result.",
+    );
+    expect(await markOnDisk()).toEqual({
+      taskId: "t-1",
+      reason: "line one line two",
+      markedAt: expect.stringMatching(/^\d{4}-\d{2}-\d{2}T/) as unknown,
+    });
+  });
+
+  it("keeps the last mark when called twice", async () => {
+    await handoff("first");
+    await handoff("second");
+
+    expect(await markOnDisk()).toMatchObject({ taskId: "t-1", reason: "second" });
+  });
+
+  it("rejects an empty or too long reason without writing a mark", async () => {
+    const empty = await handoff("   ");
+    const long = await handoff("a".repeat(201));
+
+    expect(empty.isError).toBe(true);
+    expect(firstText(empty)).toContain("empty");
+    expect(long.isError).toBe(true);
+    expect(firstText(long)).toContain("the limit is 200");
+    await expect(readdir(dir)).resolves.not.toContain("data");
+  });
+});
+
+describe("handoffTargetOf", () => {
+  it("needs both the task and the file", () => {
+    expect(handoffTargetOf("t-1", "/data/handoff.json")).toEqual({
+      taskId: "t-1",
+      file: "/data/handoff.json",
+    });
+    expect(handoffTargetOf(undefined, "/data/handoff.json")).toBeUndefined();
+    expect(handoffTargetOf("t-1", undefined)).toBeUndefined();
+    expect(handoffTargetOf("", "/data/handoff.json")).toBeUndefined();
+    expect(handoffTargetOf("t-1", "")).toBeUndefined();
   });
 });

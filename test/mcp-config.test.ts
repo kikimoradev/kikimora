@@ -54,6 +54,42 @@ describe("composeMcpConfig", () => {
     });
   });
 
+  it("gives the memory server the task and the handoff file only with a handoff target", () => {
+    const { mcpServers } = composeMcpConfig(
+      input({
+        memoryDbPath: "/data/memory.db",
+        handoff: { taskId: "KIK-27:impl:1", file: "/data/handoff.json" },
+      }),
+    );
+
+    expect(mcpServers.memory).toEqual({
+      command: process.execPath,
+      args: [
+        "--disable-warning=ExperimentalWarning",
+        "/repo/dist/index.js",
+        "mcp",
+        "serve",
+        "--db",
+        "/data/memory.db",
+        "--task",
+        "KIK-27:impl:1",
+        "--handoff",
+        "/data/handoff.json",
+      ],
+    });
+  });
+
+  it("leaves the handoff target out when there is no memory server", () => {
+    const { mcpServers } = composeMcpConfig(
+      input({
+        role: "monitor",
+        handoff: { taskId: "t-1", file: "/data/handoff.json" },
+      }),
+    );
+
+    expect(mcpServers).toEqual({});
+  });
+
   it("runs the memory server directly with node for a .js entry", () => {
     const { mcpServers } = composeMcpConfig(input({ memoryDbPath: "/data/memory.db" }));
 

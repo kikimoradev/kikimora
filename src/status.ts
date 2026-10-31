@@ -73,6 +73,8 @@ export interface ExecutorTaskOutcome {
   attempt?: number | undefined;
   maxAttempts?: number | undefined;
   sessionId?: string | undefined;
+  handedOff?: boolean | undefined;
+  handoffReason?: string | undefined;
   finishedAt: number;
 }
 

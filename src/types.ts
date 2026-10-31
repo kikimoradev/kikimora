@@ -65,6 +65,7 @@ export interface WorkerConfig {
   contextFilePath: string;
   tasksFilePath: string;
   memoryDbPath: string;
+  handoffFile: string;
   dataDir: string;
   playwrightOutputDir: string;
   logsDir: string;
@@ -143,6 +144,7 @@ export interface TaskResume {
   sessionId: string;
   limitedAt: string;
   costUsd?: number | undefined;
+  handoff?: TaskHandoff | undefined;
 }
 
 export interface Task {
@@ -155,6 +157,13 @@ export interface Task {
   updatedAt: string;
   error?: string | undefined;
   resume?: TaskResume | undefined;
+  handedOff?: boolean | undefined;
+  handoffReason?: string | undefined;
 }
 
 export type NewTask = Pick<Task, "id" | "title" | "description">;
+
+export interface TaskHandoff {
+  reason: string;
+  markedAt: string;
+}

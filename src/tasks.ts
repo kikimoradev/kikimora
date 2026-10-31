@@ -6,6 +6,7 @@ import {
   type FinalTaskStatus,
   type NewTask,
   type Task,
+  type TaskHandoff,
   type TaskResume,
   type TaskStatus,
 } from "./types.js";
@@ -24,8 +25,16 @@ const taskSchema = z.object({
       sessionId: z.string().min(1),
       limitedAt: z.iso.datetime(),
       costUsd: z.number().nonnegative().optional(),
+      handoff: z
+        .object({
+          reason: z.string().min(1),
+          markedAt: z.iso.datetime(),
+        })
+        .optional(),
     })
     .optional(),
+  handedOff: z.boolean().optional(),
+  handoffReason: z.string().optional(),
 });
 
 const storeFileSchema = z.object({
@@ -64,6 +73,16 @@ export function buildManualTask(description: string): NewTask {
       ? `${firstLine.slice(0, TASK_TITLE_MAX - 1)}…`
       : firstLine;
   return { id, title, description };
+}
+
+function markHandoff(task: Task, handoff: TaskHandoff | undefined): void {
+  if (handoff === undefined) {
+    delete task.handedOff;
+    delete task.handoffReason;
+  } else {
+    task.handedOff = true;
+    task.handoffReason = handoff.reason;
+  }
 }
 
 export class TaskStore {
@@ -181,12 +200,12 @@ export class TaskStore {
     });
   }
 
-  complete(id: string): Promise<void> {
-    return this.setStatus(id, "done");
+  complete(id: string, handoff?: TaskHandoff): Promise<void> {
+    return this.setStatus(id, "done", undefined, handoff);
   }
 
-  fail(id: string, error: string): Promise<void> {
-    return this.setStatus(id, "failed", error);
+  fail(id: string, error: string, handoff?: TaskHandoff): Promise<void> {
+    return this.setStatus(id, "failed", error, handoff);
   }
 
   release(id: string, error?: string): Promise<void> {
@@ -208,7 +227,10 @@ export class TaskStore {
       task.status = "pending";
       task.attempts = Math.max(0, task.attempts - 1);
       task.error = error;
-      task.resume = { ...resume };
+      task.resume =
+        resume.handoff === undefined
+          ? { ...resume }
+          : { ...resume, handoff: { ...resume.handoff } };
       task.updatedAt = new Date().toISOString();
       await this.persist();
     });
@@ -227,13 +249,14 @@ export class TaskStore {
     });
   }
 
-  requeue(id: string, error: string): Promise<void> {
+  requeue(id: string, error: string, handoff?: TaskHandoff): Promise<void> {
     return this.run(async () => {
       const task = this.tasks.find((candidate) => candidate.id === id);
       if (!task) return;
       task.status = "pending";
       task.error = error;
       task.resume = undefined;
+      markHandoff(task, handoff);
       task.updatedAt = new Date().toISOString();
       await this.persist();
     });
@@ -246,6 +269,7 @@ export class TaskStore {
       task.status = "pending";
       task.attempts = 0;
       task.error = undefined;
+      markHandoff(task, undefined);
       task.updatedAt = new Date().toISOString();
       await this.persist();
       return true;
@@ -286,7 +310,8 @@ export class TaskStore {
   private setStatus(
     id: string,
     status: "done" | "failed",
-    error?: string,
+    error: string | undefined,
+    handoff: TaskHandoff | undefined,
   ): Promise<void> {
     return this.run(async () => {
       const task = this.tasks.find((candidate) => candidate.id === id);
@@ -295,6 +320,7 @@ export class TaskStore {
       task.updatedAt = new Date().toISOString();
       task.error = error;
       task.resume = undefined;
+      markHandoff(task, handoff);
       await this.persist();
     });
   }

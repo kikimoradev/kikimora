@@ -1,6 +1,7 @@
 import { realpathSync } from "node:fs";
 import { mkdir, rename, writeFile } from "node:fs/promises";
 import { join } from "node:path";
+import type { HandoffTarget } from "./memory/handoff.js";
 import { MCP_DIR_NAME } from "./paths.js";
 import type { McpServer } from "./types.js";
 
@@ -20,6 +21,7 @@ export interface McpConfigInput {
   selected: readonly string[];
   browser: boolean;
   memoryDbPath: string | null;
+  handoff?: HandoffTarget | undefined;
   playwrightOutputDir: string;
   entry?: string | undefined;
 }
@@ -28,7 +30,11 @@ export interface McpConfigDocument {
   mcpServers: Record<string, McpServer>;
 }
 
-function memoryServer(dbPath: string, entry: string): McpServer {
+function memoryServer(
+  dbPath: string,
+  entry: string,
+  handoff: HandoffTarget | undefined,
+): McpServer {
   let resolved: string;
   try {
     resolved = realpathSync(entry);
@@ -36,9 +42,13 @@ function memoryServer(dbPath: string, entry: string): McpServer {
     resolved = entry;
   }
   const nodeFlags = ["--disable-warning=ExperimentalWarning"];
+  const serve = ["mcp", "serve", "--db", dbPath];
+  if (handoff !== undefined) {
+    serve.push("--task", handoff.taskId, "--handoff", handoff.file);
+  }
   const args = resolved.endsWith(".ts")
-    ? [...nodeFlags, "--import", "tsx", resolved, "mcp", "serve", "--db", dbPath]
-    : [...nodeFlags, resolved, "mcp", "serve", "--db", dbPath];
+    ? [...nodeFlags, "--import", "tsx", resolved, ...serve]
+    : [...nodeFlags, resolved, ...serve];
   return { command: process.execPath, args };
 }
 
@@ -55,6 +65,7 @@ export function composeMcpConfig(input: McpConfigInput): McpConfigDocument {
     mcpServers[MEMORY_SERVER_NAME] = memoryServer(
       input.memoryDbPath,
       input.entry ?? process.argv[1] ?? "",
+      input.handoff,
     );
   }
   if (input.browser) {

@@ -283,6 +283,41 @@ describe("createHeadlessReporters", () => {
     expect(events[2]?.fields).not.toHaveProperty("failureReason");
   });
 
+  it("adds a handoff to a human to task.finished only when the task carries one", () => {
+    const { events, executor } = collect();
+    const base = { taskId: "task-1", title: "Fix the bug", durationMs: 1000 };
+
+    executor.taskFinished({
+      ...base,
+      ok: true,
+      sessionId: "sess-1",
+      handedOff: true,
+      handoffReason: "Needs the owner's approval of the budget",
+    });
+    executor.taskFinished({
+      ...base,
+      ok: false,
+      error: "exit 1",
+      handedOff: true,
+      handoffReason: "left for a human",
+    });
+    executor.taskFinished({ ...base, ok: true, handedOff: undefined });
+
+    expect(events[0]?.fields).toEqual({
+      ...base,
+      ok: true,
+      sessionId: "sess-1",
+      handedOff: true,
+      handoffReason: "Needs the owner's approval of the budget",
+    });
+    expect(events[1]).toMatchObject({
+      level: "error",
+      fields: { ok: false, handedOff: true, handoffReason: "left for a human" },
+    });
+    expect(events[2]?.fields).not.toHaveProperty("handedOff");
+    expect(events[2]?.fields).not.toHaveProperty("handoffReason");
+  });
+
   it("keeps executor summary callbacks silent and routes them via the summarizer reporter", () => {
     const { events, executor, summarizer } = collect();
     const task = buildTask();

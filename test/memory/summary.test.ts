@@ -90,6 +90,23 @@ describe("composeSummaryPrompt", () => {
     };
   }
 
+  it("names a handoff to a human under the session result, also after a failure", () => {
+    const handoff = { reason: "left for a human", markedAt: "2026-07-02T10:04:00.000Z" };
+
+    const success = composeSummaryPrompt(buildContext({ handoff }));
+    const failure = composeSummaryPrompt(
+      buildContext({ handoff, result: buildResult({ ok: false, error: "exit 1" }) }),
+    );
+
+    expect(success).toContain(
+      "Status: success\nHanded off to a human: left for a human\n",
+    );
+    expect(failure).toContain(
+      "Retry scheduled: no\nHanded off to a human: left for a human\n",
+    );
+    expect(composeSummaryPrompt(buildContext())).not.toContain("Handed off");
+  });
+
   it("includes the task data and the log path", () => {
     const prompt = composeSummaryPrompt(buildContext());
 

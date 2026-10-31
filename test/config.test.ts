@@ -341,6 +341,7 @@ describe("loadWorkerConfig", () => {
     expect(config.settingsFilePath).toBe(join(dir, ".kikimora", "settings.json"));
     expect(config.tasksFilePath).toBe(join(dir, ".kikimora", "data", "tasks.json"));
     expect(config.memoryDbPath).toBe(join(dir, ".kikimora", "data", "memory.db"));
+    expect(config.handoffFile).toBe(join(dir, ".kikimora", "data", "handoff.json"));
     expect(config.dataDir).toBe(join(dir, ".kikimora", "data"));
     expect(config.playwrightOutputDir).toBe(join(dir, ".kikimora", "data", "playwright"));
     expect(config.logsDir).toBe(join(dir, ".kikimora", "logs"));

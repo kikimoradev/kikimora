@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { writeFileSync } from "node:fs";
+import { readFileSync, writeFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 
 const modelIndex = process.argv.indexOf("--model");
 const model = modelIndex >= 0 ? process.argv[modelIndex + 1] : undefined;
@@ -18,6 +19,8 @@ const resultText = pick("FAKE_CLAUDE_RESULT_TEXT");
 const sessionId = pick("FAKE_CLAUDE_SESSION_ID") ?? "sess-1";
 const envOut = pick("FAKE_CLAUDE_ENV_OUT");
 const treeOut = pick("FAKE_CLAUDE_TREE_OUT");
+const handoffReason = pick("FAKE_CLAUDE_HANDOFF_REASON");
+const handoffOut = pick("FAKE_CLAUDE_HANDOFF_OUT");
 
 if (argsOut) writeFileSync(argsOut, JSON.stringify(process.argv.slice(2)));
 if (envOut) {
@@ -166,8 +169,46 @@ process.stdin.on("data", (chunk) => {
 });
 process.stdin.on("end", () => {
   if (promptOut) writeFileSync(promptOut, stdin);
-  run();
+  if (handoffReason === undefined) {
+    run();
+  } else {
+    void callHandoff(handoffReason).then(run);
+  }
 });
+
+async function callHandoff(reason) {
+  let serverErr = "";
+  try {
+    const configPath = process.argv[process.argv.indexOf("--mcp-config") + 1];
+    const { memory } = JSON.parse(readFileSync(configPath, "utf8")).mcpServers;
+    const { Client } = await import("@modelcontextprotocol/sdk/client/index.js");
+    const { StdioClientTransport } = await import(
+      "@modelcontextprotocol/sdk/client/stdio.js"
+    );
+    const transport = new StdioClientTransport({
+      command: memory.command,
+      args: memory.args,
+      env: process.env,
+      cwd: fileURLToPath(new URL("../..", import.meta.url)),
+      stderr: "pipe",
+    });
+    transport.stderr.on("data", (chunk) => {
+      serverErr += chunk;
+    });
+    const client = new Client({ name: "fake-claude", version: "1.0.0" });
+    await client.connect(transport);
+    const { tools } = await client.listTools();
+    const result = await client.callTool({ name: "task_handoff", arguments: { reason } });
+    await client.close();
+    if (handoffOut) {
+      writeFileSync(handoffOut, JSON.stringify({ tools: tools.map((tool) => tool.name), result }));
+    }
+  } catch (err) {
+    if (handoffOut) {
+      writeFileSync(handoffOut, JSON.stringify({ error: String(err), stderr: serverErr }));
+    }
+  }
+}
 
 function run() {
   switch (mode) {

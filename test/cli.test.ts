@@ -1,6 +1,6 @@
 import { spawn, type ChildProcess } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, realpath, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { fileURLToPath } from "node:url";
@@ -298,6 +298,88 @@ describe("CLI start (smoke E2E)", () => {
     expect(result.output).toMatch(/task\.finished taskId=e2e-1 .*sessionId=sess-1/);
     expect(result.output).toContain("summary.finished taskId=e2e-1 ok=true");
     expect(result.output).toContain("worker.stopped signal=SIGINT");
+  }, 30_000);
+
+  it("an executor session marks its task as handed off to a human through the memory server", async () => {
+    await seedProject(dir, {
+      settings: {
+        monitor: { model: "haiku", intervalMinutes: 1 },
+        executor: { model: "opus" },
+        summarizer: { model: "sonnet" },
+      },
+    });
+    const reason = "Needs the owner's approval of the budget";
+    const env = fakeClaudeCliEnv("ok", {
+      CI: "true",
+      FAKE_CLAUDE_RESULT_TEXT_HAIKU: JSON.stringify({
+        tasks: [{ id: "handoff-1", title: "Handoff task", description: "e2e" }],
+      }),
+      FAKE_CLAUDE_HANDOFF_REASON_OPUS: reason,
+      FAKE_CLAUDE_HANDOFF_OUT_OPUS: join(dir, "handoff-call.json"),
+      FAKE_CLAUDE_RESULT_TEXT_SONNET: JSON.stringify({
+        headline: "handed off",
+        summary: "The executor left the task for the owner.",
+      }),
+    });
+    const dataDir = join(await realpath(dir), ".kikimora", "data");
+    const memoryDbPath = join(dataDir, "memory.db");
+
+    const result = await runCli(dir, env, () =>
+      Promise.resolve(readSummaries(memoryDbPath, "handoff-1").length > 0),
+    );
+
+    const call = JSON.parse(await readFile(join(dir, "handoff-call.json"), "utf8")) as {
+      tools: string[];
+      result: { isError?: boolean; content: { text: string }[] };
+    };
+    expect(call.tools.sort()).toEqual(["memory_get", "memory_search", "task_handoff"]);
+    expect(call.result.isError).not.toBe(true);
+    expect(call.result.content[0]?.text).toContain(
+      `Task handoff-1 marked as handed off to a human: ${reason}.`,
+    );
+
+    const executorConfig = JSON.parse(
+      await readFile(join(dataDir, "mcp", "executor.json"), "utf8"),
+    ) as { mcpServers: { memory: { args: string[] } } };
+    expect(executorConfig.mcpServers.memory.args.slice(-4)).toEqual([
+      "--task",
+      "handoff-1",
+      "--handoff",
+      join(dataDir, "handoff.json"),
+    ]);
+    const monitorConfig = await readFile(join(dataDir, "mcp", "monitor.json"), "utf8");
+    expect(monitorConfig).not.toContain("--handoff");
+
+    const store = JSON.parse(await readFile(join(dataDir, "tasks.json"), "utf8")) as {
+      tasks: unknown[];
+    };
+    expect(store.tasks).toEqual([
+      expect.objectContaining({
+        id: "handoff-1",
+        status: "done",
+        handedOff: true,
+        handoffReason: reason,
+      }),
+    ]);
+
+    const db = new DatabaseSync(memoryDbPath, { readOnly: true });
+    try {
+      expect(
+        db
+          .prepare(
+            "SELECT ok, handed_off, handoff_reason FROM summaries WHERE task_id = ?",
+          )
+          .all("handoff-1"),
+      ).toEqual([{ ok: 1, handed_off: 1, handoff_reason: reason }]);
+    } finally {
+      db.close();
+    }
+    await expect(readFile(join(dataDir, "handoff.json"), "utf8")).rejects.toThrow(
+      /ENOENT/,
+    );
+
+    expect(result.output).toMatch(/task\.finished taskId=handoff-1 .*ok=true/);
+    expect(result.output).toMatch(/task\.finished taskId=handoff-1 .*handedOff=true/);
   }, 30_000);
 
   it("indexes the executor session and writes both transcript files next to each other", async () => {

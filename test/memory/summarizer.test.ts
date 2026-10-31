@@ -160,6 +160,43 @@ describe("SessionSummarizer", () => {
     expect(spec.prompt).toContain("Retry scheduled: yes");
   });
 
+  it("saves a handoff to a human with the record and names it in the prompt", async () => {
+    await buildSummarizer().summarize(
+      task(),
+      executorResult(),
+      {
+        willRetry: false,
+        lease: LOCAL_LEASE,
+        handoff: {
+          reason: "Needs the owner's approval",
+          markedAt: "2026-07-02T10:04:00Z",
+        },
+      },
+      new AbortController().signal,
+    );
+
+    expect(store.get("redmine-1")[0]).toMatchObject({
+      ok: true,
+      handedOff: true,
+      handoffReason: "Needs the owner's approval",
+    });
+    const spec = mocks.runSession.mock.calls[0]?.[0] as { prompt: string };
+    expect(spec.prompt).toContain("Handed off to a human: Needs the owner's approval");
+  });
+
+  it("saves an unmarked record without handoff fields", async () => {
+    await buildSummarizer().summarize(
+      task(),
+      executorResult(),
+      { willRetry: false, lease: LOCAL_LEASE },
+      new AbortController().signal,
+    );
+
+    expect(store.get("redmine-1")[0]).not.toHaveProperty("handedOff");
+    const spec = mocks.runSession.mock.calls[0]?.[0] as { prompt: string };
+    expect(spec.prompt).not.toContain("Handed off");
+  });
+
   it("skips the summary when the executor session has no id", async () => {
     await buildSummarizer().summarize(
       task(),

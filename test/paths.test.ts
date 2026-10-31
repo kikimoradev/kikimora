@@ -28,6 +28,7 @@ describe("projectPaths", () => {
       dataDir: join(kikimoraDir, "data"),
       tasksFile: join(kikimoraDir, "data", "tasks.json"),
       memoryDbFile: join(kikimoraDir, "data", "memory.db"),
+      handoffFile: join(kikimoraDir, "data", "handoff.json"),
       mcpDir: join(kikimoraDir, "data", "mcp"),
       playwrightOutputDir: join(kikimoraDir, "data", "playwright"),
       logsDir: join(kikimoraDir, "logs"),

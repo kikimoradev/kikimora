@@ -23,4 +23,8 @@ You have access to long-term memory — summaries of tasks completed in earlier 
 through the MCP tools `mcp__memory__memory_search` (full-text search) and
 `mcp__memory__memory_get` (the full summary history of a specific task by its ID).
 
+When you leave the task for a human (a label or a question for a person, a branch left for
+someone to finish), call `mcp__memory__task_handoff` with a one-sentence reason before you end
+the session. The project prompt says when that applies.
+
 Work diligently, and at the end briefly summarize the result of your work.
