@@ -4,7 +4,10 @@ import {
   createHeadlessReporters,
   emitAdmissionChange,
 } from "../../src/headless/reporters.js";
+import { runSession } from "../../src/runner.js";
+import { LIVE_FIELD_MAX, type SessionEvent } from "../../src/session-events.js";
 import type { Task } from "../../src/types.js";
+import { buildSessionSpec, fakeClaudeEnv } from "../helpers.js";
 
 const RESUME_AT = new Date("2026-07-08T09:00:00.000Z");
 
@@ -18,6 +21,21 @@ function buildTask(overrides: Partial<Task> = {}): Task {
     createdAt: "2026-07-08T08:00:00.000Z",
     updatedAt: "2026-07-08T08:00:00.000Z",
     ...overrides,
+  };
+}
+
+function toolUse(id: string, input: unknown, name = "Bash"): SessionEvent {
+  return { type: "toolUse", id, name, input };
+}
+
+function toolResult(toolUseId: string, isError: boolean, text: string): SessionEvent {
+  return {
+    type: "toolResult",
+    toolUseId,
+    isError,
+    text,
+    lines: text.split("\n"),
+    dropped: 0,
   };
 }
 
@@ -526,21 +544,24 @@ describe("createHeadlessReporters", () => {
     expect(events).toEqual([]);
   });
 
-  it("suppresses session text, tool calls and results by default", () => {
+  it("suppresses session content by default", () => {
     const { events, executor } = collect();
 
+    executor.session({ type: "init", model: "opus", sessionId: "s-1", toolCount: 2 });
     executor.session({ type: "text", text: "thinking" });
-    executor.session({ type: "toolUse", name: "Bash", input: { command: "ls" } });
-    executor.session({ type: "toolResult", isError: true, lines: ["boom"], dropped: 0 });
+    executor.session({ type: "thinking", text: "plan" });
+    executor.session(toolUse("toolu_1", { command: "ls" }));
+    executor.session(toolResult("toolu_1", true, "boom"));
+    executor.session(toolResult("toolu_1", false, "ok"));
     executor.session({ type: "partial", text: "chunk" });
     executor.session({ type: "raw", line: "{}" });
 
-    expect(events).toEqual([]);
+    expect(events.map((event) => event.event)).toEqual(["session.init"]);
   });
 
-  it("keeps the whole thought an agent had, however long it ran", () => {
+  it("keeps the whole text an agent wrote, however long it ran", () => {
     const { events, executor } = collect({ verbose: true });
-    const thought = `${"a".repeat(900)}\nsecond paragraph`;
+    const thought = `${"a".repeat(LIVE_FIELD_MAX + 900)}\nsecond paragraph`;
 
     executor.session({ type: "text", text: thought });
 
@@ -554,47 +575,203 @@ describe("createHeadlessReporters", () => {
     ]);
   });
 
-  it("keeps the lines of a failed tool apart instead of running them together", () => {
+  it("logs the thinking, the tool input and every tool result with the session id when verbose", () => {
     const { events, executor } = collect({ verbose: true });
 
-    executor.session({
-      type: "toolResult",
-      isError: true,
-      lines: ["first", "second"],
-      dropped: 0,
-    });
-
-    expect(events[0]?.fields).toEqual({ output: "first\nsecond" });
-  });
-
-  it("logs session text, tool calls and failed tool results when verbose", () => {
-    const { events, executor } = collect({ verbose: true });
-
-    executor.session({ type: "text", text: "thinking" });
-    executor.session({ type: "toolUse", name: "Bash", input: { command: "ls -la" } });
-    executor.session({ type: "toolResult", isError: true, lines: ["boom"], dropped: 0 });
-    executor.session({ type: "toolResult", isError: false, lines: ["ok"], dropped: 0 });
+    executor.session({ type: "init", model: "opus", sessionId: "s-1", toolCount: 2 });
+    executor.session({ type: "text", text: "Checking" });
+    executor.session({ type: "thinking", text: "first\nsecond" });
+    executor.session(toolUse("toolu_1", { command: "ls -la" }));
+    executor.session(toolResult("toolu_1", false, "a.txt\n\nb.txt"));
+    executor.session(toolResult("toolu_2", true, "boom\ncontext"));
     executor.session({ type: "partial", text: "chunk" });
 
-    expect(events).toEqual([
+    expect(events.slice(1)).toEqual([
       {
         level: "info",
         agent: "executor",
         event: "session.text",
-        fields: { text: "thinking" },
+        fields: { sessionId: "s-1", text: "Checking" },
+      },
+      {
+        level: "info",
+        agent: "executor",
+        event: "session.thinking",
+        fields: { sessionId: "s-1", text: "first\nsecond", truncated: false },
       },
       {
         level: "info",
         agent: "executor",
         event: "session.tool",
-        fields: { tool: "Bash", detail: "ls -la" },
+        fields: {
+          sessionId: "s-1",
+          tool: "Bash",
+          detail: "ls -la",
+          toolUseId: "toolu_1",
+          input: { command: "ls -la" },
+          inputTruncated: false,
+        },
+      },
+      {
+        level: "info",
+        agent: "executor",
+        event: "session.toolResult",
+        fields: {
+          sessionId: "s-1",
+          toolUseId: "toolu_1",
+          output: "a.txt\n\nb.txt",
+          truncated: false,
+        },
       },
       {
         level: "warn",
         agent: "executor",
         event: "session.toolError",
-        fields: { output: "boom" },
+        fields: {
+          sessionId: "s-1",
+          toolUseId: "toolu_2",
+          output: "boom\ncontext",
+          truncated: false,
+        },
       },
     ]);
   });
+
+  it("cuts a long output, thought or input at the limit and marks it truncated", () => {
+    const { events, executor } = collect({ verbose: true });
+    const long = "x".repeat(LIVE_FIELD_MAX + 10);
+    const input = { content: long };
+
+    executor.session({ type: "thinking", text: long });
+    executor.session(toolUse("toolu_1", input, "Write"));
+    executor.session(toolResult("toolu_1", false, long));
+    executor.session(toolResult("toolu_1", true, long));
+
+    const [thinking, tool, result, error] = events.map((event) => event.fields);
+    expect(thinking).toEqual({ text: long.slice(0, LIVE_FIELD_MAX), truncated: true });
+    expect(tool).toMatchObject({
+      input: JSON.stringify(input).slice(0, LIVE_FIELD_MAX),
+      inputTruncated: true,
+    });
+    expect(result).toEqual({
+      toolUseId: "toolu_1",
+      output: long.slice(0, LIVE_FIELD_MAX),
+      truncated: true,
+    });
+    expect(error).toEqual(result);
+  });
+
+  it("omits the fields it has no value for instead of logging null", () => {
+    const { events, executor } = collect({ verbose: true });
+
+    executor.session({ type: "toolUse", id: "", name: "Bash", input: undefined });
+    executor.session(toolResult("", false, ""));
+
+    expect(events.map((event) => event.fields)).toEqual([
+      { tool: "Bash", detail: "" },
+      { output: "", truncated: false },
+    ]);
+  });
+
+  it("takes the session id of the latest run and forgets it when a new process spawns", () => {
+    const { events, executor } = collect({ verbose: true });
+
+    executor.session({ type: "text", text: "before init" });
+    executor.session({ type: "init", model: "opus", sessionId: "s-1", toolCount: 0 });
+    executor.session({ type: "text", text: "first run" });
+    executor.session({ type: "spawned", pid: 42, role: "executor", pool: "executor" });
+    executor.session({ type: "text", text: "resumed, before init" });
+    executor.session({ type: "init", model: "opus", sessionId: "s-2", toolCount: 0 });
+    executor.session({ type: "text", text: "resumed" });
+
+    expect(
+      events
+        .filter((event) => event.event === "session.text")
+        .map((event) => event.fields),
+    ).toEqual([
+      { text: "before init" },
+      { sessionId: "s-1", text: "first run" },
+      { text: "resumed, before init" },
+      { sessionId: "s-2", text: "resumed" },
+    ]);
+  });
+
+  it("logs the content of a real stream of the fake claude", async () => {
+    const { events, executor } = collect({ verbose: true });
+
+    const result = await runSession(
+      buildSessionSpec(executor.session, {
+        childEnv: fakeClaudeEnv("tool_calls", { FAKE_CLAUDE_SESSION_ID: "sess-live" }),
+      }),
+      new AbortController().signal,
+    );
+
+    expect(result.ok).toBe(true);
+    expect(
+      events
+        .filter((event) => event.event.startsWith("session."))
+        .map(({ level, event, fields }) => ({ level, event, fields })),
+    ).toEqual([
+      expect.objectContaining({ event: "session.spawned" }),
+      expect.objectContaining({ event: "session.init" }),
+      {
+        level: "info",
+        event: "session.thinking",
+        fields: {
+          sessionId: "sess-live",
+          text: "Read the readme, then list the files.",
+          truncated: false,
+        },
+      },
+      {
+        level: "info",
+        event: "session.tool",
+        fields: {
+          sessionId: "sess-live",
+          tool: "Read",
+          detail: "README.md",
+          toolUseId: "toolu_read",
+          input: { file_path: "README.md" },
+          inputTruncated: false,
+        },
+      },
+      {
+        level: "info",
+        event: "session.tool",
+        fields: {
+          sessionId: "sess-live",
+          tool: "Bash",
+          detail: "ls",
+          toolUseId: "toolu_bash",
+          input: { command: "ls" },
+          inputTruncated: false,
+        },
+      },
+      {
+        level: "info",
+        event: "session.toolResult",
+        fields: {
+          sessionId: "sess-live",
+          toolUseId: "toolu_read",
+          output: "# Project\n\nIntro",
+          truncated: false,
+        },
+      },
+      {
+        level: "warn",
+        event: "session.toolError",
+        fields: {
+          sessionId: "sess-live",
+          toolUseId: "toolu_bash",
+          output: "ls: cannot open directory",
+          truncated: false,
+        },
+      },
+      {
+        level: "info",
+        event: "session.text",
+        fields: { sessionId: "sess-live", text: "Worker output" },
+      },
+    ]);
+  }, 15_000);
 });

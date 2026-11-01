@@ -19,8 +19,16 @@ export type SessionEvent =
       cycle?: number | undefined;
     }
   | { type: "text"; text: string }
-  | { type: "toolUse"; name: string; input: unknown }
-  | { type: "toolResult"; isError: boolean; lines: string[]; dropped: number }
+  | { type: "thinking"; text: string }
+  | { type: "toolUse"; id: string; name: string; input: unknown }
+  | {
+      type: "toolResult";
+      toolUseId: string;
+      isError: boolean;
+      text: string;
+      lines: string[];
+      dropped: number;
+    }
   | { type: "partial"; text: string }
   | { type: "stream"; event: Record<string, unknown> }
   | { type: "raw"; line: string }
@@ -41,6 +49,19 @@ export function truncate(value: unknown, max = 500): string {
   if (!text) return "";
   const oneLine = text.replace(/\s+/g, " ").trim();
   return oneLine.length > max ? `${oneLine.slice(0, max)}…` : oneLine;
+}
+
+export const LIVE_FIELD_MAX = 4000;
+
+export interface BoundedText {
+  text: string;
+  truncated: boolean;
+}
+
+export function boundText(text: string, max: number): BoundedText {
+  if (text.length <= max) return { text, truncated: false };
+  const end = /[\uD800-\uDBFF]/.test(text.charAt(max - 1)) ? max - 1 : max;
+  return { text: text.slice(0, end), truncated: true };
 }
 
 export interface ToolCallView {
@@ -107,7 +128,7 @@ export function formatDroppedLines(dropped: number): string {
 }
 
 export function formatSessionEvent(
-  event: Exclude<SessionEvent, { type: "partial" | "stream" | "spawned" }>,
+  event: Exclude<SessionEvent, { type: "partial" | "stream" | "spawned" | "thinking" }>,
 ): string {
   switch (event.type) {
     case "init":

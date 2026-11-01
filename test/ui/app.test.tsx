@@ -327,16 +327,25 @@ describe("App", () => {
       toolCount: 4,
     });
     store.monitor.session({ type: "text", text: "Checking backlog" });
-    store.monitor.session({ type: "toolUse", name: "Bash", input: "git log" });
+    store.monitor.session({
+      type: "toolUse",
+      id: "toolu_1",
+      name: "Bash",
+      input: "git log",
+    });
     store.monitor.session({
       type: "toolResult",
+      toolUseId: "toolu_1",
       isError: false,
+      text: "3 commits\nabc123 fix\ndef456 feat",
       lines: ["3 commits", "abc123 fix", "def456 feat"],
       dropped: 0,
     });
     store.monitor.session({
       type: "toolResult",
+      toolUseId: "toolu_1",
       isError: true,
+      text: "boom",
       lines: ["boom"],
       dropped: 0,
     });
@@ -538,7 +547,9 @@ describe("App", () => {
 
     store.monitor.session({
       type: "toolResult",
+      toolUseId: "toolu_1",
       isError: false,
+      text: `${"a".repeat(160)} TAIL_MARKER\nSECOND_LINE_MARKER\nTHIRD`,
       lines: [`${"a".repeat(160)} TAIL_MARKER`, "SECOND_LINE_MARKER"],
       dropped: 1,
     });

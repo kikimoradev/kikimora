@@ -53,7 +53,7 @@ describe("StreamRenderer", () => {
     ]);
   });
 
-  it("assistant: emits text as text, tool_use as toolUse", () => {
+  it("assistant: emits text as text, tool_use as toolUse with its id", () => {
     const { events, renderer } = createRenderer();
     renderer.handleLine(
       line({
@@ -61,15 +61,35 @@ describe("StreamRenderer", () => {
         message: {
           content: [
             { type: "text", text: "  Hi  " },
-            { type: "tool_use", name: "Bash", input: { command: "ls" } },
+            { type: "tool_use", id: "toolu_1", name: "Bash", input: { command: "ls" } },
+            { type: "tool_use", name: "Read", input: { file_path: "a.md" } },
           ],
         },
       }),
     );
     expect(events).toEqual([
       { type: "text", text: "Hi" },
-      { type: "toolUse", name: "Bash", input: { command: "ls" } },
+      { type: "toolUse", id: "toolu_1", name: "Bash", input: { command: "ls" } },
+      { type: "toolUse", id: "", name: "Read", input: { file_path: "a.md" } },
     ]);
+  });
+
+  it("assistant: emits a thinking block with content and skips an empty one", () => {
+    const { events, renderer } = createRenderer();
+    renderer.handleLine(
+      line({
+        type: "assistant",
+        message: {
+          content: [
+            { type: "thinking", thinking: "  first\nsecond  ", signature: "sig" },
+            { type: "thinking", thinking: "   ", signature: "sig" },
+            { type: "thinking", signature: "sig" },
+            { type: "redacted_thinking", data: "opaque" },
+          ],
+        },
+      }),
+    );
+    expect(events).toEqual([{ type: "thinking", text: "first\nsecond" }]);
   });
 
   it("counts the tool calls of the run and keeps the count past the result", () => {
@@ -118,7 +138,14 @@ describe("StreamRenderer", () => {
       line({
         type: "user",
         message: {
-          content: [{ type: "tool_result", content: "ok", is_error: false }],
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "toolu_1",
+              content: "ok",
+              is_error: false,
+            },
+          ],
         },
       }),
     );
@@ -126,13 +153,34 @@ describe("StreamRenderer", () => {
       line({
         type: "user",
         message: {
-          content: [{ type: "tool_result", content: "boom", is_error: true }],
+          content: [
+            {
+              type: "tool_result",
+              tool_use_id: "toolu_2",
+              content: "boom",
+              is_error: true,
+            },
+          ],
         },
       }),
     );
     expect(events).toEqual([
-      { type: "toolResult", isError: false, lines: ["ok"], dropped: 0 },
-      { type: "toolResult", isError: true, lines: ["boom"], dropped: 0 },
+      {
+        type: "toolResult",
+        toolUseId: "toolu_1",
+        isError: false,
+        text: "ok",
+        lines: ["ok"],
+        dropped: 0,
+      },
+      {
+        type: "toolResult",
+        toolUseId: "toolu_2",
+        isError: true,
+        text: "boom",
+        lines: ["boom"],
+        dropped: 0,
+      },
     ]);
   });
 
@@ -151,7 +199,9 @@ describe("StreamRenderer", () => {
     expect(events).toEqual([
       {
         type: "toolResult",
+        toolUseId: "",
         isError: false,
+        text: "first\n\nsecond\nthird",
         lines: ["first", "second", "third"],
         dropped: 0,
       },
@@ -173,6 +223,7 @@ describe("StreamRenderer", () => {
     expect(event.lines[0]).toBe("line 1");
     expect(event.lines[19]).toBe("line 20");
     expect(event.dropped).toBe(5);
+    expect(event.text).toBe(content);
   });
 
   it("user: extracts text from tool_result content blocks", () => {
@@ -195,7 +246,14 @@ describe("StreamRenderer", () => {
       }),
     );
     expect(events).toEqual([
-      { type: "toolResult", isError: false, lines: ["alpha", "beta"], dropped: 0 },
+      {
+        type: "toolResult",
+        toolUseId: "",
+        isError: false,
+        text: "alpha\nbeta",
+        lines: ["alpha", "beta"],
+        dropped: 0,
+      },
     ]);
   });
 
@@ -210,7 +268,14 @@ describe("StreamRenderer", () => {
       }),
     );
     expect(events).toEqual([
-      { type: "toolResult", isError: false, lines: ['{"status":200}'], dropped: 0 },
+      {
+        type: "toolResult",
+        toolUseId: "",
+        isError: false,
+        text: '{"status":200}',
+        lines: ['{"status":200}'],
+        dropped: 0,
+      },
     ]);
   });
 
@@ -396,6 +461,7 @@ describe("StreamRenderer", () => {
     if (event?.type !== "toolResult") throw new Error("expected a toolResult event");
     expect(event.lines[0]?.endsWith("…")).toBe(true);
     expect(event.lines[0]?.length).toBeLessThanOrEqual(301);
+    expect(event.text).toBe("a".repeat(1000));
   });
 
   it("unescapes literal \\n sequences when the result has no real newlines", () => {
@@ -413,7 +479,9 @@ describe("StreamRenderer", () => {
     expect(events).toEqual([
       {
         type: "toolResult",
+        toolUseId: "",
         isError: false,
+        text: "status_code: 200\nbody:\n user: 179",
         lines: ["status_code: 200", "body:", "user: 179"],
         dropped: 0,
       },
@@ -433,7 +501,9 @@ describe("StreamRenderer", () => {
     expect(events).toEqual([
       {
         type: "toolResult",
+        toolUseId: "",
         isError: false,
+        text: "diff uses \\n here\nsecond",
         lines: ["diff uses \\n here", "second"],
         dropped: 0,
       },
