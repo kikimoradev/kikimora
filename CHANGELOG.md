@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.20.0] - 2026-11-01
+
 ### Added
 
 - With `--verbose` the headless log carries the whole conversation of a session: the new `session.thinking` for each thinking block, the new `session.toolResult` for every successful tool result, and on `session.tool` the `toolUseId` and the tool `input` itself; every content event (`session.text` too) names its `sessionId`, and `toolUseId` pairs a call with its result and with the session transcript. Thinking, results and inputs longer than 4,000 characters are cut and marked `truncated` or `inputTruncated`. Without `--verbose`, the `.log` transcript and the dashboard look as before.
@@ -353,7 +355,8 @@ Initial release.
 - Non-interactive `kikimora init` for provisioning, plus a first-run wizard in the terminal.
 - Reference `Dockerfile` and `docker-compose.yml`.
 
-[Unreleased]: https://github.com/kikimoradev/kikimora/compare/v0.19.0...HEAD
+[Unreleased]: https://github.com/kikimoradev/kikimora/compare/v0.20.0...HEAD
+[0.20.0]: https://github.com/kikimoradev/kikimora/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/kikimoradev/kikimora/compare/v0.18.0...v0.19.0
 [0.18.0]: https://github.com/kikimoradev/kikimora/compare/v0.17.0...v0.18.0
 [0.17.0]: https://github.com/kikimoradev/kikimora/compare/v0.16.3...v0.17.0
