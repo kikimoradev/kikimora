@@ -3,7 +3,10 @@ import type { ApiErrorInfo, RateLimitInfo, SessionSummary } from "./types.js";
 
 interface ContentBlock {
   type: string;
+  id?: string;
+  tool_use_id?: string;
   text?: string;
+  thinking?: string;
   name?: string;
   input?: unknown;
   content?: unknown;
@@ -124,10 +127,13 @@ export class StreamRenderer {
         for (const block of event.message?.content ?? []) {
           if (block.type === "text" && block.text?.trim()) {
             this.emit({ type: "text", text: block.text.trim() });
+          } else if (block.type === "thinking" && block.thinking?.trim()) {
+            this.emit({ type: "thinking", text: block.thinking.trim() });
           } else if (block.type === "tool_use") {
             this.summary.toolUses = (this.summary.toolUses ?? 0) + 1;
             this.emit({
               type: "toolUse",
+              id: block.id ?? "",
               name: block.name ?? "?",
               input: block.input,
             });
@@ -138,13 +144,16 @@ export class StreamRenderer {
       case "user":
         for (const block of event.message?.content ?? []) {
           if (block.type === "tool_result") {
-            const lines = unescapeNewlines(toolResultText(block.content))
+            const text = unescapeNewlines(toolResultText(block.content));
+            const lines = text
               .split("\n")
               .map((line) => line.trim())
               .filter(Boolean);
             this.emit({
               type: "toolResult",
+              toolUseId: block.tool_use_id ?? "",
               isError: block.is_error ?? false,
+              text,
               lines: lines
                 .slice(0, MAX_RESULT_LINES)
                 .map((line) => truncate(line, MAX_RESULT_LINE_LENGTH)),

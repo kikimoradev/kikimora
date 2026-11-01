@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- With `--verbose` the headless log carries the whole conversation of a session: the new `session.thinking` for each thinking block, the new `session.toolResult` for every successful tool result, and on `session.tool` the `toolUseId` and the tool `input` itself; every content event (`session.text` too) names its `sessionId`, and `toolUseId` pairs a call with its result and with the session transcript. Thinking, results and inputs longer than 4,000 characters are cut and marked `truncated` or `inputTruncated`. Without `--verbose`, the `.log` transcript and the dashboard look as before.
+
+### Changed
+
+- `session.toolError` now carries the original text of the failed result, line breaks and indentation kept, up to 4,000 characters with `truncated`, instead of its first 20 trimmed lines, plus `sessionId` and `toolUseId`.
+
 ## [0.19.0] - 2026-10-31
 
 ### Added

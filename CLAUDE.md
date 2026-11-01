@@ -147,7 +147,7 @@ In an interactive terminal `start.ts` constructs both controllers as `paused`, s
   - `reporters.ts` implements `MonitorReporter`, `ExecutorReporter` and `SummaryReporter`, mapping lifecycle callbacks to `HeadlessLogEvent`s (`events.ts`).
   - `format.ts` renders events as pretty lines or NDJSON: a stable envelope (`ts`, `level`, `agent`, `event`) plus fields, with undefined fields omitted. `docs/deployment.md` documents the schema.
   - `sink.ts` writes to stdout; tests inject `StartWorkerOptions.stdout`.
-  - Session `text`, `toolUse` and `toolResult` events are logged only with `--verbose`.
+  - Session `text`, `thinking`, `toolUse` and `toolResult` events are logged only with `--verbose`, each with the `sessionId` of the latest `init`; thinking, tool input and result are cut at `LIVE_FIELD_MAX` (`boundText`). `SessionLog` and the TUI skip `thinking`.
   - The `WorkerStatusStore` keeps running headless because it feeds the control socket.
 - **`control-server.ts`, `control-client.ts`, `control-protocol.ts`, `control-commands.ts`**: the control socket.
   - Transport: a unix domain socket (a named pipe on win32) at `controlSocketPath(projectDir)` in `paths.ts`. The path is tmpdir + uid + the first 16 hex characters of the sha256 of the resolved project path. It sits outside `.kikimora/` to stay under the 104-byte `sun_path` limit. `KIKIMORA_CONTROL_SOCKET` overrides it and is validated in the same function, so the worker and the CLI agree.

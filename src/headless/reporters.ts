@@ -1,8 +1,18 @@
 import type { AdmissionChange, AdmissionWait } from "../admission.js";
 import type { SummaryReporter } from "../memory/summarizer.js";
-import { describeToolUse, type SessionEventSink } from "../session-events.js";
+import {
+  boundText,
+  describeToolUse,
+  LIVE_FIELD_MAX,
+  type SessionEventSink,
+} from "../session-events.js";
 import type { ExecutorReporter, MonitorReporter } from "../status.js";
-import { compactFields, type HeadlessAgent, type HeadlessLogEmitter } from "./events.js";
+import {
+  compactFields,
+  type HeadlessAgent,
+  type HeadlessLogEmitter,
+  type HeadlessLogEvent,
+} from "./events.js";
 
 export interface HeadlessReporterOptions {
   verbose?: boolean | undefined;
@@ -14,14 +24,33 @@ export interface HeadlessReporters {
   summarizer: SummaryReporter;
 }
 
+function toolInputFields(input: unknown): Record<string, unknown> {
+  const serialized = JSON.stringify(input) as string | undefined;
+  if (serialized === undefined) return {};
+  const bounded = boundText(serialized, LIVE_FIELD_MAX);
+  return {
+    input: bounded.truncated ? bounded.text : input,
+    inputTruncated: bounded.truncated,
+  };
+}
+
 function sessionSink(
   emit: HeadlessLogEmitter,
   agent: HeadlessAgent,
   verbose: boolean,
 ): SessionEventSink {
+  let sessionId: string | undefined;
+  const content = (
+    level: HeadlessLogEvent["level"],
+    event: string,
+    fields: Record<string, unknown>,
+  ): void => {
+    emit({ level, agent, event, fields: compactFields({ sessionId, ...fields }) });
+  };
   return (event) => {
     switch (event.type) {
       case "spawned":
+        sessionId = undefined;
         emit({
           level: "info",
           agent,
@@ -36,6 +65,7 @@ function sessionSink(
         });
         return;
       case "init":
+        sessionId = event.sessionId;
         emit({
           level: "info",
           agent,
@@ -78,34 +108,40 @@ function sessionSink(
         });
         return;
       case "text":
+        if (verbose) content("info", "session.text", { text: event.text });
+        return;
+      case "thinking":
         if (verbose) {
-          emit({
-            level: "info",
-            agent,
-            event: "session.text",
-            fields: { text: event.text },
+          const thought = boundText(event.text, LIVE_FIELD_MAX);
+          content("info", "session.thinking", {
+            text: thought.text,
+            truncated: thought.truncated,
           });
         }
         return;
       case "toolUse":
         if (verbose) {
           const call = describeToolUse(event.name, event.input);
-          emit({
-            level: "info",
-            agent,
-            event: "session.tool",
-            fields: { tool: call.name, detail: call.detail },
+          content("info", "session.tool", {
+            tool: call.name,
+            detail: call.detail,
+            toolUseId: event.id || undefined,
+            ...toolInputFields(event.input),
           });
         }
         return;
       case "toolResult":
-        if (verbose && event.isError) {
-          emit({
-            level: "warn",
-            agent,
-            event: "session.toolError",
-            fields: { output: event.lines.join("\n") },
-          });
+        if (verbose) {
+          const output = boundText(event.text, LIVE_FIELD_MAX);
+          content(
+            event.isError ? "warn" : "info",
+            event.isError ? "session.toolError" : "session.toolResult",
+            {
+              toolUseId: event.toolUseId || undefined,
+              output: output.text,
+              truncated: output.truncated,
+            },
+          );
         }
         return;
       case "partial":

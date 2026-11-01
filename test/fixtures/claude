@@ -222,8 +222,28 @@ function run() {
         type: "assistant",
         message: {
           content: [
-            { type: "tool_use", name: "Read", input: { file_path: "README.md" } },
-            { type: "tool_use", name: "Bash", input: { command: "ls" } },
+            { type: "thinking", thinking: "Read the readme, then list the files.", signature: "sig" },
+            {
+              type: "tool_use",
+              id: "toolu_read",
+              name: "Read",
+              input: { file_path: "README.md" },
+            },
+            { type: "tool_use", id: "toolu_bash", name: "Bash", input: { command: "ls" } },
+          ],
+        },
+      });
+      emit({
+        type: "user",
+        message: {
+          content: [
+            { type: "tool_result", tool_use_id: "toolu_read", content: "# Project\n\nIntro" },
+            {
+              type: "tool_result",
+              tool_use_id: "toolu_bash",
+              content: "ls: cannot open directory",
+              is_error: true,
+            },
           ],
         },
       });

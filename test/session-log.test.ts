@@ -75,6 +75,34 @@ describe("SessionLog", () => {
     );
   });
 
+  it("keeps the thinking out of the log and renders tool lines as before", async () => {
+    const at = new Date(2026, 6, 2, 10, 0, 0);
+    const log = new SessionLog(dir, () => at);
+    log.sink({ type: "init", model: "haiku", sessionId: "s", toolCount: 1 });
+    log.sink({ type: "thinking", text: "private reasoning" });
+    log.sink({ type: "toolUse", id: "toolu_1", name: "Bash", input: { command: "ls" } });
+    log.sink({
+      type: "toolResult",
+      toolUseId: "toolu_1",
+      isError: false,
+      text: "a.txt\nb.txt",
+      lines: ["a.txt", "b.txt"],
+      dropped: 0,
+    });
+    await log.close();
+
+    const content = await readFile(join(dir, "2026-07-02", "10-00-00-s.log"), "utf8");
+    expect(content).toBe(
+      [
+        "[10:00:00] session started · model haiku · 1 tool · s",
+        "[10:00:00] ⏺ Bash(ls)",
+        "[10:00:00]   ⎿ a.txt",
+        "[10:00:00]     b.txt",
+        "",
+      ].join("\n"),
+    );
+  });
+
   it("events before init land in the fallback file", async () => {
     const at = new Date(2026, 6, 2, 11, 30, 0);
     const log = new SessionLog(dir, () => at);

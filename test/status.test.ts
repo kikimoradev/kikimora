@@ -213,7 +213,12 @@ describe("WorkerStatusStore", () => {
       toolCount: 2,
     });
     store.monitor.session({ type: "text", text: "Checking repo" });
-    store.monitor.session({ type: "toolUse", name: "Bash", input: "git status" });
+    store.monitor.session({
+      type: "toolUse",
+      id: "toolu_1",
+      name: "Bash",
+      input: "git status",
+    });
     store.flush();
     const panel = store.getSnapshot().monitor;
     expect(panel.sessionId).toBe("sess-7");
@@ -255,11 +260,24 @@ describe("WorkerStatusStore", () => {
     store.dispose();
   });
 
+  it("leaves the tail as it was when the session thinks", () => {
+    const store = createStore();
+    store.monitor.session({ type: "partial", text: "Report ready" });
+    store.monitor.session({ type: "thinking", text: "Is the report complete?" });
+    store.monitor.session({ type: "text", text: "Report ready" });
+    store.monitor.session({ type: "thinking", text: "Done." });
+    store.flush();
+    expect(store.getSnapshot().monitor.tail).toEqual([
+      { kind: "message", text: "Report ready" },
+    ]);
+    store.dispose();
+  });
+
   it("an event other than text restores appending of subsequent texts", () => {
     const store = createStore();
     store.monitor.session({ type: "partial", text: "first" });
     store.monitor.session({ type: "text", text: "first" });
-    store.monitor.session({ type: "toolUse", name: "Bash", input: "ls" });
+    store.monitor.session({ type: "toolUse", id: "toolu_1", name: "Bash", input: "ls" });
     store.monitor.session({ type: "text", text: "second" });
     store.flush();
     expect(store.getSnapshot().monitor.tail).toEqual([
@@ -516,7 +534,7 @@ describe("WorkerStatusStore", () => {
     expect(store.getSnapshot().monitor.lastEventAt).toBe(1_000);
 
     vi.setSystemTime(5_000);
-    store.monitor.session({ type: "toolUse", name: "Bash", input: "ls" });
+    store.monitor.session({ type: "toolUse", id: "toolu_1", name: "Bash", input: "ls" });
     store.flush();
     expect(store.getSnapshot().monitor.lastEventAt).toBe(5_000);
 
@@ -608,13 +626,15 @@ describe("formatSessionEvent", () => {
       formatSessionEvent({ type: "init", model: "haiku", sessionId: "s", toolCount: 1 }),
     ).toBe("session started · model haiku · 1 tool · s");
     expect(formatSessionEvent({ type: "text", text: "abc" })).toBe("abc");
-    expect(formatSessionEvent({ type: "toolUse", name: "Bash", input: "ls" })).toBe(
-      "⏺ Bash(ls)",
-    );
+    expect(
+      formatSessionEvent({ type: "toolUse", id: "toolu_1", name: "Bash", input: "ls" }),
+    ).toBe("⏺ Bash(ls)");
     expect(
       formatSessionEvent({
         type: "toolResult",
+        toolUseId: "toolu_1",
         isError: false,
+        text: "ok",
         lines: ["ok"],
         dropped: 0,
       }),
@@ -622,7 +642,9 @@ describe("formatSessionEvent", () => {
     expect(
       formatSessionEvent({
         type: "toolResult",
+        toolUseId: "toolu_1",
         isError: false,
+        text: "",
         lines: [],
         dropped: 0,
       }),
@@ -630,7 +652,9 @@ describe("formatSessionEvent", () => {
     expect(
       formatSessionEvent({
         type: "toolResult",
+        toolUseId: "toolu_1",
         isError: true,
+        text: "boom\ncontext",
         lines: ["boom", "context"],
         dropped: 2,
       }),

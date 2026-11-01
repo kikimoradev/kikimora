@@ -1,5 +1,11 @@
 import { describe, expect, it } from "vitest";
-import { describeToolUse, formatDroppedLines, truncate } from "../src/session-events.js";
+import {
+  boundText,
+  describeToolUse,
+  formatDroppedLines,
+  LIVE_FIELD_MAX,
+  truncate,
+} from "../src/session-events.js";
 
 describe("describeToolUse", () => {
   it("extracts the primary argument for known tools", () => {
@@ -68,5 +74,25 @@ describe("truncate", () => {
     expect(truncate("a  b\n c")).toBe("a b c");
     expect(truncate("x".repeat(600), 500).endsWith("…")).toBe(true);
     expect(truncate(undefined)).toBe("");
+  });
+});
+
+describe("boundText", () => {
+  it("keeps a text within the limit whole, line breaks included", () => {
+    expect(boundText("a\n\n  b", 10)).toEqual({ text: "a\n\n  b", truncated: false });
+    expect(boundText("x".repeat(LIVE_FIELD_MAX), LIVE_FIELD_MAX)).toEqual({
+      text: "x".repeat(LIVE_FIELD_MAX),
+      truncated: false,
+    });
+  });
+
+  it("cuts a longer text at the limit and marks it truncated", () => {
+    expect(boundText("abcdef", 4)).toEqual({ text: "abcd", truncated: true });
+    expect(LIVE_FIELD_MAX).toBe(4000);
+  });
+
+  it("does not split a character made of two code units", () => {
+    expect(boundText("abc😀def", 4)).toEqual({ text: "abc", truncated: true });
+    expect(boundText("abc😀def", 5)).toEqual({ text: "abc😀", truncated: true });
   });
 });
