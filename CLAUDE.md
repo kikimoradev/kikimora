@@ -197,6 +197,7 @@ Agent prompts live in markdown files. **Do not put prompt content in code consta
 - `vitest.config.ts` enforces coverage thresholds: statements 92%, branches 75%, functions 90%, lines 94%. New code needs tests.
 - Claude sessions are tested without a real CLI. `test/fixtures/claude` is a fake binary driven by `FAKE_CLAUDE_*` variables (mode, result text, argument dump); a `_<MODEL>` suffix gives per-model variants.
 - Helper factories for configs and reporters are in `test/helpers.ts`.
+- The suite does not depend on the environment it runs in. `test/setup-env.ts` removes every `KIKIMORA_*` variable before each test file, so a session of a worker that runs the tests never reaches that worker's control socket, launcher or admission; a test that needs one sets it itself. Where `os.tmpdir()` forbids executing files (a `noexec` `/tmp`), `vitest.config.ts` points `TMPDIR` of the tests at `node_modules/.tmp`, where the stub binaries the tests write can run. `test/suite-isolation.test.ts` guards both.
 
 ## Documentation
 
