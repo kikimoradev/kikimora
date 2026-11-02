@@ -237,7 +237,7 @@ export function createHeadlessReporters(
   };
 
   const executor: ExecutorReporter = {
-    taskStarted: (task) => {
+    taskStarted: (task, maxAttempts) => {
       emit({
         level: "info",
         agent: "executor",
@@ -245,6 +245,10 @@ export function createHeadlessReporters(
         fields: compactFields({
           taskId: task.id,
           title: task.title,
+          sourceLabel: task.sourceLabel,
+          sourceUrl: task.sourceUrl,
+          attempt: task.attempts,
+          maxAttempts,
           resumedSessionId: task.resume?.sessionId,
         }),
       });
@@ -257,6 +261,8 @@ export function createHeadlessReporters(
         fields: compactFields({
           taskId: outcome.taskId,
           title: outcome.title,
+          sourceLabel: outcome.sourceLabel,
+          sourceUrl: outcome.sourceUrl,
           ok: outcome.ok,
           durationMs: outcome.durationMs,
           costUsd: outcome.costUsd,

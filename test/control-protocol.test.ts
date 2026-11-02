@@ -100,6 +100,19 @@ describe("parseControlRequest", () => {
     expect(
       accepted('{"cmd":"tasks.add","description":"Do it","id":"t-1","title":"T"}'),
     ).toEqual({ cmd: "tasks.add", description: "Do it", id: "t-1", title: "T" });
+    expect(
+      accepted(
+        '{"cmd":"tasks.add","description":"Do it","sourceLabel":" #3021 ","sourceUrl":"https://redmine.example.eu/issues/3021"}',
+      ),
+    ).toEqual({
+      cmd: "tasks.add",
+      description: "Do it",
+      sourceLabel: "#3021",
+      sourceUrl: "https://redmine.example.eu/issues/3021",
+    });
+    expect(
+      accepted('{"cmd":"tasks.add","description":"Do it","sourceLabel":"#3027"}'),
+    ).toEqual({ cmd: "tasks.add", description: "Do it", sourceLabel: "#3027" });
     expect(accepted('{"cmd":"tasks.retry","id":"t-1"}')).toEqual({
       cmd: "tasks.retry",
       id: "t-1",
@@ -193,6 +206,20 @@ describe("parseControlRequest", () => {
     );
     expect(rejected('{"cmd":"tasks.add","description":"  "}')).toMatch(
       /must not be blank/,
+    );
+    expect(
+      rejected('{"cmd":"tasks.add","description":"x","sourceUrl":"https://example.com"}'),
+    ).toMatch(/^Invalid tasks.add request: sourceUrl: sourceUrl requires sourceLabel/);
+    expect(
+      rejected(
+        '{"cmd":"tasks.add","description":"x","sourceLabel":"S","sourceUrl":"ftp://e.com"}',
+      ),
+    ).toMatch(/sourceUrl: must be an http or https URL/);
+    expect(
+      rejected(`{"cmd":"tasks.add","description":"x","sourceLabel":"${"x".repeat(81)}"}`),
+    ).toMatch(/^Invalid tasks.add request: sourceLabel: /);
+    expect(rejected('{"cmd":"tasks.add","description":"x","sourceLabel":"  "}')).toMatch(
+      /^Invalid tasks.add request: sourceLabel: /,
     );
     expect(rejected('{"cmd":"tasks.list","status":"nope"}')).toMatch(
       /^Invalid tasks.list request: status: /,

@@ -2,6 +2,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import { defineCommand } from "citty";
 import { z } from "zod";
+import { formatSource } from "../task-source.js";
 import {
   normalizeHandoffReason,
   writeHandoffMark,
@@ -13,11 +14,10 @@ export type MemoryReader = Pick<MemoryStore, "search" | "latestMatches" | "get">
 
 function formatRecord(record: TaskSummaryRecord): string {
   const status = record.ok ? "success" : "failure";
-  const lines = [
-    `### ${record.taskId} — ${record.headline}`,
-    `Task: ${record.title}`,
-    `Attempt: ${record.attempt}, result: ${status}, date: ${record.createdAt}`,
-  ];
+  const lines = [`### ${record.taskId} — ${record.headline}`, `Task: ${record.title}`];
+  const source = formatSource(record);
+  if (source !== undefined) lines.push(`Source: ${source}`);
+  lines.push(`Attempt: ${record.attempt}, result: ${status}, date: ${record.createdAt}`);
   if (record.handedOff === true) {
     lines.push(`Handed off to a human: ${record.handoffReason ?? "no reason given"}`);
   }

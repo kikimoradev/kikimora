@@ -20,6 +20,7 @@ import { CONTROL_SOCKET_ENV } from "./paths.js";
 import type { PromptAgent, PromptFileAccess } from "./prompt-files.js";
 import type { SettingsController } from "./settings-controller.js";
 import { buildManualTask, type TaskDeletion, type TaskSelector } from "./tasks.js";
+import { sourceFields } from "./task-source.js";
 import type { NewTask } from "./types.js";
 import type { Waker } from "./waker.js";
 import type {
@@ -173,6 +174,7 @@ async function addTask(
     id: request.id ?? base.id,
     title: request.title ?? base.title,
     description: request.description,
+    ...sourceFields(request),
   };
   const [added] = await deps.tasks.addTasks([candidate]);
   if (added === undefined) {

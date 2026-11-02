@@ -19,6 +19,11 @@ import {
   type SessionRecord,
 } from "./sessions/index.js";
 import type { JsonValue } from "./settings-file.js";
+import {
+  SOURCE_URL_NEEDS_LABEL,
+  sourceLabelSchema,
+  sourceUrlSchema,
+} from "./task-source.js";
 import type {
   ExecutorPhase,
   ExecutorTaskOutcome,
@@ -107,8 +112,14 @@ export const controlRequestSchema = z.discriminatedUnion("cmd", [
       description: nonBlank,
       id: nonBlank.optional(),
       title: nonBlank.optional(),
+      sourceLabel: sourceLabelSchema.optional(),
+      sourceUrl: sourceUrlSchema.optional(),
     })
-    .strict(),
+    .strict()
+    .refine(
+      (request) => request.sourceUrl === undefined || request.sourceLabel !== undefined,
+      { message: SOURCE_URL_NEEDS_LABEL, path: ["sourceUrl"] },
+    ),
   z.object({ cmd: z.literal("tasks.retry"), id: nonBlank }).strict(),
   z.object({ cmd: z.literal("tasks.cancel"), id: nonBlank }).strict(),
   z

@@ -28,8 +28,8 @@ The agents re-read these files before each session, so a saved change applies to
 
 ## How the prompts compose
 
-- The **monitor** session gets `monitor.prompt.md` as its prompt. It must answer with a JSON task report that matches an enforced schema. Each task has a stable `id`, a `title`, and a `description` with everything needed to complete it in a separate session.
-- The **executor** session gets `executor.prompt.md` followed by a `## Task to complete` section with the task's ID, title and description. One session handles one task.
+- The **monitor** session gets `monitor.prompt.md` as its prompt. It must answer with a JSON task report that matches an enforced schema. Each task has a stable `id`, a `title`, and a `description` with everything needed to complete it in a separate session, plus an optional `sourceLabel` (the short label of the item the task comes from, at most 80 characters) and `sourceUrl` (its http(s) address, only together with the label). An invalid source is dropped and the task kept.
+- The **executor** session gets `executor.prompt.md` followed by a `## Task to complete` section with the task's ID, title and description, and a `Source:` line after the title when the task has a source (`Source: ENG-142 (https://linear.app/acme/issue/ENG-142)`, or `Source: #3027` without an address). One session handles one task.
 - The optional **context file** is appended to both project prompts after a blank line: at the end of the monitor's prompt, and between the executor's prompt and the `## Task to complete` section. A missing, empty or blank file adds nothing.
 - The **summarizer** has no project prompt and no context. It reads the executor's session log and writes findings to long-term memory.
 
@@ -47,7 +47,8 @@ Check the following sources and report actionable tasks:
    task id: `ci-<run-id>`.
 2. **Issues labeled `good-first-issue` or `bug`**: run
    `gh issue list --label bug --state open`. For each issue that describes a
-   concrete, self-contained code change, report a task with id `issue-<number>`.
+   concrete, self-contained code change, report a task with id `issue-<number>`,
+   `sourceLabel` `acme/shop#<number>` and `sourceUrl` the issue's URL.
    Skip discussions, feature requests, and anything that needs a product decision.
 3. **Outdated dependencies**: once in a while run `pnpm outdated`. Report a
    single task (id `deps-patch`) only when there are pending **patch** updates.
@@ -76,6 +77,7 @@ Rules:
 ## Tips
 
 - **Derive task ids from the source.** The monitor session has no record of its earlier reports, so it can report the same problem on each patrol. The task store skips any id it already holds, whatever that task's status, until the task is [deleted](control.md#deleting-tasks); a deleted id that the monitor reports again comes back as a new pending task. An id derived from the source (`issue-142`, `ci-9182634`) keeps one problem as one task.
+- **Name the source of a task.** When a task comes from an item people know by a label, give it in `sourceLabel` and its address in `sourceUrl`; the source then shows in the executor's prompt, in `task.started` and `task.finished`, in `kikimora tasks list --json`, in `kikimora status --json` and in the task's memory entry, so a dashboard can group and link the tasks. For example "For a task from an issue, set sourceLabel to the issue key and sourceUrl to its URL; leave both out for CI runs and dependency updates": `ENG-142` with `https://linear.app/acme/issue/ENG-142` for a Linear issue, `#3021` with `https://redmine.example.eu/issues/3021` for a Redmine ticket, `acme/shop#57` for a pull request, and no source for a CI run (`ci-9182634`) or a dependency update (`deps-patch`). `kikimora tasks add --source <label> --source-url <url>` does the same for a manual task ([docs/control.md](control.md)).
 - **Put the whole briefing in the description.** An executor session's input is the executor prompt, the context file and the task; earlier sessions reach it only through memory search. Links, error output and acceptance criteria must be in the task description.
 - **Set the safety boundaries in the prompts.** The executor runs with `--permission-mode bypassPermissions`, so the prompts define what it may do. List what is off-limits: pushing to `main`, deploying, touching secrets.
 - **Commits and pull requests carry no Claude attribution.** Every session runs with `--settings '{"attribution":{"commit":"","pr":""}}'`, so Claude Code adds neither the `Co-Authored-By` trailer nor the generated-with line. A prompt that wants attribution has to ask for it.

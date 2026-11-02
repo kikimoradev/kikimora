@@ -593,6 +593,42 @@ describe("startControlServer", () => {
     ]);
   });
 
+  it("adds a task with the source it names", async () => {
+    const { deps } = await startServer();
+
+    await sendControlRequest(socketPath, {
+      cmd: "tasks.add",
+      description: "Shipment status in the portal",
+      id: "redmine-3021",
+      sourceLabel: "#3021",
+      sourceUrl: "https://redmine.example.eu/issues/3021",
+    });
+    await sendControlRequest(socketPath, {
+      cmd: "tasks.add",
+      description: "ZPL labels",
+      id: "redmine-3027",
+      sourceLabel: "#3027",
+    });
+
+    expect(deps.tasks.addTasks).toHaveBeenNthCalledWith(1, [
+      {
+        id: "redmine-3021",
+        title: "Shipment status in the portal",
+        description: "Shipment status in the portal",
+        sourceLabel: "#3021",
+        sourceUrl: "https://redmine.example.eu/issues/3021",
+      },
+    ]);
+    expect(deps.tasks.addTasks).toHaveBeenNthCalledWith(2, [
+      {
+        id: "redmine-3027",
+        title: "ZPL labels",
+        description: "ZPL labels",
+        sourceLabel: "#3027",
+      },
+    ]);
+  });
+
   it("reports a duplicate task id without waking the executor", async () => {
     const fakes = fakeDeps();
     fakes.tasks.addTasks.mockResolvedValue([]);

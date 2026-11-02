@@ -197,6 +197,29 @@ describe("SessionSummarizer", () => {
     expect(spec.prompt).not.toContain("Handed off");
   });
 
+  it("saves the source of the task with the record only when the task has one", async () => {
+    const source = {
+      sourceLabel: "ENG-142",
+      sourceUrl: "https://linear.app/acme/issue/ENG-142",
+    };
+    await buildSummarizer().summarize(
+      task({ id: "issue-142", ...source }),
+      executorResult(),
+      { willRetry: false, lease: LOCAL_LEASE },
+      new AbortController().signal,
+    );
+    await buildSummarizer().summarize(
+      task(),
+      executorResult(),
+      { willRetry: false, lease: LOCAL_LEASE },
+      new AbortController().signal,
+    );
+
+    expect(store.get("issue-142")[0]).toMatchObject(source);
+    expect(store.get("redmine-1")[0]).not.toHaveProperty("sourceLabel");
+    expect(store.get("redmine-1")[0]).not.toHaveProperty("sourceUrl");
+  });
+
   it("skips the summary when the executor session has no id", async () => {
     await buildSummarizer().summarize(
       task(),

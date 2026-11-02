@@ -159,9 +159,14 @@ export interface Task {
   resume?: TaskResume | undefined;
   handedOff?: boolean | undefined;
   handoffReason?: string | undefined;
+  sourceLabel?: string | undefined;
+  sourceUrl?: string | undefined;
 }
 
-export type NewTask = Pick<Task, "id" | "title" | "description">;
+export type NewTask = Pick<
+  Task,
+  "id" | "title" | "description" | "sourceLabel" | "sourceUrl"
+>;
 
 export interface TaskHandoff {
   reason: string;

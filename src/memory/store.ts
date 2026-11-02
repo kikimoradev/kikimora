@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { dirname } from "node:path";
 import { DatabaseSync, type SQLInputValue } from "node:sqlite";
 import { z } from "zod";
+import { sourceFields } from "../task-source.js";
 
 export interface TaskSummaryRecord {
   id: number;
@@ -16,6 +17,8 @@ export interface TaskSummaryRecord {
   createdAt: string;
   handedOff?: boolean | undefined;
   handoffReason?: string | undefined;
+  sourceLabel?: string | undefined;
+  sourceUrl?: string | undefined;
 }
 
 export type NewTaskSummaryRecord = Omit<TaskSummaryRecord, "id">;
@@ -72,9 +75,11 @@ CREATE VIRTUAL TABLE IF NOT EXISTS summaries_fts USING fts5(
 );
 `;
 
-const HANDOFF_COLUMNS = [
+const ADDED_COLUMNS = [
   ["handed_off", "INTEGER NOT NULL DEFAULT 0"],
   ["handoff_reason", "TEXT"],
+  ["source_label", "TEXT"],
+  ["source_url", "TEXT"],
 ] as const;
 
 const columnSchema = z.object({ name: z.string() });
@@ -89,7 +94,7 @@ function migrate(db: DatabaseSync): void {
         .all()
         .map((row) => columnSchema.parse(row).name),
     );
-    for (const [name, definition] of HANDOFF_COLUMNS) {
+    for (const [name, definition] of ADDED_COLUMNS) {
       if (!present.has(name)) {
         db.exec(`ALTER TABLE summaries ADD COLUMN ${name} ${definition}`);
       }
@@ -114,6 +119,8 @@ const rowSchema = z.object({
   created_at: z.string(),
   handed_off: z.number().optional(),
   handoff_reason: z.string().nullable().optional(),
+  source_label: z.string().nullable().optional(),
+  source_url: z.string().nullable().optional(),
 });
 
 function toRecord(row: unknown): TaskSummaryRecord {
@@ -132,6 +139,10 @@ function toRecord(row: unknown): TaskSummaryRecord {
     ...(parsed.handed_off === 1
       ? { handedOff: true, handoffReason: parsed.handoff_reason ?? undefined }
       : {}),
+    ...sourceFields({
+      sourceLabel: parsed.source_label ?? undefined,
+      sourceUrl: parsed.source_url ?? undefined,
+    }),
   };
 }
 
@@ -215,8 +226,8 @@ export class MemoryStore {
         .prepare(
           `INSERT INTO summaries
              (task_id, attempt, ok, title, headline, summary, error, session_id, created_at,
-              handed_off, handoff_reason)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+              handed_off, handoff_reason, source_label, source_url)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           record.taskId,
@@ -230,6 +241,8 @@ export class MemoryStore {
           record.createdAt,
           record.handedOff === true ? 1 : 0,
           record.handedOff === true ? (record.handoffReason ?? null) : null,
+          record.sourceLabel ?? null,
+          record.sourceLabel === undefined ? null : (record.sourceUrl ?? null),
         );
       const id = Number(inserted.lastInsertRowid);
       this.db

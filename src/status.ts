@@ -75,6 +75,8 @@ export interface ExecutorTaskOutcome {
   sessionId?: string | undefined;
   handedOff?: boolean | undefined;
   handoffReason?: string | undefined;
+  sourceLabel?: string | undefined;
+  sourceUrl?: string | undefined;
   finishedAt: number;
 }
 
@@ -136,7 +138,7 @@ export interface MonitorReporter {
 }
 
 export interface ExecutorReporter {
-  taskStarted(task: Task): void;
+  taskStarted(task: Task, maxAttempts: number): void;
   taskFinished(outcome: Omit<ExecutorTaskOutcome, "finishedAt">): void;
   retryScheduled(task: Task, resumeAt: Date): void;
   usageLimit(resumeAt: Date): void;

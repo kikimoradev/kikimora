@@ -8,6 +8,7 @@ import type { SessionEventSink } from "../session-events.js";
 import type { SessionLauncher } from "../session-launcher.js";
 import type { SessionRecorder } from "../sessions/index.js";
 import type { SummaryOutcome } from "../status.js";
+import { sourceFields } from "../task-source.js";
 import type { SessionResult, SummarizerConfig, Task, TaskHandoff } from "../types.js";
 import { detectUsageLimit } from "../usage-limit.js";
 import { handoffFields } from "./handoff.js";
@@ -179,6 +180,7 @@ export class SessionSummarizer implements TaskSummarizer {
         sessionId,
         createdAt: new Date().toISOString(),
         ...handoffFields(outcome.handoff),
+        ...sourceFields(task),
       });
       finished(true, {
         costUsd: sessionResult.costUsd,

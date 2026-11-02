@@ -585,6 +585,39 @@ describe("MemoryStore", () => {
       JSON.parse(JSON.stringify([plain, marked])),
     );
   });
+
+  it("keeps the source of a task with the record and leaves it out of a record without one", () => {
+    const source = {
+      sourceLabel: "ENG-142",
+      sourceUrl: "https://linear.app/acme/issue/ENG-142",
+    };
+    const withSource = store.add(buildRecord({ taskId: "issue-142", ...source }));
+    const labelOnly = store.add(
+      buildRecord({ taskId: "redmine-3027", sourceLabel: "#3027" }),
+    );
+    const plain = store.add(buildRecord({ taskId: "ci-9182634" }));
+
+    expect(store.get("issue-142")).toEqual([withSource]);
+    expect(store.get("issue-142")[0]).toMatchObject(source);
+    expect(store.get("redmine-3027")).toEqual([labelOnly]);
+    expect(store.get("redmine-3027")[0]).not.toHaveProperty("sourceUrl");
+    expect(store.get("ci-9182634")).toEqual([plain]);
+    expect(store.get("ci-9182634")[0]).not.toHaveProperty("sourceLabel");
+    expect(store.get("ci-9182634")[0]).not.toHaveProperty("sourceUrl");
+    expect(store.recent(3)).toEqual([plain, labelOnly, withSource]);
+    expect(store.search("export", 10, { order: "newest" })).toEqual([
+      plain,
+      labelOnly,
+      withSource,
+    ]);
+    expect(store.latestMatches("export")[2]).toMatchObject(source);
+  });
+
+  it("does not store an address without a label", () => {
+    store.add(buildRecord({ sourceUrl: "https://example.com/1" }));
+
+    expect(store.get("redmine-1")[0]).not.toHaveProperty("sourceUrl");
+  });
 });
 
 const PREVIOUS_SCHEMA = `
@@ -644,16 +677,26 @@ describe("MemoryStore on a database of an earlier version", () => {
       const [old] = reader.get("old-1");
       expect(old).toMatchObject({ taskId: "old-1", headline: "Old headline" });
       expect(old).not.toHaveProperty("handedOff");
+      expect(old).not.toHaveProperty("sourceLabel");
+      expect(reader.latestMatches("handoffs")).toHaveLength(1);
     } finally {
       reader.close();
     }
     expect(columns()).not.toContain("handed_off");
+    expect(columns()).not.toContain("source_label");
   });
 
   it("adds the handoff columns once, keeps the old entries unmarked and stores new marks", () => {
     const store = MemoryStore.open(dbPath);
     try {
-      expect(columns()).toEqual(expect.arrayContaining(["handed_off", "handoff_reason"]));
+      expect(columns()).toEqual(
+        expect.arrayContaining([
+          "handed_off",
+          "handoff_reason",
+          "source_label",
+          "source_url",
+        ]),
+      );
       const [old] = store.get("old-1");
       expect(old).toMatchObject({ taskId: "old-1", ok: true });
       expect(old).not.toHaveProperty("handedOff");
@@ -665,6 +708,7 @@ describe("MemoryStore on a database of an earlier version", () => {
     const reopened = MemoryStore.open(dbPath);
     try {
       expect(columns().filter((name) => name === "handed_off")).toHaveLength(1);
+      expect(columns().filter((name) => name === "source_url")).toHaveLength(1);
       expect(reopened.get("new-1")[0]).toMatchObject({
         handedOff: true,
         handoffReason: "why",
@@ -673,5 +717,47 @@ describe("MemoryStore on a database of an earlier version", () => {
     } finally {
       reopened.close();
     }
+  });
+});
+
+describe("MemoryStore on a database of 0.19.0", () => {
+  let dir: string;
+  let dbPath: string;
+
+  beforeEach(async () => {
+    dir = await createTempDir();
+    dbPath = join(dir, "memory.db");
+    const db = new DatabaseSync(dbPath);
+    db.exec(PREVIOUS_SCHEMA);
+    db.exec("ALTER TABLE summaries ADD COLUMN handed_off INTEGER NOT NULL DEFAULT 0");
+    db.exec("ALTER TABLE summaries ADD COLUMN handoff_reason TEXT");
+    db.exec("UPDATE summaries SET handed_off = 1, handoff_reason = 'kept'");
+    db.close();
+  });
+
+  afterEach(() => removeTempDir(dir));
+
+  it("adds only the source columns and keeps the handoff of the old entries", () => {
+    const reader = MemoryStore.open(dbPath, { readOnly: true });
+    try {
+      expect(reader.recent(1)[0]).toMatchObject({
+        handedOff: true,
+        handoffReason: "kept",
+      });
+    } finally {
+      reader.close();
+    }
+
+    const store = MemoryStore.open(dbPath);
+    try {
+      const [old] = store.get("old-1");
+      expect(old).toMatchObject({ handedOff: true, handoffReason: "kept" });
+      expect(old).not.toHaveProperty("sourceLabel");
+      store.add(buildRecord({ taskId: "new-1", sourceLabel: "#3021" }));
+      expect(store.get("new-1")[0]).toMatchObject({ sourceLabel: "#3021" });
+    } finally {
+      store.close();
+    }
+    MemoryStore.open(dbPath).close();
   });
 });

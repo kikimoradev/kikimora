@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { lastJsonBlock, parseLenient } from "../report.js";
+import { formatSource } from "../task-source.js";
 import type { SessionResult, Task, TaskHandoff } from "../types.js";
 
 export const SUMMARY_JSON_SCHEMA = JSON.stringify({
@@ -40,6 +41,11 @@ export function parseSummary(resultText: string): SummaryReport | null {
   return parsed.success ? parsed.data : null;
 }
 
+function sourceLines(task: Task): string[] {
+  const source = formatSource(task);
+  return source === undefined ? [] : [`Source: ${source}`];
+}
+
 export interface SummaryContext {
   task: Task;
   result: SessionResult;
@@ -55,6 +61,7 @@ export function composeSummaryPrompt(context: SummaryContext): string {
     "",
     `ID: ${task.id}`,
     `Title: ${task.title}`,
+    ...sourceLines(task),
     `Attempt: ${task.attempts}`,
     "Description:",
     task.description,
