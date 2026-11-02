@@ -88,7 +88,7 @@ describe("WorkerStatusStore", () => {
   it("transitions through executor phases and records the task outcome", () => {
     const store = createStore();
     const task = buildTask();
-    store.executor.taskStarted(task);
+    store.executor.taskStarted(task, 3);
     store.flush();
     const phase = store.getSnapshot().executor.phase;
     expect(phase.kind).toBe("session");
@@ -118,7 +118,7 @@ describe("WorkerStatusStore", () => {
   it("summaryStarted sets the summary phase without clearing the tail", () => {
     const store = createStore();
     const task = buildTask();
-    store.executor.taskStarted(task);
+    store.executor.taskStarted(task, 3);
     store.executor.session({ type: "text", text: "working on task" });
     store.executor.summaryStarted(task);
     store.flush();

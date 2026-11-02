@@ -169,6 +169,31 @@ describe("composeTaskPrompt", () => {
     expect(prompt).toContain("Title: Task redmine-7");
     expect(prompt).toContain("Description redmine-7");
   });
+
+  it("names the source of the task after its title, with the address when there is one", () => {
+    const withUrl = composeTaskPrompt("identity\n", {
+      ...task("issue-142"),
+      sourceLabel: "ENG-142",
+      sourceUrl: "https://linear.app/acme/issue/ENG-142",
+    });
+    const labelOnly = composeTaskPrompt("identity\n", {
+      ...task("redmine-3027"),
+      sourceLabel: "#3027",
+    });
+
+    expect(withUrl).toContain(
+      "Title: Task issue-142\nSource: ENG-142 (https://linear.app/acme/issue/ENG-142)\nDescription:\n",
+    );
+    expect(labelOnly).toContain(
+      "Title: Task redmine-3027\nSource: #3027\nDescription:\n",
+    );
+  });
+
+  it("keeps the task block of a task without a source as it was", () => {
+    expect(composeTaskPrompt("identity\n", task("ci-9182634"))).toBe(
+      "identity\n\n## Task to complete\n\nID: ci-9182634\nTitle: Task ci-9182634\nDescription:\nDescription ci-9182634\n",
+    );
+  });
 });
 
 describe("attemptCostUsd", () => {
@@ -252,6 +277,53 @@ describe("runExecutorLoop", () => {
 
     controller.abort();
     await promise;
+  });
+
+  it("reports the attempt, the attempt limit and the source of a task", async () => {
+    const source = {
+      sourceLabel: "ENG-142",
+      sourceUrl: "https://linear.app/acme/issue/ENG-142",
+    };
+    const { store, complete } = fakeStore([
+      { ...task("issue-142"), ...source },
+      { ...task("ci-9182634"), attempts: 1 },
+    ]);
+    const controller = new AbortController();
+    mocks.runSession.mockResolvedValue(ok());
+
+    const promise = runExecutorLoop(
+      buildConfig(),
+      store,
+      new Waker(),
+      spy.reporter,
+      summarizerSpy.summarizer,
+      noopController(),
+      buildGates(),
+      controller.signal,
+    );
+    await vi.waitFor(() => expect(complete).toHaveBeenCalledTimes(2));
+    controller.abort();
+    await promise;
+
+    expect(spy.taskStarted).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ id: "issue-142", attempts: 1, ...source }),
+      3,
+    );
+    expect(spy.taskStarted).toHaveBeenNthCalledWith(
+      2,
+      expect.objectContaining({ id: "ci-9182634", attempts: 2 }),
+      3,
+    );
+    expect(spy.taskFinished).toHaveBeenNthCalledWith(
+      1,
+      expect.objectContaining({ taskId: "issue-142", ok: true, ...source }),
+    );
+    const plain = spy.taskFinished.mock.calls[1]?.[0] as Record<string, unknown>;
+    expect(plain).not.toHaveProperty("sourceLabel");
+    expect(plain).not.toHaveProperty("sourceUrl");
+    const prompt = (mocks.runSession.mock.calls[0]?.[0] as { prompt: string }).prompt;
+    expect(prompt).toContain("Source: ENG-142 (https://linear.app/acme/issue/ENG-142)");
   });
 
   it("composes the session spec: contract in the system prompt, task in the prompt, session sink", async () => {
@@ -1152,6 +1224,7 @@ describe("runExecutorLoop", () => {
     expect(resumedOutcome.numTurns).toBe(2);
     expect(spy.taskStarted).toHaveBeenLastCalledWith(
       expect.objectContaining({ id: "limited", resume }),
+      3,
     );
     expect(summarizerSpy.summarize).toHaveBeenCalledWith(
       expect.objectContaining({ id: "limited" }),
@@ -2122,6 +2195,7 @@ describe("runExecutorLoop while a session is being prepared", () => {
 
     expect(reporter.taskStarted).toHaveBeenCalledWith(
       expect.objectContaining({ id: "claimed" }),
+      3,
     );
     expect(reporter.taskFinished).toHaveBeenCalledWith(
       expect.objectContaining({

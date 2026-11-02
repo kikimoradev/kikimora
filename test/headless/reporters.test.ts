@@ -211,6 +211,7 @@ describe("createHeadlessReporters", () => {
       buildTask({
         resume: { sessionId: "sess-limited", limitedAt: "2026-10-22T12:33:58.000Z" },
       }),
+      3,
     );
 
     expect(events[0]).toMatchObject({
@@ -223,7 +224,7 @@ describe("createHeadlessReporters", () => {
     const { events, executor } = collect();
     const task = buildTask();
 
-    executor.taskStarted(task);
+    executor.taskStarted(task, 3);
     executor.retryScheduled(task, RESUME_AT);
     executor.usageLimit(RESUME_AT);
     executor.waiting();
@@ -233,7 +234,7 @@ describe("createHeadlessReporters", () => {
         level: "info",
         agent: "executor",
         event: "task.started",
-        fields: { taskId: "task-1", title: "Fix the bug" },
+        fields: { taskId: "task-1", title: "Fix the bug", attempt: 0, maxAttempts: 3 },
       },
       {
         level: "warn",
@@ -334,6 +335,40 @@ describe("createHeadlessReporters", () => {
     });
     expect(events[2]?.fields).not.toHaveProperty("handedOff");
     expect(events[2]?.fields).not.toHaveProperty("handoffReason");
+  });
+
+  it("adds the source of a task to task.started and task.finished only when it is set", () => {
+    const { events, executor } = collect();
+    const source = {
+      sourceLabel: "ENG-142",
+      sourceUrl: "https://linear.app/acme/issue/ENG-142",
+    };
+
+    executor.taskStarted(buildTask({ ...source, attempts: 1 }), 3);
+    executor.taskStarted(buildTask({ id: "ci-9182634", attempts: 2 }), 3);
+    executor.taskStarted(buildTask({ sourceLabel: "#3027", attempts: 1 }), 3);
+    const base = { taskId: "task-1", title: "Fix the bug", ok: true, durationMs: 1000 };
+    executor.taskFinished({ ...base, ...source });
+    executor.taskFinished(base);
+
+    expect(events[0]?.fields).toEqual({
+      taskId: "task-1",
+      title: "Fix the bug",
+      ...source,
+      attempt: 1,
+      maxAttempts: 3,
+    });
+    expect(events[1]?.fields).toEqual({
+      taskId: "ci-9182634",
+      title: "Fix the bug",
+      attempt: 2,
+      maxAttempts: 3,
+    });
+    expect(events[2]?.fields).toMatchObject({ sourceLabel: "#3027" });
+    expect(events[2]?.fields).not.toHaveProperty("sourceUrl");
+    expect(events[3]?.fields).toEqual({ ...base, ...source });
+    expect(events[4]?.fields).not.toHaveProperty("sourceLabel");
+    expect(events[4]?.fields).not.toHaveProperty("sourceUrl");
   });
 
   it("keeps executor summary callbacks silent and routes them via the summarizer reporter", () => {

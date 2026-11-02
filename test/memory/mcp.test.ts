@@ -259,6 +259,47 @@ describe("memory MCP server", () => {
     }
     expect(history.match(/Handed off to a human/g)).toHaveLength(1);
   });
+
+  it("memory_get and memory_search name the source of a task after the task line", async () => {
+    const entry = {
+      attempt: 1,
+      ok: true,
+      title: "Discount before tax",
+      headline: "Moved the discount after tax",
+      summary: "The checkout applied the discount to the gross price.",
+      error: undefined,
+      sessionId: "session-9",
+      createdAt: "2026-07-03T12:00:00.000Z",
+    };
+    store.add({
+      ...entry,
+      taskId: "issue-142",
+      sourceLabel: "ENG-142",
+      sourceUrl: "https://linear.app/acme/issue/ENG-142",
+    });
+    store.add({ ...entry, taskId: "ci-9182634", title: "Failing checkout build" });
+
+    const history = firstText(
+      await client.callTool({ name: "memory_get", arguments: { taskId: "issue-142" } }),
+    );
+    const search = firstText(
+      await client.callTool({ name: "memory_search", arguments: { query: "checkout" } }),
+    );
+    const plain = firstText(
+      await client.callTool({ name: "memory_get", arguments: { taskId: "ci-9182634" } }),
+    );
+
+    for (const text of [history, search]) {
+      expect(text).toContain(
+        "Task: Discount before tax\n" +
+          "Source: ENG-142 (https://linear.app/acme/issue/ENG-142)\n" +
+          "Attempt: 1, result: success",
+      );
+    }
+    expect(search.match(/Source:/g)).toHaveLength(1);
+    expect(plain).not.toContain("Source:");
+    expect(plain).toContain("Task: Failing checkout build\nAttempt: 1");
+  });
 });
 
 describe("memory MCP server with a handoff target", () => {

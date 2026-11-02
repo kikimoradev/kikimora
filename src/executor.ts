@@ -16,6 +16,7 @@ import { runSession } from "./runner.js";
 import { LAUNCHER_REFUSAL_BACKOFF_MS } from "./session-launcher.js";
 import type { SessionRecorder } from "./sessions/index.js";
 import type { ExecutorReporter } from "./status.js";
+import { formatSource, sourceFields } from "./task-source.js";
 import type { TaskStore } from "./tasks.js";
 import type {
   SessionFailureReason,
@@ -45,13 +46,15 @@ export function isTransientFailure(result: SessionResult): boolean {
 }
 
 export function composeTaskPrompt(prompt: string, task: Task): string {
+  const source = formatSource(task);
+  const sourceLine = source === undefined ? "" : `Source: ${source}\n`;
   return `${prompt.trimEnd()}
 
 ## Task to complete
 
 ID: ${task.id}
 Title: ${task.title}
-Description:
+${sourceLine}Description:
 ${task.description}
 `;
 }
@@ -205,7 +208,7 @@ export async function runExecutorLoop(
         continue;
       }
 
-      reporter.taskStarted(task);
+      reporter.taskStarted(task, executor.maxTaskAttempts);
 
       try {
         const [prompt, systemPrompt, context, mcpConfigPath] = await sessionInputs;
@@ -243,6 +246,7 @@ export async function runExecutorLoop(
           reporter.taskFinished({
             taskId: task.id,
             title: task.title,
+            ...sourceFields(task),
             ok: false,
             durationMs: result.durationMs,
             error: "session could not be resumed — task requeued for a fresh session",
@@ -274,6 +278,7 @@ export async function runExecutorLoop(
           reporter.taskFinished({
             taskId: task.id,
             title: task.title,
+            ...sourceFields(task),
             ok: true,
             durationMs: result.durationMs,
             costUsd,
@@ -289,6 +294,7 @@ export async function runExecutorLoop(
           reporter.taskFinished({
             taskId: task.id,
             title: task.title,
+            ...sourceFields(task),
             ok: false,
             durationMs: result.durationMs,
             costUsd,
@@ -310,6 +316,7 @@ export async function runExecutorLoop(
             reporter.taskFinished({
               taskId: task.id,
               title: task.title,
+              ...sourceFields(task),
               ok: false,
               durationMs: result.durationMs,
               costUsd,
@@ -342,6 +349,7 @@ export async function runExecutorLoop(
             reporter.taskFinished({
               taskId: task.id,
               title: task.title,
+              ...sourceFields(task),
               ok: false,
               durationMs: result.durationMs,
               costUsd,
@@ -368,6 +376,7 @@ export async function runExecutorLoop(
           reporter.taskFinished({
             taskId: task.id,
             title: task.title,
+            ...sourceFields(task),
             ok: false,
             durationMs: result.durationMs,
             costUsd,
@@ -397,6 +406,7 @@ export async function runExecutorLoop(
         reporter.taskFinished({
           taskId: task.id,
           title: task.title,
+          ...sourceFields(task),
           ok: false,
           durationMs: Date.now() - start,
           error: message,

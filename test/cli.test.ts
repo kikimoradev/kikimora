@@ -382,6 +382,110 @@ describe("CLI start (smoke E2E)", () => {
     expect(result.output).toMatch(/task\.finished taskId=handoff-1 .*handedOff=true/);
   }, 30_000);
 
+  it("carries the source of a task from the monitor report to the queue, the events, the status and memory", async () => {
+    await seedProject(dir, {
+      settings: {
+        monitor: { model: "haiku", intervalMinutes: 1 },
+        executor: { model: "opus" },
+        summarizer: { model: "sonnet" },
+      },
+    });
+    const source = {
+      sourceLabel: "ENG-142",
+      sourceUrl: "https://linear.app/acme/issue/ENG-142",
+    };
+    const env = fakeClaudeCliEnv("ok", {
+      CI: "true",
+      FAKE_CLAUDE_RESULT_TEXT_HAIKU: JSON.stringify({
+        tasks: [
+          { id: "issue-142", title: "Discount before tax", description: "d", ...source },
+          { id: "ci-9182634", title: "Failing build", description: "d" },
+        ],
+      }),
+      FAKE_CLAUDE_RESULT_TEXT_SONNET: JSON.stringify({
+        headline: "done",
+        summary: "The executor finished the task.",
+      }),
+    });
+    const memoryDbPath = join(dir, ".kikimora", "data", "memory.db");
+    const worker = spawnJsonWorker(dir, env);
+    try {
+      await worker.waitFor(
+        (event) => event.event === "summary.finished" && event.taskId === "ci-9182634",
+      );
+      const events = await worker.events();
+      const started = events.filter((event) => event.event === "task.started");
+      expect(started).toEqual([
+        expect.objectContaining({
+          taskId: "issue-142",
+          ...source,
+          attempt: 1,
+          maxAttempts: 3,
+        }),
+        expect.objectContaining({ taskId: "ci-9182634", attempt: 1, maxAttempts: 3 }),
+      ]);
+      expect(started[1]).not.toHaveProperty("sourceLabel");
+      const finished = events.filter((event) => event.event === "task.finished");
+      expect(finished[0]).toMatchObject({ taskId: "issue-142", ok: true, ...source });
+      expect(finished[1]).not.toHaveProperty("sourceLabel");
+
+      const listed = await runCommand(dir, env, ["tasks", "list", "--json"]);
+      const tasks = JSON.parse(listed.stdout) as Record<string, unknown>[];
+      expect(tasks[0]).toMatchObject({ id: "issue-142", ...source });
+      expect(tasks[1]).not.toHaveProperty("sourceLabel");
+
+      const status = JSON.parse(
+        (await runCommand(dir, env, ["status", "--json"])).stdout,
+      ) as { agents: { executor: { recentOutcomes: Record<string, unknown>[] } } };
+      const outcomes = status.agents.executor.recentOutcomes;
+      expect(outcomes.find((outcome) => outcome.taskId === "issue-142")).toMatchObject(
+        source,
+      );
+      expect(
+        outcomes.find((outcome) => outcome.taskId === "ci-9182634"),
+      ).not.toHaveProperty("sourceLabel");
+
+      const recent = JSON.parse(
+        (await runCommand(dir, env, ["memory", "recent", "--json"])).stdout,
+      ) as Record<string, unknown>[];
+      expect(recent.find((entry) => entry.taskId === "issue-142")).toMatchObject(source);
+      expect(recent.find((entry) => entry.taskId === "ci-9182634")).not.toHaveProperty(
+        "sourceLabel",
+      );
+
+      const added = await runCommand(dir, env, [
+        "tasks",
+        "add",
+        "Shipment status in the portal",
+        "--id",
+        "redmine-3021",
+        "--source",
+        "#3021",
+        "--source-url",
+        "https://redmine.example.eu/issues/3021",
+        "--json",
+      ]);
+      expect(added.code).toBe(0);
+      expect(JSON.parse(added.stdout)).toMatchObject({
+        id: "redmine-3021",
+        sourceLabel: "#3021",
+        sourceUrl: "https://redmine.example.eu/issues/3021",
+      });
+      const urlOnly = await runCommand(dir, env, [
+        "tasks",
+        "add",
+        "x",
+        "--source-url",
+        "https://example.com",
+      ]);
+      expect(urlOnly.code).toBe(1);
+      expect(urlOnly.stderr).toContain("--source-url requires --source.");
+    } finally {
+      await stopWorker(worker);
+    }
+    expect(readSummaries(memoryDbPath, "issue-142")).toEqual([{ headline: "done" }]);
+  }, 30_000);
+
   it("indexes the executor session and writes both transcript files next to each other", async () => {
     await seedProject(dir, {
       settings: {

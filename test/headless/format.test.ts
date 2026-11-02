@@ -91,6 +91,28 @@ describe("formatPrettyLine", () => {
     expect(line).toContain("cost=$0.1235");
   });
 
+  it("renders the source of a task as plain fields", () => {
+    const line = formatPrettyLine(
+      event({
+        agent: "executor",
+        event: "task.started",
+        fields: {
+          taskId: "issue-142",
+          sourceLabel: "ENG-142",
+          sourceUrl: "https://linear.app/acme/issue/ENG-142",
+          attempt: 1,
+          maxAttempts: 3,
+        },
+      }),
+      AT,
+    );
+
+    expect(line).toBe(
+      "09:05:03 [executor] task.started taskId=issue-142 sourceLabel=ENG-142 " +
+        "sourceUrl=https://linear.app/acme/issue/ENG-142 attempt=1 maxAttempts=3",
+    );
+  });
+
   it("quotes string values containing whitespace", () => {
     const line = formatPrettyLine(
       event({ fields: { title: "Fix the bug", taskId: "t-1" } }),

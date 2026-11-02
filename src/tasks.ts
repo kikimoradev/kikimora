@@ -1,6 +1,7 @@
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { z } from "zod";
+import { sourceFields } from "./task-source.js";
 import {
   isFinalTaskStatus,
   type FinalTaskStatus,
@@ -35,6 +36,8 @@ const taskSchema = z.object({
     .optional(),
   handedOff: z.boolean().optional(),
   handoffReason: z.string().optional(),
+  sourceLabel: z.string().optional(),
+  sourceUrl: z.string().optional(),
 });
 
 const storeFileSchema = z.object({
@@ -174,6 +177,7 @@ export class TaskStore {
           attempts: 0,
           createdAt: now,
           updatedAt: now,
+          ...sourceFields(candidate),
         };
         this.tasks.push(task);
         added.push({ ...task });

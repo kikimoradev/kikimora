@@ -107,6 +107,28 @@ describe("composeSummaryPrompt", () => {
     expect(composeSummaryPrompt(buildContext())).not.toContain("Handed off");
   });
 
+  it("names the source of a task under its title only when the task has one", () => {
+    const withSource = composeSummaryPrompt(
+      buildContext({
+        task: buildTask({
+          sourceLabel: "ENG-142",
+          sourceUrl: "https://linear.app/acme/issue/ENG-142",
+        }),
+      }),
+    );
+    const labelOnly = composeSummaryPrompt(
+      buildContext({ task: buildTask({ sourceLabel: "#3027" }) }),
+    );
+
+    expect(withSource).toContain(
+      "Title: Fix export\nSource: ENG-142 (https://linear.app/acme/issue/ENG-142)\nAttempt: 2\n",
+    );
+    expect(labelOnly).toContain("Title: Fix export\nSource: #3027\nAttempt: 2\n");
+    expect(composeSummaryPrompt(buildContext())).toContain(
+      "## Task\n\nID: redmine-1\nTitle: Fix export\nAttempt: 2\n",
+    );
+  });
+
   it("includes the task data and the log path", () => {
     const prompt = composeSummaryPrompt(buildContext());
 

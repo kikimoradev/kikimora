@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- A task can name its source: the monitor's task report takes an optional `sourceLabel` (a short label such as `ENG-142`, `#3021` or `acme/shop#57`) and `sourceUrl` (its http(s) address), and `kikimora tasks add` takes `--source` and `--source-url`. The source travels with the task into `kikimora tasks list --json`, a `Source:` line of the executor's and the summarizer's prompt, `task.started` and `task.finished`, the recent outcomes of `kikimora status --json` and the task's memory entry (`kikimora memory recent|search --json`, `memory_search`, `memory_get`). An invalid source in a report is dropped and the task kept. `task.started` now also carries `attempt` and `maxAttempts`. A task without a source, and every task, event and memory entry from before, looks as before; the memory database gains two columns on the first start.
+
 ## [0.20.0] - 2026-11-01
 
 ### Added

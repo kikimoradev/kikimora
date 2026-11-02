@@ -1,4 +1,10 @@
 import { z } from "zod";
+import {
+  SOURCE_LABEL_MAX,
+  sourceFields,
+  sourceLabelSchema,
+  sourceUrlSchema,
+} from "./task-source.js";
 import type { NewTask } from "./types.js";
 
 export const TASK_REPORT_JSON_SCHEMA = JSON.stringify({
@@ -24,6 +30,21 @@ export const TASK_REPORT_JSON_SCHEMA = JSON.stringify({
               "All the context needed to complete the task independently " +
               "in a separate session",
           },
+          sourceLabel: {
+            type: "string",
+            maxLength: SOURCE_LABEL_MAX,
+            description:
+              "Optional. The short label people know the source of the task by, " +
+              "such as an issue key (ENG-142), a ticket number (#3021) or a pull " +
+              "request (acme/shop#57). Omit it for a task with no item in a " +
+              "tracker, such as a CI run or a dependency update",
+          },
+          sourceUrl: {
+            type: "string",
+            description:
+              "Optional. The http(s) address of that item; only together with " +
+              "sourceLabel",
+          },
         },
         required: ["id", "title", "description"],
         additionalProperties: false,
@@ -36,11 +57,20 @@ export const TASK_REPORT_JSON_SCHEMA = JSON.stringify({
 
 export const taskReportSchema = z.object({
   tasks: z.array(
-    z.object({
-      id: z.string().trim().min(1),
-      title: z.string().trim().min(1),
-      description: z.string().trim().default(""),
-    }),
+    z
+      .object({
+        id: z.string().trim().min(1),
+        title: z.string().trim().min(1),
+        description: z.string().trim().default(""),
+        sourceLabel: sourceLabelSchema.optional().catch(undefined),
+        sourceUrl: sourceUrlSchema.optional().catch(undefined),
+      })
+      .transform((task): NewTask => ({
+        id: task.id,
+        title: task.title,
+        description: task.description,
+        ...sourceFields(task),
+      })),
   ),
 });
 

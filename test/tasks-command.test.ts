@@ -124,6 +124,40 @@ describe("tasks commands", () => {
     expect(JSON.parse(lines.join("\n"))).toEqual(buildTask());
   });
 
+  it("add sends the source only when the flags give it", async () => {
+    mocks.sendControlRequest.mockResolvedValue({ ok: true, data: buildTask() });
+
+    await runTasksAdd("Shipment status in the portal", {
+      id: "redmine-3021",
+      source: "#3021",
+      sourceUrl: "https://redmine.example.eu/issues/3021",
+      write,
+    });
+    await runTasksAdd("ZPL labels", { id: "redmine-3027", source: "#3027", write });
+
+    expect(mocks.sendControlRequest).toHaveBeenNthCalledWith(1, expect.any(String), {
+      cmd: "tasks.add",
+      description: "Shipment status in the portal",
+      id: "redmine-3021",
+      sourceLabel: "#3021",
+      sourceUrl: "https://redmine.example.eu/issues/3021",
+    });
+    expect(mocks.sendControlRequest).toHaveBeenNthCalledWith(2, expect.any(String), {
+      cmd: "tasks.add",
+      description: "ZPL labels",
+      id: "redmine-3027",
+      sourceLabel: "#3027",
+    });
+  });
+
+  it("add rejects --source-url without --source locally", async () => {
+    await runTasksAdd("x", { sourceUrl: "https://example.com", write });
+
+    expect(mocks.sendControlRequest).not.toHaveBeenCalled();
+    expect(logger.error).toHaveBeenCalledWith("--source-url requires --source.");
+    expect(process.exitCode).toBe(1);
+  });
+
   it("add rejects an empty description locally", async () => {
     await runTasksAdd("   ", { write });
 

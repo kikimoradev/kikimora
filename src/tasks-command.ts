@@ -60,11 +60,17 @@ export async function runTasksAdd(
   options: {
     id?: string | undefined;
     title?: string | undefined;
+    source?: string | undefined;
+    sourceUrl?: string | undefined;
     json?: boolean | undefined;
   } & ControlCommandIo = {},
 ): Promise<void> {
   if (description.trim() === "") {
     fail("The task description is empty.");
+    return;
+  }
+  if (options.sourceUrl !== undefined && options.source === undefined) {
+    fail("--source-url requires --source.");
     return;
   }
   const response = await requestControl(
@@ -73,6 +79,8 @@ export async function runTasksAdd(
       description,
       ...(options.id === undefined ? {} : { id: options.id }),
       ...(options.title === undefined ? {} : { title: options.title }),
+      ...(options.source === undefined ? {} : { sourceLabel: options.source }),
+      ...(options.sourceUrl === undefined ? {} : { sourceUrl: options.sourceUrl }),
     },
     options,
   );
@@ -186,12 +194,22 @@ export const tasksCommand = defineCommand({
         },
         id: { type: "string", description: "Task id (default: generated)" },
         title: { type: "string", description: "Task title (default: the first line)" },
+        source: {
+          type: "string",
+          description: "Short label of the task's source, e.g. ENG-142 or #3021",
+        },
+        "source-url": {
+          type: "string",
+          description: "http(s) address of the task's source (needs --source)",
+        },
         json: jsonArg,
       },
       run: ({ args }) =>
         runTasksAdd(args.description, {
           id: args.id,
           title: args.title,
+          source: args.source,
+          sourceUrl: args["source-url"],
           json: args.json,
         }),
     }),

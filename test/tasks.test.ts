@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { TaskStore } from "../src/tasks.js";
@@ -400,6 +400,58 @@ describe("TaskStore", () => {
       handedOff: true,
       handoffReason: "why",
     });
+  });
+
+  it("stores the source of a task only when it has one and keeps it through every change", async () => {
+    const source = {
+      sourceLabel: "ENG-142",
+      sourceUrl: "https://linear.app/acme/issue/ENG-142",
+    };
+    const store = await TaskStore.open(path);
+    const added = await store.addTasks([
+      newTask("issue-142", source),
+      newTask("redmine-3027", { sourceLabel: "#3027", sourceUrl: undefined }),
+      newTask("ci-9182634", { sourceLabel: undefined, sourceUrl: undefined }),
+      newTask("url-only", { sourceUrl: "https://example.com/1" }),
+    ]);
+
+    expect(added[0]).toMatchObject(source);
+    const raw = JSON.parse(await readFile(path, "utf8")) as {
+      tasks: Record<string, unknown>[];
+    };
+    expect(raw.tasks[0]).toMatchObject(source);
+    expect(Object.keys(raw.tasks[1] ?? {})).toContain("sourceLabel");
+    expect(Object.keys(raw.tasks[1] ?? {})).not.toContain("sourceUrl");
+    for (const plain of raw.tasks.slice(2)) {
+      expect(Object.keys(plain)).not.toContain("sourceLabel");
+      expect(Object.keys(plain)).not.toContain("sourceUrl");
+    }
+
+    await store.takeNext();
+    await store.fail("issue-142", "error");
+    await store.retry("issue-142");
+    await store.takeNext();
+    await store.requeue("issue-142", "again");
+    const reopened = await TaskStore.open(path);
+    expect(reopened.list().find((task) => task.id === "issue-142")).toMatchObject(source);
+  });
+
+  it("loads a task file written before tasks had a source", async () => {
+    await mkdir(join(dir, "data"), { recursive: true });
+    const old = {
+      id: "redmine-7",
+      title: "Old task",
+      description: "d",
+      status: "done",
+      attempts: 1,
+      createdAt: "2026-10-30T12:00:00.000Z",
+      updatedAt: "2026-10-30T12:00:00.000Z",
+    };
+    await writeFile(path, JSON.stringify({ version: 1, tasks: [old] }), "utf8");
+
+    const store = await TaskStore.open(path);
+
+    expect(store.list()).toEqual([old]);
   });
 
   it("suspend of an unknown id is ignored", async () => {
