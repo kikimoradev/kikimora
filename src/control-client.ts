@@ -37,21 +37,22 @@ export function sendControlRequest<R extends ControlRequestInput>(
     const socket = connect(socketPath);
     let buffer = "";
     let settled = false;
-    const fail = (error: Error): void => {
-      if (settled) return;
+    const settle = (): boolean => {
+      if (settled) return false;
       settled = true;
+      clearTimeout(deadline);
       socket.destroy();
-      reject(error);
+      return true;
+    };
+    const fail = (error: Error): void => {
+      if (settle()) reject(error);
     };
     const succeed = (response: ControlResponse<R["cmd"]>): void => {
-      if (settled) return;
-      settled = true;
-      socket.destroy();
-      resolve(response);
+      if (settle()) resolve(response);
     };
-    socket.setTimeout(timeoutMs, () => {
+    const deadline = setTimeout(() => {
       fail(new Error("Timed out waiting for the worker to respond."));
-    });
+    }, timeoutMs);
     socket.on("error", (error) => {
       fail(
         isAccessDenied(error)

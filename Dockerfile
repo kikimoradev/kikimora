@@ -48,7 +48,7 @@ ENV KIKIMORA_LOG_FORMAT=json \
     DISABLE_AUTOUPDATER=1 \
     KIKIMORA_DISABLE_AUTOUPDATER=1
 HEALTHCHECK --interval=30s --timeout=10s --start-period=30s \
-  CMD kikimora status --json >/dev/null || exit 1
+  CMD timeout -s KILL 8 kikimora status --json >/dev/null || exit 1
 CMD ["kikimora"]
 
 FROM runtime AS browser

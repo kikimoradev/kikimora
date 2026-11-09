@@ -138,7 +138,7 @@ kikimora drain            # finish the current sessions, then exit
 kikimora sessions list    # what ran, when, at what cost
 ```
 
-- `kikimora status --json` works as a health check: it exits `1` when no worker is running.
+- `kikimora status --json` works as a health check: it exits `1` when no worker is running or when the worker has not answered within 5 s.
 - Its document starts with the worker's identity (kikimora, Claude Code and Node versions, `authKind`, pid, start time), which `kikimora version` prints alone.
 - The socket also blocks double starts: a second `kikimora` in the same project exits with `kikimora is already running in this project (pid …)`.
 
@@ -313,7 +313,7 @@ docker compose logs -f                        # NDJSON event stream
 docker compose exec kikimora kikimora status
 ```
 
-The current directory is mounted as `/workspace`, so the project, its `.kikimora/` and the runtime state stay on the host. The image's health check runs `kikimora status --json`, so `docker ps` shows `healthy` only while the worker answers on its socket.
+The current directory is mounted as `/workspace`, so the project, its `.kikimora/` and the runtime state stay on the host. The image's health check runs `kikimora status --json` under `timeout -s KILL 8`, so `docker ps` shows `healthy` only while the worker answers on its socket, and a check that hangs is killed before Docker's 10 s limit instead of piling up with the next ones.
 
 ### Prebuilt images
 

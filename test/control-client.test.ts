@@ -133,6 +133,24 @@ describe("sendControlRequest", () => {
     ).rejects.toThrow("Timed out");
   });
 
+  it("times out at its deadline when the worker keeps sending without ever finishing a response", async () => {
+    let trickle: NodeJS.Timeout | undefined;
+    running = await startServer(socketPath, (socket) => {
+      trickle = setInterval(() => socket.write("{"), 20);
+      socket.on("close", () => clearInterval(trickle));
+    });
+
+    const started = Date.now();
+    try {
+      await expect(
+        sendControlRequest(socketPath, { cmd: "status" }, { timeoutMs: 200 }),
+      ).rejects.toThrow("Timed out");
+      expect(Date.now() - started).toBeLessThan(2_000);
+    } finally {
+      clearInterval(trickle);
+    }
+  });
+
   it("rejects a malformed response", async () => {
     running = await startServer(socketPath, (socket) => {
       socket.on("data", () => socket.end("not json\n"));
