@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- The health check of the Docker image no longer piles up hung processes: it kills `kikimora status --json` after 8 s, before Docker gives up on the check at 10 s, so a container whose worker is slow to answer (a restart of every agent of a busy machine) no longer runs out of memory and stays `unhealthy`. `kikimora status` and every other control command now give up 5 s after they start waiting for the worker, also when it keeps the connection busy without finishing its answer.
+
 ## [0.21.0] - 2026-11-02
 
 ### Added
