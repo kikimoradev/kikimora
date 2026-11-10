@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.21.1] - 2026-11-10
+
 ### Fixed
 
 - The health check of the Docker image no longer piles up hung processes: it kills `kikimora status --json` after 8 s, before Docker gives up on the check at 10 s, so a container whose worker is slow to answer (a restart of every agent of a busy machine) no longer runs out of memory and stays `unhealthy`. `kikimora status` and every other control command now give up 5 s after they start waiting for the worker, also when it keeps the connection busy without finishing its answer.
@@ -365,7 +367,8 @@ Initial release.
 - Non-interactive `kikimora init` for provisioning, plus a first-run wizard in the terminal.
 - Reference `Dockerfile` and `docker-compose.yml`.
 
-[Unreleased]: https://github.com/kikimoradev/kikimora/compare/v0.21.0...HEAD
+[Unreleased]: https://github.com/kikimoradev/kikimora/compare/v0.21.1...HEAD
+[0.21.1]: https://github.com/kikimoradev/kikimora/compare/v0.21.0...v0.21.1
 [0.21.0]: https://github.com/kikimoradev/kikimora/compare/v0.20.0...v0.21.0
 [0.20.0]: https://github.com/kikimoradev/kikimora/compare/v0.19.0...v0.20.0
 [0.19.0]: https://github.com/kikimoradev/kikimora/compare/v0.18.0...v0.19.0
