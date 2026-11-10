@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 
 import { spawn } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 
 const modelIndex = process.argv.indexOf("--model");
@@ -21,6 +21,7 @@ const envOut = pick("FAKE_CLAUDE_ENV_OUT");
 const treeOut = pick("FAKE_CLAUDE_TREE_OUT");
 const handoffReason = pick("FAKE_CLAUDE_HANDOFF_REASON");
 const handoffOut = pick("FAKE_CLAUDE_HANDOFF_OUT");
+const releaseFile = pick("FAKE_CLAUDE_RELEASE_FILE");
 
 if (argsOut) writeFileSync(argsOut, JSON.stringify(process.argv.slice(2)));
 if (envOut) {
@@ -210,6 +211,16 @@ async function callHandoff(reason) {
   }
 }
 
+function finishSlowly() {
+  emitOutcome(false);
+  process.exit(0);
+}
+
+function waitForRelease() {
+  if (existsSync(releaseFile)) finishSlowly();
+  else setTimeout(waitForRelease, 50);
+}
+
 function run() {
   switch (mode) {
     case "ok":
@@ -275,10 +286,11 @@ function run() {
       break;
     case "slow":
       emitInit();
-      setTimeout(() => {
-        emitOutcome(false);
-        process.exit(0);
-      }, Number(pick("FAKE_CLAUDE_DELAY_MS") ?? "1000"));
+      if (releaseFile === undefined) {
+        setTimeout(finishSlowly, Number(pick("FAKE_CLAUDE_DELAY_MS") ?? "1000"));
+      } else {
+        waitForRelease();
+      }
       break;
     case "hang_with_tree":
       process.on("SIGTERM", () => process.exit(143));
