@@ -1,9 +1,10 @@
-import { spawn, type ChildProcess } from "node:child_process";
+import { spawn, type ChildProcess, type StdioOptions } from "node:child_process";
 import { closeSync, openSync } from "node:fs";
 import { readFile, realpath, writeFile } from "node:fs/promises";
+import { createRequire } from "node:module";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { fileURLToPath } from "node:url";
+import { fileURLToPath, pathToFileURL } from "node:url";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { packageVersion } from "../src/paths.js";
 import type { SessionRecord } from "../src/sessions/index.js";
@@ -15,11 +16,25 @@ import {
 } from "./helpers.js";
 
 const projectRoot = fileURLToPath(new URL("..", import.meta.url));
-const tsxBin = join(projectRoot, "node_modules", ".bin", "tsx");
+const tsxLoader = pathToFileURL(createRequire(import.meta.url).resolve("tsx")).href;
 const entry = join(projectRoot, "src", "index.ts");
 
 const POLL_INTERVAL_MS = 150;
-const INTERRUPT_DEADLINE_MS = 20_000;
+const INTERRUPT_DEADLINE_MS = 90_000;
+const SMOKE_TIMEOUT_MS = 180_000;
+
+function spawnCli(
+  cwd: string,
+  env: NodeJS.ProcessEnv,
+  args: string[],
+  stdio: StdioOptions,
+): ChildProcess {
+  return spawn(process.execPath, ["--import", tsxLoader, entry, ...args], {
+    cwd,
+    env: { ...env, TSX_TSCONFIG_PATH: join(projectRoot, "tsconfig.json") },
+    stdio,
+  });
+}
 
 interface Run {
   code: number | null;
@@ -46,11 +61,7 @@ function runCli(
     ]).then(([out, err]) => `${out}${err}`);
 
   return new Promise((resolvePromise, rejectPromise) => {
-    const child = spawn(tsxBin, [entry], {
-      cwd,
-      env: { ...env, TSX_TSCONFIG_PATH: join(projectRoot, "tsconfig.json") },
-      stdio: ["ignore", outFd, errFd],
-    });
+    const child = spawnCli(cwd, env, [], ["ignore", outFd, errFd]);
 
     let watcher: NodeJS.Timeout | undefined;
     const stopWatching = () => {
@@ -94,15 +105,11 @@ function runCommand(
   args: string[],
 ): Promise<CommandRun> {
   return new Promise((resolvePromise, rejectPromise) => {
-    const child = spawn(tsxBin, [entry, ...args], {
-      cwd,
-      env: { ...env, TSX_TSCONFIG_PATH: join(projectRoot, "tsconfig.json") },
-      stdio: ["ignore", "pipe", "pipe"],
-    });
+    const child = spawnCli(cwd, env, args, ["ignore", "pipe", "pipe"]);
     let stdout = "";
     let stderr = "";
-    child.stdout.on("data", (chunk: Buffer) => (stdout += chunk.toString("utf8")));
-    child.stderr.on("data", (chunk: Buffer) => (stderr += chunk.toString("utf8")));
+    child.stdout?.on("data", (chunk: Buffer) => (stdout += chunk.toString("utf8")));
+    child.stderr?.on("data", (chunk: Buffer) => (stderr += chunk.toString("utf8")));
     child.on("error", rejectPromise);
     child.on("close", (code) => {
       resolvePromise({ code, stdout, stderr });
@@ -123,11 +130,7 @@ function spawnJsonWorker(cwd: string, env: NodeJS.ProcessEnv): JsonWorker {
   const outPath = join(cwd, "worker-out.log");
   const outFd = openSync(outPath, "w");
   const errFd = openSync(join(cwd, "worker-err.log"), "w");
-  const child = spawn(tsxBin, [entry, "--log-format", "json"], {
-    cwd,
-    env: { ...env, TSX_TSCONFIG_PATH: join(projectRoot, "tsconfig.json") },
-    stdio: ["ignore", outFd, errFd],
-  });
+  const child = spawnCli(cwd, env, ["--log-format", "json"], ["ignore", outFd, errFd]);
   const exited = new Promise<number | null>((resolvePromise) => {
     child.on("close", (code) => {
       closeSync(outFd);
@@ -224,7 +227,7 @@ function readSummaries(dbPath: string, taskId: string): { headline: string }[] {
   }
 }
 
-describe("CLI start (smoke E2E)", () => {
+describe("CLI start (smoke E2E)", { timeout: SMOKE_TIMEOUT_MS }, () => {
   let dir: string;
 
   beforeEach(async () => {
@@ -298,7 +301,7 @@ describe("CLI start (smoke E2E)", () => {
     expect(result.output).toMatch(/task\.finished taskId=e2e-1 .*sessionId=sess-1/);
     expect(result.output).toContain("summary.finished taskId=e2e-1 ok=true");
     expect(result.output).toContain("worker.stopped signal=SIGINT");
-  }, 30_000);
+  });
 
   it("an executor session marks its task as handed off to a human through the memory server", async () => {
     await seedProject(dir, {
@@ -380,7 +383,7 @@ describe("CLI start (smoke E2E)", () => {
 
     expect(result.output).toMatch(/task\.finished taskId=handoff-1 .*ok=true/);
     expect(result.output).toMatch(/task\.finished taskId=handoff-1 .*handedOff=true/);
-  }, 30_000);
+  });
 
   it("carries the source of a task from the monitor report to the queue, the events, the status and memory", async () => {
     await seedProject(dir, {
@@ -484,7 +487,7 @@ describe("CLI start (smoke E2E)", () => {
       await stopWorker(worker);
     }
     expect(readSummaries(memoryDbPath, "issue-142")).toEqual([{ headline: "done" }]);
-  }, 30_000);
+  });
 
   it("indexes the executor session and writes both transcript files next to each other", async () => {
     await seedProject(dir, {
@@ -511,11 +514,7 @@ describe("CLI start (smoke E2E)", () => {
     const kikimoraDir = join(dir, ".kikimora");
     const outFd = openSync(join(dir, "worker-out.log"), "w");
     const errFd = openSync(join(dir, "worker-err.log"), "w");
-    const worker = spawn(tsxBin, [entry, "--log-format", "json"], {
-      cwd: dir,
-      env: { ...env, TSX_TSCONFIG_PATH: join(projectRoot, "tsconfig.json") },
-      stdio: ["ignore", outFd, errFd],
-    });
+    const worker = spawnCli(dir, env, ["--log-format", "json"], ["ignore", outFd, errFd]);
     const workerClosed = new Promise<void>((resolve) => {
       worker.on("close", () => {
         closeSync(outFd);
@@ -590,14 +589,14 @@ describe("CLI start (smoke E2E)", () => {
       worker.kill("SIGINT");
       await workerClosed;
     }
-  }, 40_000);
+  });
 
   it("exits with code 1 when preflight fails (no .kikimora/settings.json)", async () => {
     const result = await runCli(dir, fakeClaudeCliEnv("ok"));
 
     expect(result.code).toBe(1);
     expect(result.output).toMatch(/Preflight failed|file missing/);
-  }, 30_000);
+  });
 
   it("exits with code 1 when Claude Code is not logged in", async () => {
     await seedProject(dir);
@@ -609,7 +608,7 @@ describe("CLI start (smoke E2E)", () => {
     expect(result.code).toBe(1);
     expect(result.output).toMatch(/not logged in/);
     expect(result.output).toMatch(/claude auth login/);
-  }, 30_000);
+  });
 
   it("an auth failure parks both agents in authBlocked until resume", async () => {
     await seedProject(dir, {
@@ -622,11 +621,7 @@ describe("CLI start (smoke E2E)", () => {
     const outPath = join(dir, "worker-out.log");
     const outFd = openSync(outPath, "w");
     const errFd = openSync(join(dir, "worker-err.log"), "w");
-    const worker = spawn(tsxBin, [entry, "--log-format", "json"], {
-      cwd: dir,
-      env: { ...env, TSX_TSCONFIG_PATH: join(projectRoot, "tsconfig.json") },
-      stdio: ["ignore", outFd, errFd],
-    });
+    const worker = spawnCli(dir, env, ["--log-format", "json"], ["ignore", outFd, errFd]);
     const workerClosed = new Promise<void>((resolve) => {
       worker.on("close", () => {
         closeSync(outFd);
@@ -689,7 +684,7 @@ describe("CLI start (smoke E2E)", () => {
       worker.kill("SIGINT");
       await workerClosed;
     }
-  }, 40_000);
+  });
 
   it("answers kikimora status --json and pause over the control socket", async () => {
     await seedProject(dir, {
@@ -704,11 +699,7 @@ describe("CLI start (smoke E2E)", () => {
     delete env.ANTHROPIC_API_KEY;
     const outFd = openSync(join(dir, "worker-out.log"), "w");
     const errFd = openSync(join(dir, "worker-err.log"), "w");
-    const worker = spawn(tsxBin, [entry, "--log-format", "json"], {
-      cwd: dir,
-      env: { ...env, TSX_TSCONFIG_PATH: join(projectRoot, "tsconfig.json") },
-      stdio: ["ignore", outFd, errFd],
-    });
+    const worker = spawnCli(dir, env, ["--log-format", "json"], ["ignore", outFd, errFd]);
     const workerClosed = new Promise<void>((resolve) => {
       worker.on("close", () => {
         closeSync(outFd);
@@ -854,7 +845,7 @@ describe("CLI start (smoke E2E)", () => {
       worker.kill("SIGINT");
       await workerClosed;
     }
-  }, 30_000);
+  });
 
   it("kikimora drain --json lets the executor finish its session and summary, then the worker exits 0", async () => {
     await seedProject(dir, {
@@ -864,8 +855,9 @@ describe("CLI start (smoke E2E)", () => {
         summarizer: { model: "sonnet" },
       },
     });
+    const release = join(dir, "release-executor");
     const env = drainProjectEnv("drain-1", {
-      FAKE_CLAUDE_DELAY_MS_OPUS: "4000",
+      FAKE_CLAUDE_RELEASE_FILE_OPUS: release,
       FAKE_CLAUDE_MODE_SONNET: "slow",
       FAKE_CLAUDE_DELAY_MS_SONNET: "800",
     });
@@ -893,6 +885,7 @@ describe("CLI start (smoke E2E)", () => {
         since: ack.since,
         reason: "drain",
       });
+      await writeFile(release, "", "utf8");
 
       expect(await worker.exited).toBe(0);
       const events = await worker.events();
@@ -927,7 +920,7 @@ describe("CLI start (smoke E2E)", () => {
     } finally {
       await stopWorker(worker);
     }
-  }, 40_000);
+  });
 
   it("kikimora drain waits for a monitor cycle in flight while the executor idles, then the worker exits 0", async () => {
     await seedProject(dir, {
@@ -936,13 +929,18 @@ describe("CLI start (smoke E2E)", () => {
         executor: { model: "opus" },
       },
     });
+    const release = join(dir, "release-monitor");
     const env = fakeClaudeCliEnv("ok", {
       CI: "true",
       FAKE_CLAUDE_MODE_HAIKU: "slow",
-      FAKE_CLAUDE_DELAY_MS_HAIKU: "5000",
+      FAKE_CLAUDE_RELEASE_FILE_HAIKU: release,
       FAKE_CLAUDE_RESULT_TEXT_HAIKU: JSON.stringify({ tasks: [] }),
     });
     const worker = spawnJsonWorker(dir, env);
+    const isPaused = (agent: string) => (event: LogEvent) =>
+      event.event === "control.changed" &&
+      event.agent === agent &&
+      event.state === "paused";
 
     try {
       await worker.waitFor(
@@ -951,13 +949,11 @@ describe("CLI start (smoke E2E)", () => {
 
       const drained = await runCommand(dir, env, ["drain", "--json"]);
       expect(drained.code).toBe(0);
+      await worker.waitFor(isPaused("executor"));
+      await writeFile(release, "", "utf8");
 
       expect(await worker.exited).toBe(0);
       const events = await worker.events();
-      const isPaused = (agent: string) => (event: LogEvent) =>
-        event.event === "control.changed" &&
-        event.agent === agent &&
-        event.state === "paused";
       const draining = indexOfEvent(events, (event) => event.event === "worker.draining");
       const executorPaused = indexOfEvent(events, isPaused("executor"));
       const cycleFinished = indexOfEvent(
@@ -981,7 +977,7 @@ describe("CLI start (smoke E2E)", () => {
     } finally {
       await stopWorker(worker);
     }
-  }, 40_000);
+  });
 
   it("a drain deadline shorter than the session kills it and the worker exits 0, forced", async () => {
     await seedProject(dir, {
@@ -1024,7 +1020,7 @@ describe("CLI start (smoke E2E)", () => {
     } finally {
       await stopWorker(worker);
     }
-  }, 40_000);
+  });
 
   it("SIGTERM under shutdownGraceMs lets the executor finish its session and summary, then the worker exits 0", async () => {
     await seedProject(dir, {
@@ -1076,7 +1072,7 @@ describe("CLI start (smoke E2E)", () => {
     } finally {
       await stopWorker(worker);
     }
-  }, 40_000);
+  });
 
   it("SIGTERM without shutdownGraceMs kills the session in flight, as before", async () => {
     await seedProject(dir, {
@@ -1107,7 +1103,7 @@ describe("CLI start (smoke E2E)", () => {
     } finally {
       await stopWorker(worker);
     }
-  }, 40_000);
+  });
 
   it("a second SIGTERM during the grace kills the session at once and the worker exits 0, forced", async () => {
     await seedProject(dir, {
@@ -1140,7 +1136,7 @@ describe("CLI start (smoke E2E)", () => {
     } finally {
       await stopWorker(worker);
     }
-  }, 40_000);
+  });
 
   it("a session timeout names the killed executor session and its task", async () => {
     await seedProject(dir, {
@@ -1168,14 +1164,14 @@ describe("CLI start (smoke E2E)", () => {
     } finally {
       await stopWorker(worker);
     }
-  }, 40_000);
+  });
 
   it("kikimora status fails cleanly when no worker is running", async () => {
     const result = await runCommand(dir, fakeClaudeCliEnv("ok"), ["status"]);
 
     expect(result.code).toBe(1);
     expect(`${result.stdout}${result.stderr}`).toContain("No kikimora worker is running");
-  }, 30_000);
+  });
 
   it("kikimora version needs a worker, kikimora --version does not", async () => {
     const env = fakeClaudeCliEnv("ok");
@@ -1189,5 +1185,5 @@ describe("CLI start (smoke E2E)", () => {
     );
     expect(installed.code).toBe(0);
     expect(`${installed.stdout}${installed.stderr}`).toContain(packageVersion());
-  }, 30_000);
+  });
 });

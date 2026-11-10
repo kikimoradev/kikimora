@@ -479,7 +479,11 @@ describe("App", () => {
 
     store.monitor.cycleStarted(1);
     store.flush();
-    await vi.advanceTimersByTimeAsync(180_000);
+    await vi.advanceTimersByTimeAsync(1_000);
+    expect(lastFrame()).not.toContain("no output");
+
+    vi.setSystemTime(Date.now() + 178_000);
+    await vi.advanceTimersByTimeAsync(1_000);
 
     expect(lastFrame()).toContain("⚠ cycle #1 · no output for 3 min");
 
