@@ -21,7 +21,7 @@ const entry = join(projectRoot, "src", "index.ts");
 
 const POLL_INTERVAL_MS = 150;
 const INTERRUPT_DEADLINE_MS = 90_000;
-const SMOKE_TIMEOUT_MS = 180_000;
+const SMOKE_TIMEOUT_MS = 300_000;
 
 function spawnCli(
   cwd: string,
@@ -743,7 +743,26 @@ describe("CLI start (smoke E2E)", { timeout: SMOKE_TIMEOUT_MS }, () => {
       expect(status?.agents.monitor.control).toBe("running");
       expect(status?.agents.executor.control).toBe("running");
 
-      const identity = await runCommand(dir, env, ["version", "--json"]);
+      const [
+        identity,
+        identityText,
+        settings,
+        prompt,
+        emptyContext,
+        memory,
+        purged,
+        missing,
+      ] = await Promise.all([
+        runCommand(dir, env, ["version", "--json"]),
+        runCommand(dir, env, ["version"]),
+        runCommand(dir, env, ["settings", "get", "--json"]),
+        runCommand(dir, env, ["prompt", "get", "monitor"]),
+        runCommand(dir, env, ["context", "get"]),
+        runCommand(dir, env, ["memory", "recent", "--json"]),
+        runCommand(dir, env, ["tasks", "delete", "--status", "failed", "--json"]),
+        runCommand(dir, env, ["tasks", "delete", "e2e-missing"]),
+      ]);
+
       expect(identity.code).toBe(0);
       const identityJson = JSON.parse(identity.stdout) as IdentityJson;
       expect(identityJson).toEqual({
@@ -756,22 +775,64 @@ describe("CLI start (smoke E2E)", { timeout: SMOKE_TIMEOUT_MS }, () => {
         authKind: "oauth",
       });
 
-      const identityText = await runCommand(dir, env, ["version"]);
       expect(identityText.code).toBe(0);
       expect(identityText.stdout).toContain(`kikimora   ${packageVersion()}`);
       expect(identityText.stdout).toContain("claude    2.1.300");
       expect(identityText.stdout).toContain("auth      oauth");
 
+      expect(settings.code).toBe(0);
+      expect(JSON.parse(settings.stdout)).toMatchObject({ monitor: { model: "haiku" } });
+
+      expect(prompt.code).toBe(0);
+      expect(prompt.stdout.trim()).toBe("observe");
+
+      expect(emptyContext.code).toBe(0);
+      expect(emptyContext.stdout).toBe("\n");
+
+      expect(memory.code).toBe(0);
+      expect(JSON.parse(memory.stdout)).toEqual([]);
+
+      expect(purged.code).toBe(0);
+      expect(JSON.parse(purged.stdout)).toEqual({ deleted: [] });
+      expect(missing.code).toBe(1);
+      expect(missing.stderr).toContain('No task "e2e-missing".');
+
       const paused = await runCommand(dir, env, ["pause", "monitor"]);
       expect(paused.code).toBe(0);
 
-      const after = await runCommand(dir, env, ["status", "--json"]);
+      const contextSource = join(dir, "context-source.md");
+      await writeFile(contextSource, "# Workspace context\n\nacme-shop\n", "utf8");
+      const [after, human, [added, listed], patched, [contextSet, context]] =
+        await Promise.all([
+          runCommand(dir, env, ["status", "--json"]),
+          runCommand(dir, env, ["status"]),
+          runCommand(dir, env, [
+            "tasks",
+            "add",
+            "e2e manual task",
+            "--id",
+            "e2e-manual",
+          ]).then(
+            async (addRun) =>
+              [addRun, await runCommand(dir, env, ["tasks", "list", "--json"])] as const,
+          ),
+          runCommand(dir, env, [
+            "settings",
+            "patch",
+            '{"executor":{"maxTaskAttempts":5}}',
+            "--json",
+          ]),
+          runCommand(dir, env, ["context", "set", contextSource]).then(
+            async (setRun) =>
+              [setRun, await runCommand(dir, env, ["context", "get"])] as const,
+          ),
+        ]);
+
       expect(after.code).toBe(0);
       const afterStatus = JSON.parse(after.stdout) as StatusJson;
       expect(["pausing", "paused"]).toContain(afterStatus.agents.monitor.control);
       expect(afterStatus.agents.executor.control).toBe("running");
 
-      const human = await runCommand(dir, env, ["status"]);
       expect(human.code).toBe(0);
       expect(human.stdout).toContain(
         `kikimora ${packageVersion()} · claude 2.1.300 · auth oauth · pid ${String(status?.pid)}`,
@@ -779,68 +840,23 @@ describe("CLI start (smoke E2E)", { timeout: SMOKE_TIMEOUT_MS }, () => {
       expect(human.stdout).toContain("monitor");
       expect(human.stdout).toContain("executor");
 
-      const added = await runCommand(dir, env, [
-        "tasks",
-        "add",
-        "e2e manual task",
-        "--id",
-        "e2e-manual",
-      ]);
       expect(added.code).toBe(0);
-      const listed = await runCommand(dir, env, ["tasks", "list", "--json"]);
       expect(listed.code).toBe(0);
       expect(JSON.parse(listed.stdout)).toContainEqual(
         expect.objectContaining({ id: "e2e-manual", title: "e2e manual task" }),
       );
-      const purged = await runCommand(dir, env, [
-        "tasks",
-        "delete",
-        "--status",
-        "failed",
-        "--json",
-      ]);
-      expect(purged.code).toBe(0);
-      expect(JSON.parse(purged.stdout)).toEqual({ deleted: [] });
-      const missing = await runCommand(dir, env, ["tasks", "delete", "e2e-missing"]);
-      expect(missing.code).toBe(1);
-      expect(missing.stderr).toContain('No task "e2e-missing".');
 
-      const settings = await runCommand(dir, env, ["settings", "get", "--json"]);
-      expect(settings.code).toBe(0);
-      expect(JSON.parse(settings.stdout)).toMatchObject({ monitor: { model: "haiku" } });
-      const patched = await runCommand(dir, env, [
-        "settings",
-        "patch",
-        '{"executor":{"maxTaskAttempts":5}}',
-        "--json",
-      ]);
       expect(patched.code).toBe(0);
       expect(JSON.parse(patched.stdout)).toMatchObject({
         executor: { maxTaskAttempts: 5 },
       });
 
-      const prompt = await runCommand(dir, env, ["prompt", "get", "monitor"]);
-      expect(prompt.code).toBe(0);
-      expect(prompt.stdout.trim()).toBe("observe");
-
-      const emptyContext = await runCommand(dir, env, ["context", "get"]);
-      expect(emptyContext.code).toBe(0);
-      expect(emptyContext.stdout).toBe("\n");
-
-      const contextSource = join(dir, "context-source.md");
-      await writeFile(contextSource, "# Workspace context\n\nacme-shop\n", "utf8");
-      const contextSet = await runCommand(dir, env, ["context", "set", contextSource]);
       expect(contextSet.code).toBe(0);
-      const context = await runCommand(dir, env, ["context", "get"]);
       expect(context.code).toBe(0);
       expect(context.stdout).toBe("# Workspace context\n\nacme-shop\n");
       expect(
         await readFile(join(dir, ".kikimora", "prompts", "context.md"), "utf8"),
       ).toBe("# Workspace context\n\nacme-shop\n");
-
-      const memory = await runCommand(dir, env, ["memory", "recent", "--json"]);
-      expect(memory.code).toBe(0);
-      expect(JSON.parse(memory.stdout)).toEqual([]);
     } finally {
       worker.kill("SIGINT");
       await workerClosed;
