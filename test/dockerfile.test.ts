@@ -85,7 +85,7 @@ function runProbeLikeDocker(
   });
 }
 
-describe.skipIf(process.platform === "win32")("the health check of the image", () => {
+describe.runIf(process.platform === "linux")("the health check of the image", () => {
   let dir: string;
   let hungPid: number | undefined;
 
