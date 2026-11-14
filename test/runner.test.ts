@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { chmod, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AdmissionGate, LOCAL_LEASE, type AdmissionLease } from "../src/admission.js";
@@ -304,6 +304,96 @@ describe("runSession (integration with fake claude)", () => {
       line: expect.stringContaining("something went wrong") as string,
     });
   }, 15_000);
+
+  posixOnly(
+    "names the last stderr lines of a session a signal ended mid-run in its error",
+    async () => {
+      const claude = join(dir, "claude-aborting");
+      await writeFile(
+        claude,
+        [
+          "#!/bin/sh",
+          "ulimit -c 0",
+          `echo '{"type":"system","subtype":"init","model":"haiku","session_id":"sess-abort","tools":[]}'`,
+          "echo 'terminate called after throwing an instance of std::system_error' >&2",
+          "echo 'what():  Resource temporarily unavailable' >&2",
+          "kill -ABRT $$",
+          "",
+        ].join("\n"),
+      );
+      await chmod(claude, 0o755);
+      const spec = buildSessionSpec(collector.sink, {
+        command: claude,
+        launcher: NO_LAUNCHER,
+      });
+
+      const result = await runSession(spec, new AbortController().signal);
+
+      expect(result.ok).toBe(false);
+      expect(result.sessionId).toBe("sess-abort");
+      expect(result.error).toContain("SIGABRT");
+      expect(result.error).toContain("what():  Resource temporarily unavailable");
+      expect(result.error).toContain(
+        "terminate called after throwing an instance of std::system_error",
+      );
+    },
+    15_000,
+  );
+
+  posixOnly(
+    "keeps only the last stderr lines of a failed session, each cut to a bounded length",
+    async () => {
+      const claude = join(dir, "claude-noisy");
+      const lines = ["first", "second", "third", "fourth", "fifth", "sixth"];
+      await writeFile(
+        claude,
+        [
+          "#!/bin/sh",
+          ...lines.map((line) => `echo '${line}' >&2`),
+          `echo '${"x".repeat(400)}' >&2`,
+          "exit 3",
+          "",
+        ].join("\n"),
+      );
+      await chmod(claude, 0o755);
+      const spec = buildSessionSpec(collector.sink, {
+        command: claude,
+        launcher: NO_LAUNCHER,
+      });
+
+      const result = await runSession(spec, new AbortController().signal);
+
+      expect(result.error).toBe(
+        `Process exited with code 3; last stderr: third | fourth | fifth | sixth | ${"x".repeat(300)}…`,
+      );
+    },
+    15_000,
+  );
+
+  posixOnly(
+    "keeps the stderr out of the error of a session the worker timed out",
+    async () => {
+      const claude = join(dir, "claude-stuck");
+      await writeFile(
+        claude,
+        ["#!/bin/sh", "echo 'still working' >&2", "exec sleep 30", ""].join("\n"),
+      );
+      await chmod(claude, 0o755);
+      const spec = buildSessionSpec(collector.sink, {
+        command: claude,
+        launcher: NO_LAUNCHER,
+        sessionTimeoutMs: 500,
+      });
+
+      const result = await runSession(spec, new AbortController().signal);
+
+      expect(result).toMatchObject({
+        failureReason: "timeout",
+        error: "Session timed out",
+      });
+    },
+    15_000,
+  );
 
   it("always runs the session in bypassPermissions mode", async () => {
     const out = join(dir, "received-args.json");

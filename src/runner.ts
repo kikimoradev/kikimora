@@ -16,6 +16,12 @@ import { StreamRenderer } from "./stream.js";
 import type { EffortLevel, SessionFailureReason, SessionResult } from "./types.js";
 
 const KILL_GRACE_MS = 5000;
+const STDERR_TAIL_LINES = 5;
+const STDERR_LINE_MAX = 300;
+const STDERR_REASONS: ReadonlySet<SessionFailureReason | undefined> = new Set([
+  "exit",
+  "poolMemoryLimit",
+]);
 const SESSION_SETTINGS = JSON.stringify({ attribution: { commit: "", pr: "" } });
 
 type KillReason = "timeout" | "abort";
@@ -117,9 +123,13 @@ export async function runSession(
   const rl = createInterface({ input: child.stdout });
   rl.on("line", (line) => renderer.handleLine(line));
 
+  const stderrTail: string[] = [];
   const stderrRl = createInterface({ input: child.stderr });
   stderrRl.on("line", (line) => {
-    if (line.trim()) spec.events({ type: "stderr", line });
+    if (!line.trim()) return;
+    spec.events({ type: "stderr", line });
+    stderrTail.push(boundStderrLine(line));
+    if (stderrTail.length > STDERR_TAIL_LINES) stderrTail.shift();
   });
 
   try {
@@ -191,7 +201,13 @@ export async function runSession(
       toolUses: summary.toolUses,
       sessionId: summary.sessionId ?? indexed.sessionId ?? undefined,
       resultText: summary.resultText,
-      error: ok ? undefined : describeFailure(failureReason, code, exitSignal),
+      error: ok
+        ? undefined
+        : withStderrTail(
+            describeFailure(failureReason, code, exitSignal),
+            failureReason,
+            stderrTail,
+          ),
       failureReason,
       rateLimit: summary.rateLimit,
       apiError: summary.apiError,
@@ -264,6 +280,22 @@ function describeFailure(
         ? `Process exited with code ${code}`
         : `Process terminated by signal ${exitSignal ?? "?"}`;
   }
+}
+
+function boundStderrLine(line: string): string {
+  const trimmed = line.trim();
+  return trimmed.length > STDERR_LINE_MAX
+    ? `${trimmed.slice(0, STDERR_LINE_MAX)}…`
+    : trimmed;
+}
+
+function withStderrTail(
+  error: string,
+  reason: SessionFailureReason | undefined,
+  tail: readonly string[],
+): string {
+  if (tail.length === 0 || !STDERR_REASONS.has(reason)) return error;
+  return `${error}; last stderr: ${tail.join(" | ")}`;
 }
 
 function hasExited(child: ChildProcess): boolean {
