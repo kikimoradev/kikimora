@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- A session whose process ends on its own with an error, or that a signal ends mid-run (a crash, a `SIGABRT` of a process that could not start a thread, a kill by the memory limit of a resource pool), now names the cause in the error of its task and of `cycle.finished`, `task.finished` and `summary.finished`: the error ends with the last stderr lines of the process (up to 5, each cut at 300 characters), as `Process terminated by signal SIGABRT; last stderr: …`, instead of the bare exit code or signal. A session without stderr output, or one the worker stopped itself (a timeout, an abort), keeps the error it had.
+
 ## [0.21.1] - 2026-11-10
 
 ### Fixed

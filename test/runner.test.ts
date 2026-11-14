@@ -340,6 +340,61 @@ describe("runSession (integration with fake claude)", () => {
     15_000,
   );
 
+  posixOnly(
+    "keeps only the last stderr lines of a failed session, each cut to a bounded length",
+    async () => {
+      const claude = join(dir, "claude-noisy");
+      const lines = ["first", "second", "third", "fourth", "fifth", "sixth"];
+      await writeFile(
+        claude,
+        [
+          "#!/bin/sh",
+          ...lines.map((line) => `echo '${line}' >&2`),
+          `echo '${"x".repeat(400)}' >&2`,
+          "exit 3",
+          "",
+        ].join("\n"),
+      );
+      await chmod(claude, 0o755);
+      const spec = buildSessionSpec(collector.sink, {
+        command: claude,
+        launcher: NO_LAUNCHER,
+      });
+
+      const result = await runSession(spec, new AbortController().signal);
+
+      expect(result.error).toBe(
+        `Process exited with code 3; last stderr: third | fourth | fifth | sixth | ${"x".repeat(300)}…`,
+      );
+    },
+    15_000,
+  );
+
+  posixOnly(
+    "keeps the stderr out of the error of a session the worker timed out",
+    async () => {
+      const claude = join(dir, "claude-stuck");
+      await writeFile(
+        claude,
+        ["#!/bin/sh", "echo 'still working' >&2", "exec sleep 30", ""].join("\n"),
+      );
+      await chmod(claude, 0o755);
+      const spec = buildSessionSpec(collector.sink, {
+        command: claude,
+        launcher: NO_LAUNCHER,
+        sessionTimeoutMs: 500,
+      });
+
+      const result = await runSession(spec, new AbortController().signal);
+
+      expect(result).toMatchObject({
+        failureReason: "timeout",
+        error: "Session timed out",
+      });
+    },
+    15_000,
+  );
+
   it("always runs the session in bypassPermissions mode", async () => {
     const out = join(dir, "received-args.json");
     const spec = buildSessionSpec(collector.sink, {
