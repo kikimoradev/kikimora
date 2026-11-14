@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { chmod, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { AdmissionGate, LOCAL_LEASE, type AdmissionLease } from "../src/admission.js";
@@ -304,6 +304,41 @@ describe("runSession (integration with fake claude)", () => {
       line: expect.stringContaining("something went wrong") as string,
     });
   }, 15_000);
+
+  posixOnly(
+    "names the last stderr lines of a session a signal ended mid-run in its error",
+    async () => {
+      const claude = join(dir, "claude-aborting");
+      await writeFile(
+        claude,
+        [
+          "#!/bin/sh",
+          "ulimit -c 0",
+          `echo '{"type":"system","subtype":"init","model":"haiku","session_id":"sess-abort","tools":[]}'`,
+          "echo 'terminate called after throwing an instance of std::system_error' >&2",
+          "echo 'what():  Resource temporarily unavailable' >&2",
+          "kill -ABRT $$",
+          "",
+        ].join("\n"),
+      );
+      await chmod(claude, 0o755);
+      const spec = buildSessionSpec(collector.sink, {
+        command: claude,
+        launcher: NO_LAUNCHER,
+      });
+
+      const result = await runSession(spec, new AbortController().signal);
+
+      expect(result.ok).toBe(false);
+      expect(result.sessionId).toBe("sess-abort");
+      expect(result.error).toContain("SIGABRT");
+      expect(result.error).toContain("what():  Resource temporarily unavailable");
+      expect(result.error).toContain(
+        "terminate called after throwing an instance of std::system_error",
+      );
+    },
+    15_000,
+  );
 
   it("always runs the session in bypassPermissions mode", async () => {
     const out = join(dir, "received-args.json");
